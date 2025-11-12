@@ -1,0 +1,43 @@
+# ===========================
+#  Node / Build Artifacts
+# ===========================
+node_modules/
+dist/
+build/
+.vite/
+.cache/
+.temp/
+coverage/
+
+# ===========================
+#  Logs
+# ===========================
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+
+# ===========================
+#  OS / Editor Junk
+# ===========================
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# ===========================
+#  Environment Files (Secrets)
+# ===========================
+.env
+.env.*
+server/.env
+server/.env.*
+frontend/.env
+frontend/.env.*
+
+# allow safe examples
+!.env.example
+!server/.env.example
+!frontend/.env.example
