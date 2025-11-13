@@ -6,6 +6,7 @@ import { FaHeart, FaTimes, FaMapMarkerAlt } from "react-icons/fa";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { getSocket } from "../socket";
+import { API_BASE } from "../config";
 
 // Fix Leaflet icon paths
 delete L.Icon.Default.prototype._getIconUrl;
@@ -20,7 +21,6 @@ L.Icon.Default.mergeOptions({
  
 //const API_BASE = "http://localhost:4000";
 //const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com/api";
-import { API_BASE } from "../config";
 
 function FlyTo({ center }) {
   const map = useMap();
