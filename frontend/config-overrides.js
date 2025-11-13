@@ -4,14 +4,16 @@ const webpack = require("webpack");
 const path = require("path");
 
 module.exports = function override(config) {
-  // ============================
-  // 🔥 Disable ESLint on build
-  // ============================
-  if (config.plugins) {
-    config.plugins = config.plugins.filter(
-      (plugin) => plugin.constructor.name !== "ESLintWebpackPlugin"
-    );
-  }
+ // ============================
+// 🔥 Disable all ESLint plugins
+// ============================
+if (config.plugins) {
+  config.plugins = config.plugins.filter((plugin) => {
+    const name = plugin.constructor && plugin.constructor.name;
+    return name !== "ESLintWebpackPlugin" && name !== "ESLintPlugin";
+  });
+}
+
 
   // ============================
   // 🔧 Your existing fallbacks
