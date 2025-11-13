@@ -16,11 +16,13 @@
  *   - Returns full sanitized profile with media and posts
  *
  * Dependencies:
- *   - db.lowdb.js
- *   - authMiddleware.js
- *   - shortid
- *   - socket.io (optional for real-time notifications)
- *   - utils/helpers.js (baseSanitizeUser)
+ *   - models/User.js              → Core user document
+ *   - models/PostModel.js         → LetsBuzz posts
+ *   - models/Notification.js      → In-app notifications
+ *   - models/MatchModel.js        → Match relationships
+ *   - auth-middleware.js          → JWT protection
+ *   - utils/helpers.js            → baseSanitizeUser()
+ *   - sockets/connection.js       → Socket.IO (io) for real-time notifications
  * ============================================================
  */
 
@@ -30,30 +32,28 @@ const shortid = require("shortid");
 const { io } = require("../sockets/connection"); // optional socket export
 const { baseSanitizeUser } = require("../utils/helpers");
 const authMiddleware = require("./auth-middleware");
-const db = require("../models/db.lowdb");
+
+// ✅ Mongo models only (no LowDB)
 const User = require("../models/User");
+const PostModel = require("../models/PostModel");
+const Notification = require("../models/Notification");
+const MatchModel = require("../models/MatchModel");
 
 /* ============================================================
-   👤 SECTION 1: FULL PROFILE (with media)
+   👤 SECTION 1: FULL PROFILE (with media & posts)
 ============================================================ */
 
 /**
  * GET /api/profile/full
- * Returns the full profile of the authenticated user including media & posts.
+ * Returns the full profile of the authenticated user including media, posts, and recent notifications.
  */
-// ============================================================
-// 👤 FULL PROFILE (MongoDB version)
-// ============================================================
 router.get("/profile/full", authMiddleware, async (req, res) => {
   try {
-    const PostModel = require("../models/PostModel");
-    const Notification = require("../models/Notification");
-
-    // 1️⃣ Fetch user
+    // 1️⃣ Fetch user from MongoDB
     const user = await User.findOne({ id: req.user.id }).lean();
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // 2️⃣ Fetch posts from MongoDB
+    // 2️⃣ Fetch this user's posts (LetsBuzz)
     const posts = await PostModel.find({ userId: user.id })
       .sort({ createdAt: -1 })
       .lean();
@@ -64,7 +64,7 @@ router.get("/profile/full", authMiddleware, async (req, res) => {
       .limit(20)
       .lean();
 
-    // 4️⃣ Build response
+    // 4️⃣ Build response payload
     res.json({
       user: {
         ...baseSanitizeUser(user),
@@ -79,22 +79,36 @@ router.get("/profile/full", authMiddleware, async (req, res) => {
   }
 });
 
-
-
 /* ============================================================
-   🌟 SECTION 2: COMPLETE PROFILE ROUTE
+   🌟 SECTION 2: COMPLETE PROFILE ROUTE (onboarding)
 ============================================================ */
 
 /**
  * POST /api/profile/complete
  * Completes profile setup for a logged-in user.
- * Used during onboarding after signup.
+ * Used during onboarding after signup (email / Google).
+ *
+ * Body can include:
+ *   - avatar: string (URL)
+ *   - photos: string[] (photo URLs)
+ *   - hobbies: string[]
+ *   - matchPref: any match preference object
+ *   - locationRadius: number
+ *   - ageRange: { min, max }
  */
 router.post("/profile/complete", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { avatar, photos = [], hobbies, matchPref, locationRadius, ageRange } = req.body;
+    const {
+      avatar,
+      photos = [],
+      hobbies,
+      matchPref,
+      locationRadius,
+      ageRange,
+    } = req.body || {};
 
+    // 1️⃣ Update user document in MongoDB
     const user = await User.findOneAndUpdate(
       { id: userId },
       {
@@ -115,64 +129,60 @@ router.post("/profile/complete", authMiddleware, async (req, res) => {
 
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // ✅ Create posts directly in MongoDB
-const PostModel = require("../models/PostModel");
+    // 2️⃣ Auto-create posts for uploaded photos (LetsBuzz)
+    //    Each photo becomes a public photo post announcing the user joined.
+    for (const photoUrl of photos) {
+      await PostModel.create({
+        id: shortid.generate(),
+        userId: user.id,
+        type: "photo",
+        mediaUrl: photoUrl,
+        text: `${user.firstName || "Someone"} just joined RomBuzz ✨ Let's Buzz!`,
+        privacy: "public",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
 
-for (const photoUrl of photos) {
-  await PostModel.create({
-    id: shortid.generate(),
-    userId: user.id,
-    type: "photo",
-    mediaUrl: photoUrl,
-    text: `${user.firstName || "Someone"} just joined RomBuzz ✨ Let's Buzz!`,
-    privacy: "public",
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  });
-}
+    // 3️⃣ Notify matched users about new photos / completed profile
+    //    Find matches where this user is user1 or user2 and status is "matched".
+    const matches = await MatchModel.find({
+      status: "matched",
+      $or: [{ user1: user.id }, { user2: user.id }],
+    }).lean();
 
+    const matchedUsers = matches.map((m) =>
+      m.user1 === user.id ? m.user2 : m.user1
+    );
 
-   // ✅ Notify matched users (MongoDB)
-const Notification = require("../models/Notification");
+    for (const matchId of matchedUsers) {
+      const notif = {
+        id: shortid.generate(),
+        toId: matchId,
+        fromId: user.id,
+        type: "new_post",
+        message: `${user.firstName || "Someone"} just shared new photos! 💫`,
+        href: "/letsbuzz",
+        postOwnerId: user.id,
+        createdAt: Date.now(),
+        read: false,
+      };
 
-// ✅ Fetch matched users (MongoDB)
-const MatchModel = require("../models/MatchModel");
+      await Notification.create(notif);
 
-const matches = await MatchModel.find({
-  status: "matched",
-  $or: [{ user1: user.id }, { user2: user.id }],
-}).lean();
+      // 🔔 Real-time push if receiver is online
+      if (io) {
+        io.to(String(matchId)).emit("notification:new_post", notif);
+      }
+    }
 
-const matchedUsers = matches.map((m) =>
-  m.user1 === user.id ? m.user2 : m.user1
-);
-
-for (const matchId of matchedUsers) {
-  const notif = {
-    id: shortid.generate(),
-    toId: matchId,
-    fromId: user.id,
-    type: "new_post",
-    message: `${user.firstName || "Someone"} just shared new photos! 💫`,
-    href: "/letsbuzz",
-    postOwnerId: user.id,
-    createdAt: Date.now(),
-    read: false,
-  };
-
-  await Notification.create(notif);
-
-  if (io) io.to(matchId).emit("notification:new_post", notif);
-}
-
-
+    // 4️⃣ Return sanitized updated user
     res.json(baseSanitizeUser(user));
   } catch (err) {
     console.error("❌ /profile/complete error:", err);
     res.status(500).json({ error: "Failed to complete profile" });
   }
 });
-
 
 /* ============================================================
    🧩 SECTION 3: COMPLETE PROFILE FOR GOOGLE USERS
@@ -181,6 +191,8 @@ for (const matchId of matchedUsers) {
 /**
  * PUT /api/users/complete-profile
  * Completes profile for Google-authenticated users.
+ *
+ * Merges arbitrary fields from body with standard completion flags.
  */
 router.put("/users/complete-profile", authMiddleware, async (req, res) => {
   try {
@@ -191,7 +203,12 @@ router.put("/users/complete-profile", authMiddleware, async (req, res) => {
       updatedAt: Date.now(),
     };
 
-    const user = await User.findOneAndUpdate({ id: req.user.id }, { $set: updates }, { new: true }).lean();
+    const user = await User.findOneAndUpdate(
+      { id: req.user.id },
+      { $set: updates },
+      { new: true }
+    ).lean();
+
     if (!user) return res.status(404).json({ error: "User not found" });
 
     res.json({ success: true, user: baseSanitizeUser(user) });
@@ -200,7 +217,6 @@ router.put("/users/complete-profile", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Failed to complete profile" });
   }
 });
-
 
 console.log("✅ Profile routes initialized (full + complete + google)");
 
