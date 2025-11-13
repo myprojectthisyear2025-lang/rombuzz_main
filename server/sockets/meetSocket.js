@@ -11,55 +11,48 @@
  *   meet:chosen                      → Notify both users of selected venue
  *   buzz_request                     → Handle MicroBuzz live pop-ups
  *
- * Dependencies:
- *   - db.lowdb.js
- *   - global.onlineUsers map
- *   - node-fetch (for calling /api/meet-suggest)
+ * Dependencies (Mongo version):
+ *   - models/User.js        → User data + location
+ *   - global.onlineUsers    → Socket ID map
+ *   - node-fetch / fetch    → For calling /api/meet-suggest
  * ============================================================
  */
 
 const fetch = require("node-fetch");
-const db = require("../db");
+const User = require("../models/User"); // MongoDB User model
 
 function registerMeetSockets(io) {
   io.on("connection", (socket) => {
     console.log("⚡ meet-user connected:", socket.id);
 
-    // ✅ Ensure global online user map exists
+    // Ensure map exists
     global.onlineUsers = global.onlineUsers || {};
 
     /* ============================================================
        👤 USER REGISTRATION & PRESENCE
     ============================================================ */
 
-    // Modern clients register with `user:register`
     socket.on("user:register", (userId) => {
       if (!userId) return;
 
-      // Track socket ID for this user
       onlineUsers[userId] = socket.id;
       socket.userId = String(userId);
-
-      // Join personal room so `io.to(userId)` works everywhere
       socket.join(String(userId));
 
       console.log("✅ Registered user:", userId, "→", socket.id);
     });
 
-    // 🧩 Legacy fallback for older clients still using `register`
     socket.on("register", (userId) => {
       if (!userId) return;
+
       onlineUsers[userId] = socket.id;
       socket.userId = String(userId);
       socket.join(String(userId));
 
       console.log("✅ Legacy register:", userId, "→", socket.id);
-
-      // Broadcast online presence globally
       io.emit("presence:online", { userId });
     });
 
-    // 🧹 Clean disconnect handler
     socket.on("disconnect", () => {
       const userId = socket.userId;
       if (userId && onlineUsers[userId]) {
@@ -75,7 +68,6 @@ function registerMeetSockets(io) {
     socket.on("buzz_request", ({ toId, fromId, selfieUrl, name, message }) => {
       if (!toId || !fromId) return;
 
-      // Relay the live buzz popup only if target is online
       if (onlineUsers[toId]) {
         io.to(String(toId)).emit("buzz_request", {
           fromId,
@@ -84,22 +76,24 @@ function registerMeetSockets(io) {
           message: message || "Someone nearby buzzed you!",
           type: "microbuzz",
         });
+
         console.log(`📡 buzz_request ${fromId} → ${toId}`);
       }
     });
 
     /* ============================================================
-       💞 MEET-IN-MIDDLE — Realtime Coordination
+       💞 MEET-IN-MIDDLE — Realtime Coordination (Mongo version)
     ============================================================ */
 
     // 🔔 Step 1: Send Meet Request
     socket.on("meet:request", async ({ from, to }) => {
       try {
         if (!from || !to) return;
-        await db.read();
 
+        // Fetch sender from Mongo
         const sender =
-          db.data.users.find((u) => String(u.id) === String(from)) || { id: from };
+          (await User.findOne({ id: from }, { id: 1, firstName: 1, lastName: 1 }).lean()) ||
+          { id: from };
 
         const sid = onlineUsers[to];
         if (sid) {
@@ -116,47 +110,65 @@ function registerMeetSockets(io) {
       try {
         if (!from || !to || !coords) return;
 
-        await db.read();
-        const me = db.data.users.find((u) => String(u.id) === String(from));
-        const you = db.data.users.find((u) => String(u.id) === String(to));
+        // 1️⃣ Update "from" user's location in Mongo
+        const me = await User.findOneAndUpdate(
+          { id: from },
+          {
+            $set: {
+              location: {
+                lat: Number(coords.lat),
+                lng: Number(coords.lng),
+                updatedAt: new Date(),
+              },
+            },
+          },
+          { new: true }
+        ).lean();
+
+        // 2️⃣ Fetch "to" user
+        const you = await User.findOne({ id: to }).lean();
         if (!me || !you) return;
 
-        // Save latest location for sender
-        me.location = { lat: Number(coords.lat), lng: Number(coords.lng) };
-        await db.write();
-
-        // If the other user hasn't shared yet → send mine and wait
+        // If "to" user hasn't shared location yet → send mine and wait
         if (!you.location?.lat || !you.location?.lng) {
           const sid = onlineUsers[to];
           if (sid)
-            io.to(sid).emit("meet:accept", { from, coords: me.location });
+            io.to(sid).emit("meet:accept", {
+              from,
+              coords: me.location,
+            });
           return;
         }
 
-        // Both shared → Fetch midpoint & nearby places (Google or fallback)
-        const resp = await fetch("http://localhost:4000/api/meet-suggest", {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-        }).catch(() => null);
+        // 3️⃣ Both shared → Fetch midpoint & venues
+        let data = {};
+        try {
+          const resp = await fetch(`${process.env.API_BASE}/api/meet-suggest?otherId=${to}`);
+          data = await resp.json();
+        } catch (err) {
+          console.warn("⚠️ meet-suggest fetch failed:", err);
+        }
 
-        const data = resp ? await resp.json().catch(() => ({})) : {};
         const places = Array.isArray(data.places) ? data.places : [];
 
-        // Build payload for both users
+        // Final calculated midpoint (fallback)
+        const midpoint = {
+          lat: (me.location.lat + you.location.lat) / 2,
+          lng: (me.location.lng + you.location.lng) / 2,
+        };
+
+        // Final payload
         const payload = {
           from: {
             id: me.id,
             firstName: me.firstName,
             lastName: me.lastName,
           },
-          midpoint: {
-            lat: (me.location.lat + you.location.lat) / 2,
-            lng: (me.location.lng + you.location.lng) / 2,
-          },
+          midpoint,
           places,
         };
 
-        // Notify both participants simultaneously
+        // Send to both users
         [me.id, you.id].forEach((id) => {
           const sid = onlineUsers[id];
           if (sid) io.to(sid).emit("meet:suggest", payload);
@@ -179,7 +191,11 @@ function registerMeetSockets(io) {
     socket.on("meet:chosen", ({ from, to, place }) => {
       const sid = onlineUsers[to];
       if (sid)
-        io.to(sid).emit("meet:place:selected", { from: { id: from }, place });
+        io.to(sid).emit("meet:place:selected", {
+          from: { id: from },
+          place,
+        });
+
       console.log(`🏠 meet:chosen ${from} → ${to} (${place?.name || "?"})`);
     });
   });
