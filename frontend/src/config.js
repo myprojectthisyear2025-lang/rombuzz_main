@@ -1,6 +1,12 @@
 // src/config.js
-// ✅ Local-only configuration for development
-// Forces all API and Socket.IO traffic to your local backend (port 4000)
+// Automatically choose correct backend based on environment
 
-export const API_BASE = "http://localhost:4000/api";
-export const SOCKET_URL = "http://localhost:4000";
+const isLocal = window.location.hostname === "localhost";
+
+export const API_BASE = isLocal
+  ? "http://localhost:4000/api"
+  : process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com/api";
+
+export const SOCKET_URL = isLocal
+  ? "http://localhost:4000"
+  : process.env.REACT_APP_SOCKET_URL || "https://rombuzz-api.onrender.com";

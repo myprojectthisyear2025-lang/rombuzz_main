@@ -33,25 +33,34 @@ const { JSONFile } = require("lowdb/node");
 const path = require("path");
 const bcrypt = require("bcrypt");
 
+// Path to db.json
 const dbFile = path.join(__dirname, "../db.json");
 const adapter = new JSONFile(dbFile);
-const db = new Low(adapter);
 
-// Initialize data and perform one-time migrations
+// 🟩 FIX: Provide default data (required for LowDB v3, safe for v1/v2)
+const defaultData = {
+  users: [],
+  posts: [],
+  likes: [],
+  matches: [],
+  notifications: [],
+  messages: [],
+  blocks: [],
+  reports: [],
+  roomMessages: [],
+  matchStreaks: {},
+};
+
+// 🟩 FIX: Pass defaults directly → fixes "missing default data" on Render
+const db = new Low(adapter, defaultData);
+
+// Initialize + migrate
 (async () => {
   await db.read();
-  db.data ||= {
-    users: [],
-    posts: [],
-    likes: [],
-    matches: [],
-    notifications: [],
-    messages: [],
-    blocks: [],
-    reports: [],
-    roomMessages: [],
-    matchStreaks: {},
-  };
+
+  // Ensure default structure (v1/v2 safety)
+  db.data ||= defaultData;
+
   await db.write();
 
   // 🔐 Migrate any plain passwords to hashed
@@ -64,11 +73,12 @@ const db = new Low(adapter);
         updated++;
       }
     }
+
     if (updated > 0) {
       await db.write();
-      console.log(`🔒 Migrated ${updated} legacy plain-text password(s) to hashed version`);
+      console.log(`🔒 Migrated ${updated} legacy plain-text password(s)`);
     } else {
-      console.log("✅ No legacy passwords found - all accounts already hashed");
+      console.log("✅ No legacy plaintext passwords");
     }
   } catch (err) {
     console.error("⚠️ Password migration error:", err);
@@ -78,5 +88,3 @@ const db = new Low(adapter);
 })();
 
 module.exports = db;
-
-
