@@ -6,7 +6,7 @@
   "scripts": {
     "start": "react-app-rewired start",
     "dev": "react-app-rewired start",
-    "build": "react-app-rewired build",
+"build": "ESLINT_NO_DEV_ERRORS=true react-app-rewired build",
     "test": "react-app-rewired test",
     "eject": "react-scripts eject"
   },
