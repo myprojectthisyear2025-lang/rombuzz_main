@@ -1,7 +1,21 @@
+//Rombuzz_main/Rombuzz/frontend/config-overrides.js
+
 const webpack = require("webpack");
 const path = require("path");
 
 module.exports = function override(config) {
+  // ============================
+  // 🔥 Disable ESLint on build
+  // ============================
+  if (config.plugins) {
+    config.plugins = config.plugins.filter(
+      (plugin) => plugin.constructor.name !== "ESLintWebpackPlugin"
+    );
+  }
+
+  // ============================
+  // 🔧 Your existing fallbacks
+  // ============================
   config.resolve.fallback = {
     ...config.resolve.fallback,
     process: require.resolve("process/browser.js"),
@@ -14,6 +28,9 @@ module.exports = function override(config) {
     "process/browser.js": path.resolve(__dirname, "node_modules/process/browser.js"),
   };
 
+  // ============================
+  // 🔧 Your existing plugins
+  // ============================
   config.plugins = [
     ...(config.plugins || []),
     new webpack.ProvidePlugin({
