@@ -36,10 +36,13 @@ const FEATURE_TOGGLES = {
   ENABLE_BLURRED_PROFILES: true,
   SHOW_PRIVATE: true,
   SHOW_RESTRICTED: false,
+
+  // ⭐ REQUIRED: prevents socket crash
+  ENABLE_REALTIME_CHAT: true,
 };
 
-// Export everything you might reuse later
 module.exports = {
   googleClient,
   FEATURE_TOGGLES,
+  ENABLE_REALTIME_CHAT: FEATURE_TOGGLES.ENABLE_REALTIME_CHAT, // export it directly
 };

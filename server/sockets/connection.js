@@ -10,8 +10,18 @@
  * ============================================================
  */
 
-function registerConnection(io) {
-  io.on("connection", (socket) => {
+const jwt = require("jsonwebtoken");
+const shortid = require("shortid");
+const db = require("../models/db.lowdb");
+const { JWT_SECRET, ENABLE_REALTIME_CHAT = true } = require("../config/env");
+const { isBlocked, getRoomDoc } = require("../utils/helpers");
+const { onlineUsers } = require("../models/state");
+
+// ESM-safe fetch wrapper (same pattern as index.js)
+const fetch = (...args) =>
+  import("node-fetch").then(({ default: fetch }) => fetch(...args));
+
+function registerConnection(io) {  io.on("connection", (socket) => {
     console.log(`⚡️ New client connected: ${socket.id}`);
     let currentUserId = null;
 
