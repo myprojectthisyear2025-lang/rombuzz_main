@@ -39,22 +39,32 @@ const allowedOrigins = [
 ];
 
 function setupCors(app) {
-  app.use(
-    cors({
-      origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) return callback(null, true);
-        return callback(new Error("CORS not allowed for this origin: " + origin));
-      },
-      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"],
-      credentials: true,
-    })
-  );
+ app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error("CORS not allowed for this origin: " + origin));
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Accept",
+      "X-Requested-With",
+      "Origin",
+      "Sec-Fetch-Site",
+      "Sec-Fetch-Mode",
+      "Sec-Fetch-Dest",
+    ],
+    credentials: true,
+    preflightContinue: false,
+  })
+);
 
-  // ✅ Handle all preflight OPTIONS requests safely
-  app.options(/.*/, cors());
+// Still keep this for OPTIONS preflight
+app.options(/.*/, cors());
+
 }
 
 module.exports = setupCors;

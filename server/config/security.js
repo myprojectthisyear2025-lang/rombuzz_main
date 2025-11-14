@@ -33,15 +33,13 @@ const helmet = require("helmet");
  */
 function setupSecurity(app) {
   // 🧱 Apply default Helmet protections
-  app.use(helmet());
-
-  // 🧩 Override specific headers that can break embeds or sockets
-  app.use(
-    helmet({
-      crossOriginOpenerPolicy: false,
-      crossOriginEmbedderPolicy: false,
-    })
-  );
+ app.use(
+  helmet({
+    crossOriginOpenerPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
 
   console.log("🔐 Helmet security initialized successfully");
 }
