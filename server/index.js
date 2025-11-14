@@ -138,6 +138,15 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 setupSecurity(app);
 
+// 🔓 Root health route for Render & uptime checks
+app.get("/", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    message: "RomBuzz backend is running",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Socket.IO
 const io = setupSocket(server);
 registerConnection(io);
@@ -148,6 +157,7 @@ registerConnection(io);
 
 // 🔐 AUTH & PROFILE
 app.use('/api/auth', require('./routes/auth'));
+
 app.use('/api', require('./routes/profile'));
 
 // 👤 USERS & NOTIFICATIONS
