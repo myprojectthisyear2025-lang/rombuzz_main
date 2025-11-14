@@ -1,9 +1,12 @@
 // src/socket.js
 import { io } from "socket.io-client";
 
-// Automatically pick local or production socket
-// ✅ Local-only Socket.IO endpoint (for development)
-const SOCKET_URL = "http://localhost:4000";
+// Automatically pick correct backend socket URL
+const isLocal = window.location.hostname === "localhost";
+
+const SOCKET_URL = isLocal
+  ? "http://localhost:4000"
+  : "https://rombuzz-api-ulyk.onrender.com";
 
 
 // Single socket instance (reused everywhere)
