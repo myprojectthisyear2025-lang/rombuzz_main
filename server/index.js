@@ -55,7 +55,7 @@ const { signToken } = require('./utils/jwt');
 // 📦 DATABASE (modularized) — LowDB (legacy) + MongoDB init + User sync
 const db = require("./models/db.lowdb");
 require("./models/writeGuard")(db);
-require("./modules/mongoInit").initMongo(); // ✅ non-blocking Mongo connection
+const { initMongo } = require("./config/db");  // ⭐ REAL Mongo connection
 
 // 🔄 Optional one-time user sync on startup
 const { bulkSyncAllUsers } = require("./modules/userSync");
@@ -226,6 +226,9 @@ app.use(errorHandler);
 // =====================================================
 // 🏁 START SERVER
 // =====================================================
-server.listen(PORT, () => {
-logSuccess(`✅ Rombuzz API running on port ${PORT}`);
-});
+(async () => {
+  await initMongo();  // ⭐ Ensure Mongo is ready
+  server.listen(PORT, () => {
+    logSuccess(`🍃 Mongo ready — Rombuzz API running on port ${PORT}`);
+  });
+})();
