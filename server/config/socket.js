@@ -26,8 +26,8 @@ function setupSocket(server) {
         "https://rombuzz.com",
         "https://www.rombuzz.com",
         "https://rombuzz.vercel.app",
+        "https://rombuzz-api-ulyk.onrender.com",   // 🔥 REQUIRED (backend must allow itself!)
         "https://rombuzz-main.vercel.app",   // 🔥 REQUIRED
-
         "http://localhost:3000",
         "http://localhost:5173",
       ],
