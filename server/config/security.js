@@ -17,7 +17,7 @@
  *
  * Dependencies:
  *   - helmet (npm install helmet)
- *
+ *   
  * Notes:
  *   - Keep this module minimal and declarative.
  *   - Future additions like rate-limiting, CSP, or XSS protection

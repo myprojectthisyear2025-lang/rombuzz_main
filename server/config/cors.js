@@ -17,7 +17,7 @@
  * Used In:
  *   - index.js → setupCors(app);
  *
- * Notes:
+ * Notes: 
  *   - Update allowedOrigins[] whenever adding new frontend URLs
  *   - Always keep OPTIONS preflight handler below the CORS middleware
  * ============================================================
