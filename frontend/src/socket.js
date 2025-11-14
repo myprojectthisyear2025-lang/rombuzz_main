@@ -1,22 +1,16 @@
 // src/socket.js
 import { io } from "socket.io-client";
-
-// Automatically pick correct backend socket URL
-const isLocal = window.location.hostname === "localhost";
-
-const SOCKET_URL = isLocal
-  ? "http://localhost:4000"
-  : "https://rombuzz-api-ulyk.onrender.com";
-
+import { SOCKET_URL } from "./config";
 
 // Single socket instance (reused everywhere)
 let socket = null;
 
-// ✅ Always use localStorage for persistent auth
+// Get token from localStorage
 function getToken() {
   return localStorage.getItem("token") || "";
 }
 
+// Get user from localStorage
 function getUser() {
   try {
     const stored = localStorage.getItem("user");
