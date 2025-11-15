@@ -27,6 +27,7 @@
 const express = require("express");
 const router = express.Router();
 const shortid = require("shortid");
+
 const authMiddleware = require("../auth-middleware");
 const PostModel = require("../../models/PostModel");
 const User = require("../../models/User");
@@ -41,7 +42,9 @@ router.post("/posts/:postId/comment", authMiddleware, async (req, res) => {
     const { text } = req.body || {};
     const myId = req.user.id;
 
-    if (!text?.trim()) return res.status(400).json({ error: "Text required" });
+    if (!text?.trim()) {
+      return res.status(400).json({ error: "Text required" });
+    }
 
     const post = await PostModel.findOne({ id: postId });
     if (!post) return res.status(404).json({ error: "Post not found" });
@@ -76,8 +79,11 @@ router.get("/posts/:postId/comments", authMiddleware, async (req, res) => {
     if (!post) return res.status(404).json({ error: "Post not found" });
 
     const userIds = [...new Set(post.comments.map((c) => c.userId))];
+
     const authors = await User.find({ id: { $in: userIds } }).lean();
-    const authorMap = new Map(authors.map((u) => [u.id, baseSanitizeUser(u)]));
+    const authorMap = new Map(
+      authors.map((u) => [u.id, baseSanitizeUser(u)])
+    );
 
     const comments = post.comments.map((c) => ({
       ...c,
@@ -109,21 +115,25 @@ router.patch(
       const { text } = req.body || {};
       const myId = req.user.id;
 
-      if (!text?.trim())
+      if (!text?.trim()) {
         return res.status(400).json({ error: "Text required" });
+      }
 
       const post = await PostModel.findOne({ id: postId });
       if (!post) return res.status(404).json({ error: "Post not found" });
 
       const comment = post.comments.find((c) => c.id === commentId);
       if (!comment) return res.status(404).json({ error: "Comment not found" });
-      if (comment.userId !== myId)
+
+      if (comment.userId !== myId) {
         return res.status(403).json({ error: "Not your comment" });
+      }
 
       comment.text = text.trim();
       comment.updatedAt = Date.now();
 
       await post.save();
+
       res.json({ success: true, comment });
     } catch (err) {
       console.error("❌ Mongo PATCH /posts/:postId/comments/:commentId error:", err);
@@ -147,11 +157,13 @@ router.delete(
       if (!post) return res.status(404).json({ error: "Post not found" });
 
       const before = post.comments.length;
+
       post.comments = post.comments.filter(
         (c) => !(c.id === commentId && c.userId === myId)
       );
 
       const changed = before !== post.comments.length;
+
       if (changed) await post.save();
 
       res.json({ success: changed });

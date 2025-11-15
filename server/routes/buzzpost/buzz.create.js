@@ -6,8 +6,8 @@
  * Description:
  *   - Creates text, photo, video, or story posts for the current user.
  *   - Automatically determines the post type (text / image / video).
- *   - Saves post to MongoDB (`PostModel`) while preserving old LowDB compatibility.
- *   - Sends notifications to matched users (read from LowDB until match model migrates).
+ *   - Saves post to MongoDB (`PostModel`).
+ *   - Sends notifications to matched users using MongoDB (`Match`).
  *
  * Endpoint:
  *   POST /api/buzz/posts → Create new post
@@ -16,8 +16,8 @@
  *   - authMiddleware.js
  *   - models/PostModel.js
  *   - models/User.js
+ *   - models/Match.js
  *   - utils/helpers.js → sendNotification()
- *   - db.lowdb.js (temporary for matches)
  * ============================================================
  */
 
@@ -27,13 +27,13 @@ const shortid = require("shortid");
 
 const authMiddleware = require("../auth-middleware");
 const { sendNotification } = require("../../utils/helpers");
-const { db } = require("../../models/db.lowdb");
+
 const PostModel = require("../../models/PostModel");
 const User = require("../../models/User");
-
+const Match = require("../../models/Match");   // ✅ Now using only one Match model
 
 // =======================================================
-// ✅ Create a new post (MongoDB)
+// ✅ Create a new post (MongoDB only, no LowDB)
 // =======================================================
 router.post("/buzz/posts", authMiddleware, async (req, res) => {
   try {
@@ -47,7 +47,7 @@ router.post("/buzz/posts", authMiddleware, async (req, res) => {
       tags = []                // optional tag list
     } = req.body || {};
 
-    // 🧾 Verify user in Mongo
+    // 🧾 Verify user in MongoDB
     const user = await User.findOne({ id: req.user.id }).lean();
     if (!user) return res.status(404).json({ error: "User not found" });
 
@@ -82,22 +82,34 @@ router.post("/buzz/posts", authMiddleware, async (req, res) => {
       shares: [],
       bookmarks: [],
       viewCount: 0,
-      isActive: true,
+      isActive: true
     };
 
-    // 🗄️ Save to MongoDB
+    // 🗄️ Save post to MongoDB
     const created = await PostModel.create(newPost);
     console.log(`🪶 New post created by ${req.user.id}: ${created.id}`);
 
-    // 🔔 Notify matches (still read from LowDB until match model migrates)
-    await db.read();
-    const matches = (db.data.matches || [])
-      .filter(m => Array.isArray(m.users) && m.users.includes(req.user.id))
-      .map(m => m.users.find(id => id !== req.user.id))
+    // =======================================================
+    // 🔔 Notify matched users (MongoDB version)
+    // =======================================================
+
+    // Find all matches where current user is one of the pair
+    const mongoMatches = await Match.find({
+      users: req.user.id,
+      status: "matched"
+    }).lean();
+
+    // Extract the *other* user from each match
+    const matchedUserIds = mongoMatches
+      .map(m => m.users.find(u => u !== req.user.id))
       .filter(Boolean);
 
-    for (const matchId of matches) {
-      if (privacy === "matches" || (privacy === "specific" && sharedWith.includes(matchId))) {
+    // Notify matched users depending on privacy settings
+    for (const matchId of matchedUserIds) {
+      if (
+        privacy === "matches" ||
+        (privacy === "specific" && sharedWith.includes(matchId))
+      ) {
         await sendNotification(matchId, {
           fromId: req.user.id,
           type: "new_post",
@@ -106,11 +118,12 @@ router.post("/buzz/posts", authMiddleware, async (req, res) => {
           entity: "post",
           entityId: created.id,
           postId: created.id,
-          postOwnerId: req.user.id,
+          postOwnerId: req.user.id
         });
       }
     }
 
+    // Response
     res.json({ success: true, post: created });
   } catch (err) {
     console.error("❌ Mongo create /buzz/posts error:", err);

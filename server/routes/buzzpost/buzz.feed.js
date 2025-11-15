@@ -12,7 +12,7 @@
  *   - Handles view counter updates (e.g., for Reels autoplay).
  *
  * Endpoints:
- *   GET  /api/buzz/feed               → Main feed (matches + visibility)
+ *   GET  /api/buzz/feed               → Main feed
  *   GET  /api/buzz/reels              → Only video/reel posts
  *   POST /api/buzz/posts/:postId/view → Increment post view count
  *
@@ -20,7 +20,7 @@
  *   - auth-middleware.js
  *   - models/PostModel.js
  *   - models/User.js
- *   - db.lowdb.js (temporary for match references)
+ *   - models/Match.js (Mongo)
  *   - utils/helpers.js → baseSanitizeUser()
  * ============================================================
  */
@@ -29,9 +29,9 @@ const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../auth-middleware");
 
-const { db } = require("../../models/db.lowdb");
 const PostModel = require("../../models/PostModel");
 const User = require("../../models/User");
+const Match = require("../../models/Match");
 const { baseSanitizeUser } = require("../../utils/helpers");
 
 // =======================================================
@@ -40,34 +40,26 @@ const { baseSanitizeUser } = require("../../utils/helpers");
 router.get("/buzz/feed", authMiddleware, async (req, res) => {
   try {
     const {
-      type,             // filter by post type
-      search,           // search in text/tags
-      sort = "newest",  // newest | popular
+      type,
+      search,
+      sort = "newest",
       limit = 50,
       offset = 0,
     } = req.query;
 
     const myId = req.user.id;
 
-    // 1️⃣ Read matches from LowDB (to be migrated later)
-    await db.read();
-    const myMatches = (db.data.matches || [])
-      .filter(
-        (m) =>
-          (Array.isArray(m.users) && m.users.includes(myId)) ||
-          m.userA === myId ||
-          m.userB === myId
-      )
-      .map((m) =>
-        Array.isArray(m.users)
-          ? m.users.find((id) => id !== myId)
-          : m.userA === myId
-          ? m.userB
-          : m.userA
-      )
+    // 1️⃣ Get matches from Mongo
+    const mongoMatches = await Match.find({
+      users: myId,
+      status: "matched",
+    }).lean();
+
+    const myMatches = mongoMatches
+      .map((m) => m.users.find((u) => u !== myId))
       .filter(Boolean);
 
-    // 2️⃣ Build Mongo query
+    // 2️⃣ Build visibility query
     const visibilityQuery = {
       $or: [
         { userId: myId },
@@ -87,7 +79,7 @@ router.get("/buzz/feed", authMiddleware, async (req, res) => {
     }
 
     // 3️⃣ Fetch posts
-    let posts = await PostModel.find(visibilityQuery)
+    const posts = await PostModel.find(visibilityQuery)
       .sort(
         sort === "popular"
           ? { viewCount: -1, createdAt: -1 }
@@ -97,15 +89,16 @@ router.get("/buzz/feed", authMiddleware, async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    if (!posts.length)
+    if (!posts.length) {
       return res.json({ posts: [], total: 0, hasMore: false });
+    }
 
-    // 4️⃣ Get owners
+    // 4️⃣ Fetch owners
     const userIds = [...new Set(posts.map((p) => p.userId))];
     const owners = await User.find({ id: { $in: userIds } }).lean();
     const ownersMap = new Map(owners.map((u) => [u.id, baseSanitizeUser(u)]));
 
-    // 5️⃣ Format for frontend
+    // 5️⃣ Build formatted feed items
     const formatted = posts.map((p) => ({
       ...p,
       user:
@@ -122,7 +115,9 @@ router.get("/buzz/feed", authMiddleware, async (req, res) => {
       myReaction: p.reactions?.[myId] || null,
     }));
 
+    // 6️⃣ Pagination: count total
     const total = await PostModel.countDocuments(visibilityQuery);
+
     res.json({
       posts: formatted,
       total,
@@ -141,12 +136,17 @@ router.get("/buzz/reels", authMiddleware, async (req, res) => {
   try {
     const myId = req.user.id;
 
-    await db.read();
-    const myMatches = (db.data.matches || [])
-      .filter((m) => Array.isArray(m.users) && m.users.includes(myId))
-      .map((m) => m.users.find((id) => id !== myId))
+    // 1️⃣ Get matches from Mongo
+    const mongoMatches = await Match.find({
+      users: myId,
+      status: "matched",
+    }).lean();
+
+    const myMatches = mongoMatches
+      .map((m) => m.users.find((u) => u !== myId))
       .filter(Boolean);
 
+    // 2️⃣ Find reels
     const reels = await PostModel.find({
       userId: { $in: myMatches },
       type: { $in: ["reel", "video"] },
@@ -157,12 +157,12 @@ router.get("/buzz/reels", authMiddleware, async (req, res) => {
 
     if (!reels.length) return res.json({ posts: [] });
 
-    const owners = await User.find({
-      id: { $in: [...new Set(reels.map((p) => p.userId))] },
-    }).lean();
-
+    // 3️⃣ Fetch owners
+    const ownerIds = [...new Set(reels.map((p) => p.userId))];
+    const owners = await User.find({ id: { $in: ownerIds } }).lean();
     const ownerMap = new Map(owners.map((u) => [u.id, baseSanitizeUser(u)]));
 
+    // 4️⃣ Build response
     const posts = reels.map((p) => ({
       ...p,
       user:
@@ -182,11 +182,12 @@ router.get("/buzz/reels", authMiddleware, async (req, res) => {
 });
 
 // =======================================================
-// ✅ POST: Increment view counter (used by reels autoplay)
+// ✅ POST: Increment view counter (Reels autoplay)
 // =======================================================
 router.post("/buzz/posts/:postId/view", authMiddleware, async (req, res) => {
   try {
     const { postId } = req.params;
+
     const post = await PostModel.findOne({ id: postId });
     if (!post) return res.status(404).json({ error: "Post not found" });
 

@@ -11,18 +11,21 @@
  *   POST   /api/notifications/block/:userId→ Block user's notifications
  *
  * Notes:
- *   - Fully MongoDB-based, backward-compatible with old LowDB logic.
- *   - Real-time Socket.IO support retained.
+ *   - 100% MongoDB (no LowDB).
+ *   - Uses Block model for blocking user notifications.
+ *   - Retains backward-compatible href building and socket notifications.
  * ============================================================
  */
 
 const express = require("express");
 const router = express.Router();
 const shortid = require("shortid");
+
 const Notification = require("../models/Notification");
+const Block = require("../models/Block");
 const authMiddleware = require("./auth-middleware");
 
-// Import globals (Socket.IO)
+// Socket.IO globals
 const { io, onlineUsers } = global;
 
 // ============================================================
@@ -31,37 +34,46 @@ const { io, onlineUsers } = global;
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
+
     const notifs = await Notification.find({ toId: userId })
       .sort({ createdAt: -1 })
       .lean();
 
-    // enrich with hrefs
+    // enrich with dynamic href
     const enrich = (n) => {
       if (n.href?.startsWith("/")) return n;
       const out = { ...n };
+
       switch (n.type) {
         case "wingman":
           out.href = "/discover";
           break;
+
         case "match":
         case "buzz":
         case "like":
-          if (n.fromId) out.href = `/viewprofile/${n.fromId}`;
+          out.href = `/viewprofile/${n.fromId}`;
           break;
+
         case "comment":
         case "reaction":
         case "new_post":
         case "share": {
           const postId = n.postId || n.entityId;
           const ownerId = n.postOwnerId || n.ownerId || n.fromId;
+
           if (postId && ownerId)
             out.href = `/viewprofile/${ownerId}?post=${postId}`;
-          else if (n.fromId) out.href = `/viewprofile/${n.fromId}`;
+          else if (n.fromId)
+            out.href = `/viewprofile/${n.fromId}`;
+
           break;
         }
+
         default:
           out.href = "/notifications";
       }
+
       return out;
     };
 
@@ -78,7 +90,12 @@ router.get("/", authMiddleware, async (req, res) => {
 router.patch("/:id/read", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
-    const notif = await Notification.findOne({ id: req.params.id, toId: userId });
+
+    const notif = await Notification.findOne({
+      id: req.params.id,
+      toId: userId,
+    });
+
     if (!notif) return res.status(404).json({ error: "Notification not found" });
 
     notif.read = true;
@@ -87,7 +104,7 @@ router.patch("/:id/read", authMiddleware, async (req, res) => {
     res.json({ success: true, id: notif.id });
   } catch (err) {
     console.error("❌ PATCH /notifications/:id/read error:", err);
-    res.status(500).json({ error: "Failed to mark as read" });
+    res.status(500).json({ error: "Failed to mark read" });
   }
 });
 
@@ -96,7 +113,11 @@ router.patch("/:id/read", authMiddleware, async (req, res) => {
 // ============================================================
 router.delete("/:id", authMiddleware, async (req, res) => {
   try {
-    await Notification.deleteOne({ id: req.params.id, toId: req.user.id });
+    await Notification.deleteOne({
+      id: req.params.id,
+      toId: req.user.id,
+    });
+
     res.json({ success: true });
   } catch (err) {
     console.error("❌ DELETE /notifications/:id error:", err);
@@ -105,25 +126,32 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 });
 
 // ============================================================
-// ✅ POST → block another user's notifications (still LowDB for now)
+// ✅ POST → block a user's notifications (MongoDB)
 // ============================================================
-const { db } = require("../models/db.lowdb");
 router.post("/block/:userId", authMiddleware, async (req, res) => {
-  await db.read();
-  const uid = req.user.id;
-  db.data.blocks ||= [];
-  const exists = db.data.blocks.find(
-    (b) => b.blocker === uid && b.blocked === req.params.userId
-  );
-  if (!exists) {
-    db.data.blocks.push({ blocker: uid, blocked: req.params.userId });
-    await db.write();
+  try {
+    const blocker = req.user.id;
+    const blocked = req.params.userId;
+
+    const exists = await Block.findOne({ blocker, blocked }).lean();
+    if (!exists) {
+      await Block.create({
+        id: shortid.generate(),
+        blocker,
+        blocked,
+        createdAt: Date.now(),
+      });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ POST /notifications/block/:userId error:", err);
+    res.status(500).json({ error: "Failed to block user" });
   }
-  res.json({ success: true });
 });
 
 // ============================================================
-// ✅ POST → AI Wingman message generator (Mongo + sockets)
+// ✅ POST → AI Wingman notification (Mongo + Sockets)
 // ============================================================
 router.post("/wingman", authMiddleware, async (req, res) => {
   try {
@@ -145,11 +173,14 @@ router.post("/wingman", authMiddleware, async (req, res) => {
       io.to(onlineUsers[toId]).emit("notification", notif);
     }
 
-    console.log("🤖 AI Wingman →", toId, notif.message);
-    res.json({ success: true, message: "Wingman notification sent", notif });
+    res.json({
+      success: true,
+      message: "Wingman notification sent",
+      notif,
+    });
   } catch (err) {
     console.error("❌ POST /notifications/wingman error:", err);
-    res.status(500).json({ error: "Failed to create Wingman notification" });
+    res.status(500).json({ error: "Failed to send wingman message" });
   }
 });
 
