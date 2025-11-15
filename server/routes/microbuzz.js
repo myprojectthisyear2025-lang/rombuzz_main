@@ -8,17 +8,17 @@
  *   - 🧭 Safe deactivation of MicroBuzz visibility
  *
  * Endpoints:
- *   POST   /api/microbuzz/selfie         → Upload selfie image
- *   POST   /api/microbuzz/activate       → Activate live MicroBuzz presence
- *   GET    /api/microbuzz/nearby         → Fetch nearby active users
- *   POST   /api/microbuzz/deactivate     → Remove active presence
- *   POST   /api/microbuzz/buzz           → Send or confirm a Buzz request
+ *   POST   /api/microbuzz/selfie
+ *   POST   /api/microbuzz/activate
+ *   GET    /api/microbuzz/nearby
+ *   POST   /api/microbuzz/deactivate
+ *   POST   /api/microbuzz/buzz
  *
  * Dependencies:
  *   - auth-middleware.js (JWT verification)
  *   - cloudinary.js (media upload)
  *   - models/state.js (onlineUsers map)
- *   - socket: using global.io from initSocket()
+ *   - socket.js (getIO → Socket.IO instance)
  *   - MicroBuzzPresence / MicroBuzzBuzz / Match (Mongo models)
  * ============================================================
  */
@@ -31,8 +31,9 @@ const upload = multer({ dest: "uploads/" });
 const cloudinary = require("../config/cloudinary");
 const authMiddleware = require("../routes/auth-middleware");
 
-// ✅ Use the shared onlineUsers singleton + socket getter
-const { io, onlineUsers } = global;
+// ✅ Correct shared realtime state + socket access
+const { onlineUsers } = require("../models/state");
+const { getIO } = require("../socket");
 
 const MicroBuzzPresence = require("../models/MicroBuzzPresence");
 const MicroBuzzBuzz = require("../models/MicroBuzzBuzz");
@@ -69,10 +70,10 @@ router.post("/activate", authMiddleware, async (req, res) => {
     const lngNum = parseFloat(lng);
     const userId = req.user.id;
 
-    if (isNaN(latNum) || isNaN(lngNum) || !selfieUrl)
+    if (isNaN(latNum) || isNaN(lngNum) || !selfieUrl) {
       return res.status(400).json({ error: "Invalid or missing lat/lng/selfieUrl" });
+    }
 
-    // Small jitter only for dev
     let offsetLat = 0;
     let offsetLng = 0;
     if (process.env.NODE_ENV !== "production") {
@@ -109,8 +110,9 @@ router.get("/nearby", authMiddleware, async (req, res) => {
     const radiusKm = parseFloat(req.query.radius || "1");
     const userId = req.user.id;
 
-    if (isNaN(lat) || isNaN(lng))
+    if (isNaN(lat) || isNaN(lng)) {
       return res.status(400).json({ error: "lat/lng required" });
+    }
 
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     const allActive = await MicroBuzzPresence.find({
@@ -127,9 +129,7 @@ router.get("/nearby", authMiddleware, async (req, res) => {
           distanceMeters: d * 1000,
         };
       })
-      .filter(
-        (u) => u.distanceMeters <= radiusKm * 1000 || process.env.NODE_ENV !== "production"
-      );
+      .filter((u) => u.distanceMeters <= radiusKm * 1000 || process.env.NODE_ENV !== "production");
 
     res.json({ users });
   } catch (err) {
@@ -152,15 +152,18 @@ router.post("/deactivate", authMiddleware, async (req, res) => {
 });
 
 /* ============================================================
-   💞 BUZZ REQUEST + MATCH CONFIRM (FIXED SOCKET PAYLOAD)
+   💞 BUZZ REQUEST + MATCH CONFIRM
 ============================================================ */
 router.post("/buzz", authMiddleware, async (req, res) => {
   try {
+    // ✅ Socket.IO instance
+    const io = getIO();
+
     const { toId, confirm } = req.body || {};
     const fromId = req.user.id;
+
     if (!toId) return res.status(400).json({ error: "toId required" });
 
-    // Fetch presence for socket payload
     const fromPresence = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
     const toPresence = await MicroBuzzPresence.findOne({ userId: toId }).lean();
 
@@ -172,8 +175,6 @@ router.post("/buzz", authMiddleware, async (req, res) => {
     };
 
     const distanceMeters = calcDistance();
-
-    // Check reverse match
     const reverseBuzz = await MicroBuzzBuzz.findOne({ fromId: toId, toId: fromId });
 
     /* ============================================================
@@ -198,15 +199,12 @@ router.post("/buzz", authMiddleware, async (req, res) => {
           });
         }
 
-        // Fetch presence again for final render
         const fromUser = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
         const toUser = await MicroBuzzPresence.findOne({ userId: toId }).lean();
 
-        // Notify both users
         [fromId, toId].forEach((uid) => {
           const other = uid === fromId ? toId : fromId;
-          const otherSelfie =
-            uid === fromId ? toUser?.selfieUrl : fromUser?.selfieUrl;
+          const otherSelfie = uid === fromId ? toUser?.selfieUrl : fromUser?.selfieUrl;
 
           if (onlineUsers[uid]) {
             io.to(onlineUsers[uid]).emit("buzz_match_open_profile", {
@@ -219,7 +217,6 @@ router.post("/buzz", authMiddleware, async (req, res) => {
         return res.json({ matched: true });
       }
 
-      // WAITING FOR CONFIRMATION (2nd buzz)
       if (onlineUsers[toId]) {
         io.to(onlineUsers[toId]).emit("buzz_request", {
           fromId,
@@ -235,10 +232,12 @@ router.post("/buzz", authMiddleware, async (req, res) => {
     }
 
     /* ============================================================
-         ONE WAY BUZZ
+         ONE-WAY BUZZ
     ============================================================ */
     const exists = await MicroBuzzBuzz.findOne({ fromId, toId });
-    if (!exists) await MicroBuzzBuzz.create({ fromId, toId, time: new Date() });
+    if (!exists) {
+      await MicroBuzzBuzz.create({ fromId, toId, time: new Date() });
+    }
 
     if (onlineUsers[toId]) {
       io.to(onlineUsers[toId]).emit("buzz_request", {

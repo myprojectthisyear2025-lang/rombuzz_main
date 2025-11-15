@@ -6,36 +6,34 @@
  *
  *   Includes:
  *   - User data sanitization
- *   - Block check
+ *   - Block check (MongoDB: Relationship model)
  *   - Time + distance utilities
- *   - Chat room persistence
- *   - Match streak increment
- *   - Notification dispatcher (MongoDB + Socket.io hybrid)
+ *   - Chat room persistence (in-memory, no LowDB)
+ *   - Match streak increment (MongoDB: MatchStreak model)
+ *   - Notification dispatcher (MongoDB + Socket.io)
  *
  * ⚙️ Updated:
- *   Added `sendNotification()` — uses MongoDB Notification model,
- *   falls back to LowDB if Mongo is unavailable, and emits
- *   real-time events via Socket.IO (global.io).
+ *   - Removed all LowDB references
+ *   - sendNotification → MongoDB Notification + Socket.IO only
+ *   - isBlocked        → uses Relationship collection
+ *   - incMatchStreakOut → uses MatchStreak collection
  *
  *   © 2025 RomBuzz (Neptrixx Technologies)
  * ================================================================
  */
 
 const shortid = require("shortid");
-const { db } = require("../models/db.lowdb");
 const Notification = require("../models/Notification");
+const MatchStreak = require("../models/MatchStreak");
+const Relationship = require("../models/Relationship");
 
-const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000; // constant: 30 days in ms
+const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000; // 30 days in ms
 
-// Access globals safely
-const { io, onlineUsers } = global || {};
-
-// ============================================================
-// 🔔 sendNotification()
-// ------------------------------------------------------------
-// Unified MongoDB + LowDB + Socket notification dispatcher.
-// All modules (buzzPosts, matches, chat, etc.) can call this.
-// ============================================================
+/* ============================================================
+   🔔 sendNotification(toId, data)
+   ------------------------------------------------------------
+   Mongo-only notification dispatcher + Socket.IO emit
+============================================================ */
 async function sendNotification(toId, data = {}) {
   const notif = {
     id: shortid.generate(),
@@ -53,10 +51,11 @@ async function sendNotification(toId, data = {}) {
   };
 
   try {
-    // ✅ Primary storage: MongoDB
+    // ✅ Store in MongoDB
     const mongoNotif = await Notification.create(notif);
 
-    // 🔔 Real-time socket emit
+    // 🔔 Real-time socket emit (use latest globals)
+    const { io, onlineUsers } = global || {};
     if (io && onlineUsers && onlineUsers[toId]) {
       io.to(onlineUsers[toId]).emit("notification", mongoNotif);
     }
@@ -64,25 +63,8 @@ async function sendNotification(toId, data = {}) {
     console.log(`🔔 Notification (Mongo) → ${toId}: ${notif.message}`);
     return mongoNotif;
   } catch (err) {
-    console.error("⚠️ MongoDB notification failed, falling back:", err.message);
-
-    // ⚙️ Fallback to LowDB (temporary compatibility)
-    try {
-      await db.read();
-      db.data.notifications ||= [];
-      db.data.notifications.push(notif);
-      await db.write();
-
-      if (io && onlineUsers && onlineUsers[toId]) {
-        io.to(onlineUsers[toId]).emit("notification", notif);
-      }
-
-      console.log(`🔔 Notification (LowDB fallback) → ${toId}: ${notif.message}`);
-      return notif;
-    } catch (fallbackErr) {
-      console.error("❌ Notification failed completely:", fallbackErr);
-      return null;
-    }
+    console.error("❌ Notification failed:", err);
+    return null;
   }
 }
 
@@ -91,7 +73,12 @@ async function sendNotification(toId, data = {}) {
 ============================================================ */
 function baseSanitizeUser(user) {
   if (!user) return null;
-  const { passwordHash, emailVerificationCode, pendingEmailChange, ...safe } = user;
+  const {
+    passwordHash,
+    emailVerificationCode,
+    pendingEmailChange,
+    ...safe
+  } = user;
   return {
     ...safe,
     profileComplete: user.profileComplete || false,
@@ -99,15 +86,43 @@ function baseSanitizeUser(user) {
 }
 
 /* ============================================================
-   🚫 isBlocked(db, user1, user2)
+   🚫 isBlocked(user1, user2)
+   ------------------------------------------------------------
+   Mongo-based block check using Relationship model.
+
+   Supports both legacy signature (db, user1, user2) and
+   new signature (user1, user2). The first param is ignored
+   if it looks like a DB object.
 ============================================================ */
-function isBlocked(db, user1, user2) {
-  if (!db.data.blocks) return false;
-  return db.data.blocks.some(
-    (b) =>
-      (b.blocker === user1 && b.blocked === user2) ||
-      (b.blocker === user2 && b.blocked === user1)
-  );
+async function isBlocked(a, b, c) {
+  let user1;
+  let user2;
+
+  // New usage: isBlocked("u1", "u2")
+  if (typeof a === "string" && typeof b === "string") {
+    user1 = a;
+    user2 = b;
+  } else {
+    // Legacy usage: isBlocked(db, "u1", "u2")
+    user1 = b;
+    user2 = c;
+  }
+
+  if (!user1 || !user2) return false;
+
+  try {
+    const exists = await Relationship.exists({
+      type: "block",
+      $or: [
+        { from: String(user1), to: String(user2) },
+        { from: String(user2), to: String(user1) },
+      ],
+    });
+    return !!exists;
+  } catch (err) {
+    console.error("⚠️ isBlocked Mongo error:", err);
+    return false;
+  }
 }
 
 /* ============================================================
@@ -136,41 +151,73 @@ function distanceKm(loc1, loc2) {
 
 /* ============================================================
    💬 getRoomDoc(db, roomId)
+   ------------------------------------------------------------
+   In-memory room message store (no LowDB).
+   Keeps the signature (db, roomId) for compatibility,
+   but ignores the first argument.
 ============================================================ */
-async function getRoomDoc(db, roomId) {
-  await db.read();
-  db.data.roomMessages = db.data.roomMessages || [];
+const roomStore =
+  (global && global._roomMessages) ||
+  (global._roomMessages = new Map());
 
-  let doc = db.data.roomMessages.find((r) => r.roomId === roomId);
+async function getRoomDoc(_dbIgnored, roomId) {
+  const key = String(roomId);
+  let doc = roomStore.get(key);
   if (!doc) {
-    doc = { roomId, list: [] };
-    db.data.roomMessages.push(doc);
-    await db.write();
+    doc = { roomId: key, list: [] };
+    roomStore.set(key, doc);
   }
   return doc;
 }
 
 /* ============================================================
-   🔥 incMatchStreakOut(dbData, fromId, toId)
+   🔥 incMatchStreakOut(fromId, toId)
+   ------------------------------------------------------------
+   Mongo-based MatchStreak increment.
+   - Uses MatchStreak collection
+   - key = `${fromId}_${toId}`
+   - Returns a simple object: { from, to, count, lastBuzz, createdAt }
 ============================================================ */
-function incMatchStreakOut(dbData, fromId, toId) {
-  dbData.matchStreaks = dbData.matchStreaks || {};
-  const key = `${String(fromId)}_${String(toId)}`;
+async function incMatchStreakOut(fromId, toId) {
+  const from = String(fromId);
+  const to = String(toId);
+  const key = `${from}_${to}`;
 
-  let s = dbData.matchStreaks[key];
-  if (!s) {
-    s = dbData.matchStreaks[key] = {
-      from: String(fromId),
-      to: String(toId),
+  try {
+    let streak = await MatchStreak.findOne({ key });
+
+    if (!streak) {
+      streak = await MatchStreak.create({
+        id: shortid.generate(),
+        key,
+        from,
+        to,
+        count: 1,
+        lastBuzz: new Date(),
+      });
+    } else {
+      streak.count = Number(streak.count || 0) + 1;
+      streak.lastBuzz = new Date();
+      await streak.save();
+    }
+
+    return {
+      from: streak.from,
+      to: streak.to,
+      count: Number(streak.count || 0),
+      lastBuzz: streak.lastBuzz || null,
+      createdAt: streak.createdAt || null,
+    };
+  } catch (err) {
+    console.error("⚠️ incMatchStreakOut Mongo error:", err);
+    return {
+      from,
+      to,
       count: 0,
       lastBuzz: null,
-      createdAt: Date.now(),
+      createdAt: null,
     };
   }
-
-  s.count = Number(s.count || 0) + 1;
-  s.lastBuzz = Date.now();
-  return s;
 }
 
 // ============================================================

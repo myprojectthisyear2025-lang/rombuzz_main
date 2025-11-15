@@ -29,15 +29,16 @@
  * ============================================================
  */
 
+
 const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../routes/auth-middleware");
 const shortid = require("shortid");
 
 const User = require("../models/User");
-const Relationship = require("../models/Relationship"); // ✅ unified model for likes, blocks, follows
+const Relationship = require("../models/Relationship");
 const Match = require("../models/Match");
-const MatchStreak = require("../models/MatchStreak"); // optional schema
+const MatchStreak = require("../models/MatchStreak");
 const {
   baseSanitizeUser,
   sendNotification,
@@ -61,27 +62,28 @@ router.post("/likes", authMiddleware, async (req, res) => {
     if (!to) return res.status(400).json({ error: "to required" });
     const from = req.user.id;
 
-    if (isBlocked(from, to))
+    // ⭐ FIXED: make async
+    if (await isBlocked(from, to))
       return res.status(403).json({ error: "blocked" });
 
-  // 💞 Already liked?
-const existing = await Relationship.findOne({ from, to, type: "like" });
-if (existing)
-  return res.status(400).json({ error: "already liked" });
+    // 💞 Already liked?
+    const existing = await Relationship.findOne({ from, to, type: "like" });
+    if (existing)
+      return res.status(400).json({ error: "already liked" });
 
-// 💞 Create like (with required id)
-await Relationship.create({
-  id: shortid.generate(),
-  from,
-  to,
-  type: "like",
-  createdAt: new Date(),
-});
+    // 💞 Create like
+    await Relationship.create({
+      id: shortid.generate(),
+      from,
+      to,
+      type: "like",
+      createdAt: new Date(),
+    });
 
-// 💞 Check mutual like → MATCH
-const mutual = await Relationship.findOne({ from: to, to: from, type: "like" });
-const self = await User.findOne({ id: from }).lean();
-const other = await User.findOne({ id: to }).lean();
+    // 💞 Check mutual like → MATCH
+    const mutual = await Relationship.findOne({ from: to, to: from, type: "like" });
+    const self = await User.findOne({ id: from }).lean();
+    const other = await User.findOne({ id: to }).lean();
 
     if (mutual) {
       const existsMatch = await Match.findOne({ users: { $all: [from, to] } });
@@ -93,16 +95,15 @@ const other = await User.findOne({ id: to }).lean();
         });
       }
 
-     // 🧹 Cleanup both likes
-await Relationship.deleteMany({
-  $or: [
-    { from, to, type: "like" },
-    { from: to, to: from, type: "like" },
-  ],
-});
+      // 🧹 Cleanup
+      await Relationship.deleteMany({
+        $or: [
+          { from, to, type: "like" },
+          { from: to, to: from, type: "like" },
+        ],
+      });
 
-
-      // 🔔 Socket events
+      // 🔔 Socket
       const selfSocket = onlineUsers[from];
       const targetSocket = onlineUsers[to];
       if (selfSocket) io.to(selfSocket).emit("match", { otherUserId: to });
@@ -111,12 +112,14 @@ await Relationship.deleteMany({
       // 📨 Notifications
       const fromName = self?.firstName || "Someone";
       const otherName = other?.firstName || "Someone";
+
       await sendNotification(to, {
         fromId: from,
         type: "buzz",
         message: `${fromName} wants to match with you! 💖`,
         href: `/viewProfile/${from}`,
       });
+
       await sendNotification(from, {
         fromId: to,
         type: "match",
@@ -124,7 +127,7 @@ await Relationship.deleteMany({
         href: `/viewProfile/${to}`,
       });
     } else {
-      // 💌 Buzz request (first like)
+      // 💌 Buzz Request
       const targetSocket = onlineUsers[to];
       if (targetSocket) {
         const fromUser = baseSanitizeUser(self);
@@ -134,6 +137,7 @@ await Relationship.deleteMany({
           selfieUrl: fromUser.avatar || "",
         });
       }
+
       const fromName = self?.firstName || "Someone nearby";
       await sendNotification(to, {
         fromId: from,
@@ -163,14 +167,15 @@ router.post("/buzz", authMiddleware, async (req, res) => {
   buzzLocks.add(pairKey);
 
   try {
-    // ✅ Ensure both are matched
+    // Ensure match
     const matched = await Match.findOne({ users: { $all: [fromId, to] } });
     if (!matched) return res.status(409).json({ error: "not_matched" });
 
-    if (isBlocked(fromId, to))
+    // ⭐ FIXED: make async
+    if (await isBlocked(fromId, to))
       return res.status(403).json({ error: "blocked" });
 
-    // 🔥 Buzz cooldown (memory-based)
+    // Cooldown
     const now = Date.now();
     const COOLDOWN_MS = 10 * 1000;
     global._buzzCooldown ||= {};
@@ -183,7 +188,7 @@ router.post("/buzz", authMiddleware, async (req, res) => {
     }
     global._buzzCooldown[pairKey] = now;
 
-    // 🔥 Update streak
+    // Streak update
     const streakObj = await incMatchStreakOut(fromId, to);
     const currentStreak = Number(streakObj?.count || 0);
 
@@ -221,9 +226,9 @@ router.get("/likes/status/:targetUserId", authMiddleware, async (req, res) => {
     const targetId = req.params.targetUserId;
     const selfId = req.user.id;
 
-   const likedByMe = await Relationship.exists({ from: selfId, to: targetId, type: "like" });
-const likedMe = await Relationship.exists({ from: targetId, to: selfId, type: "like" });
- const matched = await Match.exists({ users: { $all: [selfId, targetId] } });
+    const likedByMe = await Relationship.exists({ from: selfId, to: targetId, type: "like" });
+    const likedMe = await Relationship.exists({ from: targetId, to: selfId, type: "like" });
+    const matched = await Match.exists({ users: { $all: [selfId, targetId] } });
 
     res.json({ likedByMe: !!likedByMe, likedMe: !!likedMe, matched: !!matched });
   } catch (e) {
@@ -295,12 +300,11 @@ router.post("/unmatch/:id", authMiddleware, async (req, res) => {
     const before = await Match.countDocuments({});
     await Match.deleteMany({ users: { $all: [me, them] } });
     await Relationship.deleteMany({
-  $or: [
-    { from: me, to: them, type: "like" },
-    { from: them, to: me, type: "like" },
-  ],
-});
-
+      $or: [
+        { from: me, to: them, type: "like" },
+        { from: them, to: me, type: "like" },
+      ],
+    });
 
     const after = await Match.countDocuments({});
     const removed = before !== after;
@@ -317,7 +321,7 @@ router.post("/unmatch/:id", authMiddleware, async (req, res) => {
 router.get("/social-stats", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
-const likes = await Relationship.find({ type: "like" }).lean();
+    const likes = await Relationship.find({ type: "like" }).lean();
     const matches = await Match.find({}).lean();
 
     const liked = likes.filter((l) => l.from === userId).map((l) => l.to);
@@ -340,7 +344,7 @@ router.get("/social/:type", authMiddleware, async (req, res) => {
     const userId = req.user.id;
     const type = req.params.type;
 
-const likes = await Relationship.find({ type: "like" }).lean();
+    const likes = await Relationship.find({ type: "like" }).lean();
     const matches = await Match.find({}).lean();
     const users = await User.find({}).lean();
 
