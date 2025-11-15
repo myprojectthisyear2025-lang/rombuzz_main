@@ -69,13 +69,19 @@ const existing = await Relationship.findOne({ from, to, type: "like" });
 if (existing)
   return res.status(400).json({ error: "already liked" });
 
-// 💞 Create like
-await Relationship.create({ from, to, type: "like", createdAt: new Date() });
+// 💞 Create like (with required id)
+await Relationship.create({
+  id: shortid.generate(),
+  from,
+  to,
+  type: "like",
+  createdAt: new Date(),
+});
 
 // 💞 Check mutual like → MATCH
 const mutual = await Relationship.findOne({ from: to, to: from, type: "like" });
- const self = await User.findOne({ id: from }).lean();
-    const other = await User.findOne({ id: to }).lean();
+const self = await User.findOne({ id: from }).lean();
+const other = await User.findOne({ id: to }).lean();
 
     if (mutual) {
       const existsMatch = await Match.findOne({ users: { $all: [from, to] } });
