@@ -1,45 +1,33 @@
 /**
  * ============================================================
  * 📁 File: config/sendgrid.js
- * 🧩 Purpose: Configures SendGrid for transactional email delivery.
+ * 📧 Purpose: Initialize SendGrid client for sending emails
  *
  * Features:
- *   - Initializes SendGrid using SENDGRID_API_KEY from .env
- *   - Provides ready-to-use sgMail instance
- *   - Supports OTP verification, password resets, and alerts
+ *   - Sets API key from environment variables
+ *   - Provides safe fallback in dev when no API key is present
+ *   - Prevents crashes like "sgMail.send is not a function"
  *
  * Environment Variables:
  *   SENDGRID_API_KEY
  *   FROM_EMAIL
- *
- * Used In:
- *   - /api/auth/send-code (email OTP)
- *   - /api/auth/forgot-password (reset code)
- *
- * Notes:
- *   - All SendGrid logic centralized here
- *   - Always check for key presence before sending emails
  * ============================================================
  */
 
-// =======================
-// FEATURE TOGGLES
-// =======================
+const sgMail = require("@sendgrid/mail");
 
-require("dotenv").config();
-const { OAuth2Client } = require("google-auth-library");
+// If API key exists → real SendGrid
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  console.log("📧 SendGrid initialized");
+} else {
+  // Safe fallback to prevent crashes
+  console.warn("⚠️ No SENDGRID_API_KEY — using mock email sender");
 
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+  sgMail.send = async (message) => {
+    console.log("📧 [DEV MOCK] Email would be sent:", message);
+    return { success: true, dev: true };
+  };
+}
 
-// Dynamically loaded feature toggles
-const FEATURE_TOGGLES = {
-  ENABLE_BLURRED_PROFILES: String(process.env.ENABLE_BLURRED_PROFILES || 'true') === 'true',
-  ENABLE_LIKES_MATCHES:    String(process.env.ENABLE_LIKES_MATCHES || 'true') === 'true',
-  ENABLE_REALTIME_CHAT:    String(process.env.ENABLE_REALTIME_CHAT || 'true') === 'true',
-  ENABLE_AI_WINGMAN:       String(process.env.ENABLE_AI_WINGMAN || 'false') === 'true',
-};
-
-module.exports = {
-  googleClient,
-  FEATURE_TOGGLES,
-};
+module.exports = sgMail;
