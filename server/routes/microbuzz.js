@@ -17,8 +17,8 @@
  * Dependencies:
  *   - auth-middleware.js (JWT verification)
  *   - cloudinary.js (media upload)
- *   - socket.js (getSocket → io instance)
  *   - models/state.js (onlineUsers map)
+ *   - socket: using global.io from initSocket()
  *   - MicroBuzzPresence / MicroBuzzBuzz / Match (Mongo models)
  * ============================================================
  */
@@ -32,9 +32,7 @@ const cloudinary = require("../config/cloudinary");
 const authMiddleware = require("../routes/auth-middleware");
 
 // ✅ Use the shared onlineUsers singleton + socket getter
-const { onlineUsers } = require("../models/state");
-const { getSocket } = require("../socket");
-const io = getSocket();
+const { io, onlineUsers } = global;
 
 const MicroBuzzPresence = require("../models/MicroBuzzPresence");
 const MicroBuzzBuzz = require("../models/MicroBuzzBuzz");
