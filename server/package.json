@@ -9,6 +9,7 @@
     "dev": "nodemon index.js"
   },
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "axios": "^1.7.4",
     "bcrypt": "^5.1.1",
     "chalk": "^5.3.0",
