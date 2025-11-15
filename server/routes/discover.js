@@ -7,17 +7,17 @@
  *   GET /api/discover → Filter and discover nearby users
  *
  * Dependencies:
- *   - models/User.js     → Mongoose user schema
- *   - models/Like.js     → For liked users (optional)
- *   - auth-middleware.js → JWT validation
- *   - utils/helpers.js   → canUseRestricted(), isRestricted()
+ *   - models/User.js         → Mongoose user schema
+ *   - models/Relationship.js → Unified model for likes/blocks/follows
+ *   - auth-middleware.js     → JWT validation
+ *   - utils/helpers.js       → canUseRestricted(), isRestricted()
  * ============================================================
  */
 
 const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
-const Relationship = require("../models/Relationship"); // ✅ Unified model for likes/blocks/follows
+const Relationship = require("../models/Relationship"); // ✅ Correct model for likes/blocks/follows
 const authMiddleware = require("../routes/auth-middleware");
 const { isRestricted, canUseRestricted } = require("../utils/helpers");
 
@@ -40,7 +40,7 @@ router.get("/", authMiddleware, async (req, res) => {
     const {
       lat,
       lng,
-      range = 0,
+      range = 50000, // 🎯 FIX: default 50km so users show without query params
       gender,
       intent,
       vibe,
@@ -52,7 +52,9 @@ router.get("/", authMiddleware, async (req, res) => {
       love,
     } = req.query;
 
-    // 🌍 Determine base location
+    /* ============================================================
+       🌍 Determine base location (GPS or last known)
+    ============================================================ */
     let baseLat = parseFloat(lat) || self.location?.lat;
     let baseLng = parseFloat(lng) || self.location?.lng;
 
@@ -68,30 +70,42 @@ router.get("/", authMiddleware, async (req, res) => {
       }
     }
 
-    // ✅ Update user's location if changed
-    const locChanged =
-      !self.location ||
-      self.location.lat !== baseLat ||
-      self.location.lng !== baseLng;
+    /* ============================================================
+       📍 Always update user location
+    ============================================================ */
+    await User.updateOne(
+      { id: self.id },
+      {
+        $set: {
+          location: { lat: baseLat, lng: baseLng },
+          lastActive: Date.now(),
+        },
+      }
+    );
 
-    if (locChanged) {
-      await User.updateOne({ id: self.id }, { $set: { location: { lat: baseLat, lng: baseLng } } });
-    }
+    /* ============================================================
+       💌 Fetch liked users using Relationship model
+    ============================================================ */
+    const likedDocs = await Relationship.find({
+      from: self.id,
+      type: "like",
+    }).lean();
 
-    // 💌 Fetch liked users
-    const likedDocs = await Like.find({ from: self.id }).lean();
     const likedIds = likedDocs.map((l) => l.to);
 
-    // 🧩 Fetch all visible candidates
+    /* ============================================================
+       🧩 Fetch visible candidates
+    ============================================================ */
     let candidates = await User.find({
       id: { $ne: self.id },
       visibility: { $ne: "invisible" },
-      id: { $nin: likedIds },
+      id: { $nin: likedIds }, // remove already-liked users
     }).lean();
 
-    /* -----------------------------
+    /* ============================================================
        🩷 Tier 1 — Basic Filters
-    ------------------------------*/
+    ============================================================ */
+
     if (gender) {
       candidates = candidates.filter(
         (u) => (u.gender || "").toLowerCase() === gender.toLowerCase()
@@ -104,27 +118,20 @@ router.get("/", authMiddleware, async (req, res) => {
       );
     }
 
-    // 🗺️ Distance filter
-    if (self.location?.lat && self.location?.lng && Number(range) > 0) {
-      const R = 6371e3;
+    /* ============================================================
+       🗺️ Distance filter (Fixed)
+    ============================================================ */
+    if (baseLat && baseLng && Number(range) > 0) {
       candidates = candidates.filter((u) => {
-        if (!u.location?.lat || !u.location?.lng) return true;
-        const dLat = ((u.location.lat - baseLat) * Math.PI) / 180;
-        const dLng = ((u.location.lng - baseLng) * Math.PI) / 180;
-        const a =
-          Math.sin(dLat / 2) ** 2 +
-          Math.cos(baseLat * Math.PI / 180) *
-            Math.cos(u.location.lat * Math.PI / 180) *
-            Math.sin(dLng / 2) ** 2;
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const dist = R * c;
-        return dist <= range;
+        if (!u.location?.lat || !u.location?.lng) return false; // ❌ FIX: used to return true
+        const d = getDistanceMeters(baseLat, baseLng, u.location.lat, u.location.lng);
+        return d <= Number(range);
       });
     }
 
-    /* -----------------------------
+    /* ============================================================
        🧠 Tier 2 — Lifestyle Filters
-    ------------------------------*/
+    ============================================================ */
     if (vibe && canFilterWithRequestedVibe) {
       candidates = candidates.filter(
         (u) => (u.vibe || "").toLowerCase() === requestedVibe
@@ -155,9 +162,9 @@ router.get("/", authMiddleware, async (req, res) => {
       });
     }
 
-    /* -----------------------------
+    /* ============================================================
        💎 Tier 3 — Premium Filters
-    ------------------------------*/
+    ============================================================ */
     if (verified === "true") {
       candidates = candidates.filter((u) => u.verified);
     }
@@ -174,9 +181,9 @@ router.get("/", authMiddleware, async (req, res) => {
       );
     }
 
-    /* -----------------------------
+    /* ============================================================
        ✨ Response Sanitization
-    ------------------------------*/
+    ============================================================ */
     const sanitize = (u) => {
       const hasLocation = !!(u.location?.lat && u.location?.lng);
       let distanceMeters = null;
@@ -208,6 +215,9 @@ router.get("/", authMiddleware, async (req, res) => {
       };
     };
 
+    /* ============================================================
+       🔢 Sort results (original logic unchanged)
+    ============================================================ */
     const sorted = candidates
       .map(sanitize)
       .sort((a, b) => {
@@ -228,9 +238,9 @@ router.get("/", authMiddleware, async (req, res) => {
   }
 });
 
-/* -----------------------------
+/* ============================================================
    Helper: Distance calculator
-------------------------------*/
+============================================================ */
 function getDistanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371e3;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
