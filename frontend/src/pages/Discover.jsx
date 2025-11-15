@@ -663,7 +663,7 @@ export default function Discover() {
           if (v !== "" && v != null) qs.set(k, String(v));
         });
 
-        const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
+const res = await fetch(`${API_BASE}/discover/nearby?${qs.toString()}`, {
           headers: { Authorization: `Bearer ${token()}` },
         });
         const data = await res.json();
