@@ -15,10 +15,11 @@
  *   POST   /api/microbuzz/buzz           → Send or confirm a Buzz request
  *
  * Dependencies:
- *   - db.lowdb.js (LowDB instance)
- *   - authMiddleware.js (JWT verification)
+ *   - auth-middleware.js (JWT verification)
  *   - cloudinary.js (media upload)
- *   - socket.js (io + onlineUsers for live notifications)
+ *   - socket.js (getSocket → io instance)
+ *   - models/state.js (onlineUsers map)
+ *   - MicroBuzzPresence / MicroBuzzBuzz / Match (Mongo models)
  * ============================================================
  */
 
@@ -30,10 +31,14 @@ const upload = multer({ dest: "uploads/" });
 const cloudinary = require("../config/cloudinary");
 const authMiddleware = require("../routes/auth-middleware");
 
+// ✅ Use the shared onlineUsers singleton + socket getter
+const { onlineUsers } = require("../models/state");
+const { getSocket } = require("../socket");
+const io = getSocket();
+
 const MicroBuzzPresence = require("../models/MicroBuzzPresence");
 const MicroBuzzBuzz = require("../models/MicroBuzzBuzz");
 const Match = require("../models/Match");
-const { io, onlineUsers } = global;
 
 /* ============================================================
    📸 SELFIE UPLOAD
@@ -206,7 +211,7 @@ router.post("/buzz", authMiddleware, async (req, res) => {
             uid === fromId ? toUser?.selfieUrl : fromUser?.selfieUrl;
 
           if (onlineUsers[uid]) {
-            io.to(String(uid)).emit("buzz_match_open_profile", {
+            io.to(onlineUsers[uid]).emit("buzz_match_open_profile", {
               otherUserId: other,
               selfieUrl: otherSelfie,
             });
@@ -216,9 +221,9 @@ router.post("/buzz", authMiddleware, async (req, res) => {
         return res.json({ matched: true });
       }
 
-      // WAITING FOR CONFIRMATION
+      // WAITING FOR CONFIRMATION (2nd buzz)
       if (onlineUsers[toId]) {
-        io.to(String(toId)).emit("buzz_request", {
+        io.to(onlineUsers[toId]).emit("buzz_request", {
           fromId,
           selfieUrl: fromPresence?.selfieUrl,
           name: fromPresence?.name || "Nearby user",
@@ -238,7 +243,7 @@ router.post("/buzz", authMiddleware, async (req, res) => {
     if (!exists) await MicroBuzzBuzz.create({ fromId, toId, time: new Date() });
 
     if (onlineUsers[toId]) {
-      io.to(String(toId)).emit("buzz_request", {
+      io.to(onlineUsers[toId]).emit("buzz_request", {
         fromId,
         selfieUrl: fromPresence?.selfieUrl,
         name: fromPresence?.name || "Nearby user",
