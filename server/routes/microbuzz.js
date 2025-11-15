@@ -22,7 +22,6 @@
  * ============================================================
  */
 
-
 const express = require("express");
 const router = express.Router();
 const fs = require("fs");
@@ -70,6 +69,7 @@ router.post("/activate", authMiddleware, async (req, res) => {
     if (isNaN(latNum) || isNaN(lngNum) || !selfieUrl)
       return res.status(400).json({ error: "Invalid or missing lat/lng/selfieUrl" });
 
+    // Small jitter only for dev
     let offsetLat = 0;
     let offsetLng = 0;
     if (process.env.NODE_ENV !== "production") {
@@ -149,7 +149,7 @@ router.post("/deactivate", authMiddleware, async (req, res) => {
 });
 
 /* ============================================================
-   💞 BUZZ REQUEST + MATCH CONFIRM
+   💞 BUZZ REQUEST + MATCH CONFIRM (FIXED SOCKET PAYLOAD)
 ============================================================ */
 router.post("/buzz", authMiddleware, async (req, res) => {
   try {
@@ -157,9 +157,25 @@ router.post("/buzz", authMiddleware, async (req, res) => {
     const fromId = req.user.id;
     if (!toId) return res.status(400).json({ error: "toId required" });
 
+    // Fetch presence for socket payload
+    const fromPresence = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
+    const toPresence = await MicroBuzzPresence.findOne({ userId: toId }).lean();
+
+    const calcDistance = () => {
+      if (!fromPresence || !toPresence) return null;
+      const dx = (fromPresence.lat - toPresence.lat) * 111000;
+      const dy = (fromPresence.lng - toPresence.lng) * 111000;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const distanceMeters = calcDistance();
+
+    // Check reverse match
     const reverseBuzz = await MicroBuzzBuzz.findOne({ fromId: toId, toId: fromId });
 
-    // Mutual buzz → create match
+    /* ============================================================
+         MUTUAL BUZZ → MATCH
+    ============================================================ */
     if (reverseBuzz) {
       if (confirm === true) {
         await MicroBuzzBuzz.deleteMany({
@@ -179,44 +195,56 @@ router.post("/buzz", authMiddleware, async (req, res) => {
           });
         }
 
-        const fromUser = await MicroBuzzPresence.findOne({ userId: fromId });
-        const toUser = await MicroBuzzPresence.findOne({ userId: toId });
+        // Fetch presence again for final render
+        const fromUser = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
+        const toUser = await MicroBuzzPresence.findOne({ userId: toId }).lean();
 
+        // Notify both users
         [fromId, toId].forEach((uid) => {
-          const otherId = uid === fromId ? toId : fromId;
+          const other = uid === fromId ? toId : fromId;
           const otherSelfie =
             uid === fromId ? toUser?.selfieUrl : fromUser?.selfieUrl;
 
           if (onlineUsers[uid]) {
             io.to(String(uid)).emit("buzz_match_open_profile", {
-              otherUserId: otherId,
+              otherUserId: other,
               selfieUrl: otherSelfie,
             });
           }
         });
 
         return res.json({ matched: true });
-      } else {
-        if (onlineUsers[toId]) {
-          io.to(String(toId)).emit("buzz_request", {
-            fromId,
-            type: "microbuzz",
-            message: "Someone nearby buzzed you!",
-          });
-        }
-        return res.json({ pending: true, requiresConfirm: true });
       }
+
+      // WAITING FOR CONFIRMATION
+      if (onlineUsers[toId]) {
+        io.to(String(toId)).emit("buzz_request", {
+          fromId,
+          selfieUrl: fromPresence?.selfieUrl,
+          name: fromPresence?.name || "Nearby user",
+          distanceMeters,
+          message: "Someone nearby buzzed you!",
+          type: "microbuzz",
+        });
+      }
+
+      return res.json({ pending: true, requiresConfirm: true });
     }
 
-    // One-way buzz → store
+    /* ============================================================
+         ONE WAY BUZZ
+    ============================================================ */
     const exists = await MicroBuzzBuzz.findOne({ fromId, toId });
     if (!exists) await MicroBuzzBuzz.create({ fromId, toId, time: new Date() });
 
     if (onlineUsers[toId]) {
       io.to(String(toId)).emit("buzz_request", {
         fromId,
-        type: "microbuzz",
+        selfieUrl: fromPresence?.selfieUrl,
+        name: fromPresence?.name || "Nearby user",
+        distanceMeters,
         message: "Someone nearby buzzed you!",
+        type: "microbuzz",
       });
     }
 
