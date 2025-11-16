@@ -44,6 +44,7 @@ export default function MatchCelebrateOverlay() {
   const [otherUserId, setOtherUserId] = useState(null);
   const [myUser, setMyUser] = useState(null);
   const [matchUser, setMatchUser] = useState(null);
+  const [matchSelfie, setMatchSelfie] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
 
   // 🚀 Listen to global "match:celebrate" events from socket.js
@@ -53,13 +54,31 @@ export default function MatchCelebrateOverlay() {
       if (!detail.otherUserId) return;
 
       setOtherUserId(String(detail.otherUserId));
-      setMyUser(getStoredUser());
-      setVisible(true);
+setMatchSelfie(detail.selfieUrl || null); // ← NEW
+setMyUser(getStoredUser());
+setVisible(true);
+
     };
 
-    window.addEventListener("match:celebrate", handler);
+       window.addEventListener("match:celebrate", handler);
     return () => window.removeEventListener("match:celebrate", handler);
   }, []);
+
+
+// 🔐 Freeze background scroll while overlay is visible
+useEffect(() => {
+  if (visible) {
+    document.body.style.overflow = "hidden";
+  } else {
+    document.body.style.overflow = "";
+  }
+
+  return () => {
+    document.body.style.overflow = "";
+  };
+}, [visible]);
+
+
 
   // 👤 Try to fetch the other user's public profile for avatar + name
   useEffect(() => {
@@ -106,7 +125,7 @@ export default function MatchCelebrateOverlay() {
     if (!visible || !otherUserId) return;
     const timer = setTimeout(() => {
       goToChat();
-    }, 4500); // ~4.5s then auto-open chat
+    }, 7000); // ~7s then auto-open chat
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -125,19 +144,22 @@ export default function MatchCelebrateOverlay() {
 
   if (!visible) return null;
 
-  const myName =
-    (myUser && [myUser.firstName, myUser.lastName].filter(Boolean).join(" ")) ||
-    "You";
+ const myName =
+  (myUser && myUser.firstName) ||
+  "You";
 
-  const matchName =
-    (matchUser &&
-      [matchUser.firstName, matchUser.lastName].filter(Boolean).join(" ")) ||
-    "Your new match";
+
+ const matchName =
+  (matchUser && matchUser.firstName) ||
+  "Your new match";
+
 
   const matchAvatar =
-    matchUser?.avatar ||
-    matchUser?.profilePhoto ||
-    "https://i.pravatar.cc/200?img=67";
+  matchUser?.avatar ||
+  matchUser?.profilePhoto ||
+  matchSelfie || // ← fallback to selfie
+  "https://i.pravatar.cc/200?img=67";
+
 
   const myAvatar =
     myUser?.avatar ||
@@ -145,7 +167,10 @@ export default function MatchCelebrateOverlay() {
     "https://i.pravatar.cc/200?img=21";
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center px-4">
+<div
+  className="fixed inset-0 z-[9999] flex items-center justify-center px-4"
+  style={{ height: "100dvh" }}
+>
       {/* Dimmed background */}
       <div
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -188,11 +213,11 @@ export default function MatchCelebrateOverlay() {
           <h2 className="text-3xl md:text-4xl font-extrabold drop-shadow-sm">
             It&apos;s a Match! 💫
           </h2>
-          <p className="text-sm md:text-base text-rose-50/90 max-w-xs">
-            {myName} &amp; {matchName} just unlocked each other.
-            Profiles are open, vibes are buzzing - start talking before the
-            spark cools down.
-          </p>
+         <p className="text-sm md:text-base text-rose-50/90 max-w-xs">
+  {myName} &amp; {matchName} just unlocked each other.<br />
+  Profiles are open, vibes are buzzing — start talking before the spark cools down.
+</p>
+
 
           {/* Avatar row */}
           <div className="mt-3 mb-4 flex items-center justify-center gap-6">
@@ -252,14 +277,16 @@ export default function MatchCelebrateOverlay() {
 
         {/* Local styles for animations */}
         <style>{`
-          @keyframes rbz-pop {
-            0% { transform: scale(0.8) translateY(16px); opacity: 0; }
-            60% { transform: scale(1.03) translateY(0); opacity: 1; }
-            100% { transform: scale(1) translateY(0); opacity: 1; }
-          }
-          .animate-rbz-pop {
-            animation: rbz-pop 0.35s ease-out;
-          }
+            @keyframes rbz-pop {
+            from { opacity: 0; }
+            to { opacity: 1; }
+            }
+
+            .animate-rbz-pop {
+            animation: rbz-pop 0.4s ease-out;
+            will-change: opacity;
+            }
+
 
           @keyframes rbz-heart {
             0% { transform: translateY(0) scale(0.9); opacity: 0; }
