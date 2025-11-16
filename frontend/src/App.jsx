@@ -28,6 +28,7 @@ import ViewProfile from "./pages/ViewProfile";
 import SettingsLayout from "./pages/settings/SettingsLayout";
 import ProfilePreview from "./pages/ProfilePreview";
 import Account from "./pages/settings"; // index.jsx
+import MatchCelebrateOverlay from "./components/MatchCelebrateOverlay"; // ⬅️ NEW
 import Security from "./pages/settings/Security";
 import Privacy from "./pages/settings/Privacy";
 import Notifications from "./pages/settings/Notifications";
@@ -259,6 +260,8 @@ useEffect(() => {
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>
+      {/* 🌟 Global match celebration overlay (always listening) */}
+      <MatchCelebrateOverlay /> {/* ⬅️ NEW */}
 
       {/* ✅ Footer only on homepage */}
       {showFooter && <Footer />}

@@ -118,6 +118,19 @@ socket.on("comment:new", (payload) => {
         }
       } catch {}
     });
+        // 💞 Match event → trigger global RomBuzz celebration
+    socket.on("match", (payload) => {
+      console.log("💞 match event received:", payload);
+      try {
+        // payload shape from backend: { otherUserId }
+        window.dispatchEvent(
+          new CustomEvent("match:celebrate", { detail: payload })
+        );
+      } catch (e) {
+        console.error("match:celebrate dispatch failed:", e);
+      }
+    });
+
 
       // ✅ Optional badge reset listener
     window.addEventListener("notifications:clear", () => {
