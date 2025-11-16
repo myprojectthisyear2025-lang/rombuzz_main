@@ -219,8 +219,11 @@ if (reverseBuzz) {
     if (!exists) {
       await Match.create({
         id: `${fromId}_${toId}_${Date.now()}`,
-        users: [fromId, toId],
-        type: "microbuzz",
+          user1: fromId,
+    user2: toId,
+    users: [fromId, toId],    // still included for array lookups
+    type: "microbuzz",
+
         createdAt: new Date(),
       });
     }
