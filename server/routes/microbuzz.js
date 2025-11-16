@@ -176,60 +176,63 @@ router.post("/buzz", authMiddleware, async (req, res) => {
 
     const distanceMeters = calcDistance();
     const reverseBuzz = await MicroBuzzBuzz.findOne({ fromId: toId, toId: fromId });
+// ✅ PREVENT LOOPING — If already matched, do NOT send any buzz popup again
+const alreadyMatched = await Match.findOne({ users: { $all: [fromId, toId] } });
 
-    /* ============================================================
-         MUTUAL BUZZ → MATCH
-    ============================================================ */
-    if (reverseBuzz) {
-      if (confirm === true) {
-        await MicroBuzzBuzz.deleteMany({
-          $or: [
-            { fromId, toId },
-            { fromId: toId, toId: fromId },
-          ],
-        });
+if (alreadyMatched) {
+  return res.json({ matched: true });
+}
 
-        const exists = await Match.findOne({ users: { $all: [fromId, toId] } });
-        if (!exists) {
-          await Match.create({
-            id: `${fromId}_${toId}_${Date.now()}`,
-            users: [fromId, toId],
-            type: "microbuzz",
-            createdAt: new Date(),
-          });
-        }
+  /* ============================================================
+     MUTUAL BUZZ → MATCH (loop-proof)
+============================================================ */
+if (reverseBuzz) {
+  if (confirm === true) {
+    // Clean up pending buzzes
+    await MicroBuzzBuzz.deleteMany({
+      $or: [
+        { fromId, toId },
+        { fromId: toId, toId: fromId },
+      ],
+    });
 
-        const fromUser = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
-        const toUser = await MicroBuzzPresence.findOne({ userId: toId }).lean();
-
-        [fromId, toId].forEach((uid) => {
-          const other = uid === fromId ? toId : fromId;
-          const otherSelfie = uid === fromId ? toUser?.selfieUrl : fromUser?.selfieUrl;
-
-          if (onlineUsers[uid]) {
-            io.to(onlineUsers[uid]).emit("buzz_match_open_profile", {
-              otherUserId: other,
-              selfieUrl: otherSelfie,
-            });
-          }
-        });
-
-        return res.json({ matched: true });
-      }
-
-      if (onlineUsers[toId]) {
-        io.to(onlineUsers[toId]).emit("buzz_request", {
-          fromId,
-          selfieUrl: fromPresence?.selfieUrl,
-          name: fromPresence?.name || "Nearby user",
-          distanceMeters,
-          message: "Someone nearby buzzed you!",
-          type: "microbuzz",
-        });
-      }
-
-      return res.json({ pending: true, requiresConfirm: true });
+    // Create match if not exists
+    const exists = await Match.findOne({ users: { $all: [fromId, toId] } });
+    if (!exists) {
+      await Match.create({
+        id: `${fromId}_${toId}_${Date.now()}`,
+        users: [fromId, toId],
+        type: "microbuzz",
+        createdAt: new Date(),
+      });
     }
+
+    // Notify both users: MATCHED!
+    const fromUser = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
+    const toUser = await MicroBuzzPresence.findOne({ userId: toId }).lean();
+
+    [fromId, toId].forEach((uid) => {
+      const other = uid === fromId ? toId : fromId;
+      const otherSelfie = uid === fromId ? toUser?.selfieUrl : fromUser?.selfieUrl;
+
+      if (onlineUsers[uid]) {
+        io.to(onlineUsers[uid]).emit("match", {
+          otherUserId: other,
+          selfieUrl: otherSelfie,
+        });
+      }
+    });
+
+    // Final response
+    return res.json({ matched: true });
+  }
+
+  // ❗ DO NOT SEND buzz_request AGAIN
+  // User B already buzzed A; now waiting only for confirm:true
+
+  return res.json({ pending: true, requiresConfirm: true });
+}
+
 
     /* ============================================================
          ONE-WAY BUZZ
