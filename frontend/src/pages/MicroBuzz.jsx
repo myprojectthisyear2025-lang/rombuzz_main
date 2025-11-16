@@ -143,12 +143,17 @@ socket.on("buzz_request", (data) => {
       console.log("❌ Buzz rejected:", data);
       alert("❌ Your buzz was rejected.");
     });
-  
+  // 💚 When the other user accepts your buzz (pre-match state)
+socket.on("buzz_accept", (data) => {
+  console.log("💚 Received buzz_accept:", data);
+});
 
     return () => {
   socket.off("buzz_request");
   socket.off("match");
   socket.off("buzz_rejected");
+    socket.off("buzz_accept");   // ✅ REQUIRED FIX
+
 };
 
   }, [navigate]);
@@ -453,46 +458,46 @@ socket.on("buzz_request", (data) => {
     return Math.max(min, Math.min(max, v));
   }
 
-  // Respond to a Buzz popup ❤️ or ❌
+// Respond to a Buzz popup ❤️ or ❌
+// NOTE: We rely on the "match" socket event to trigger the celebration overlay.
+// This avoids double-firing match:celebrate for the accepter.
 async function respondToBuzz(accepted) {
   if (!buzzRequest) return;
 
   try {
+    const targetId = buzzRequest.fromId;
+
     if (accepted) {
-      // ❤️ Correct flow: send LIKE → backend checks mutual like → match event emitted
-const res = await fetch(`${API_BASE}/microbuzz/buzz`, {
+      // Only send confirm:true – backend will create the match
+      // and emit "match" to BOTH users via Socket.IO.
+      const res = await fetch(`${API_BASE}/microbuzz/buzz`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token()}`,
         },
-body: JSON.stringify({ toId: buzzRequest.fromId }),
+        body: JSON.stringify({ toId: targetId, confirm: true }),
       });
 
-      const data = await res.json();
-      console.log("👍 Accept like response:", data);
+      // We don't need to do anything with the response here.
+      // The celebration + redirect is driven entirely by the "match"
+      // socket event listener above.
+      await res.json().catch(() => null);
 
-      // Fallback direct redirect in case backend immediately returns matched:true
-   if (data?.matched) {
-  // Global overlay handles match UI + redirect
-  window.dispatchEvent(
-    new CustomEvent("match:celebrate", {
-      detail: { otherUserId: buzzRequest.fromId },
-    })
-  );
-}
-
-
-    } else {
-      // ❌ Rejected buzz → notify sender
-      socket.emit("buzz_rejected", { toId: buzzRequest.fromId });
+      setBuzzRequest(null);
+      return;
     }
+
+    // ❌ Rejected
+    socket.emit("buzz_rejected", { toId: targetId });
   } catch (err) {
     console.error("❌ respondToBuzz error:", err);
   } finally {
     setBuzzRequest(null);
   }
 }
+
+
 
 
   // Cleanup on unmount + pause scanning when tab hidden
