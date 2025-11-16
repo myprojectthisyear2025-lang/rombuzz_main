@@ -33,11 +33,12 @@ export default function MicroBuzz({ user }) {
 
       const data = await res.json();
 
-      if (data.matched) {
-        console.log("🎯 Match confirmed:", data);
-        alert("🎉 It's a match! Opening chat...");
-        navigate(`/chat/${targetId}`);
-      } else if (data.alreadyLiked) {
+     if (data.matched) {
+  window.dispatchEvent(new CustomEvent("match:celebrate", {
+    detail: { otherUserId: targetId }
+  }));
+}
+ else if (data.alreadyLiked) {
         alert("You already buzzed this person before ⚡");
       } else {
         alert("You buzzed them! Waiting for them to buzz back 👋");
@@ -51,12 +52,11 @@ export default function MicroBuzz({ user }) {
   // ---------- UI States ----------
   const [isActive, setIsActive] = useState(false);
   const [status, setStatus] = useState(
-    "Ultra-local discovery for shy moments. Turn on MicroBuzz, take a quick selfie, and we'll show nearby people who did the same. If you both tap Connect, it's an instant match."
+    "Ultra-local discovery for instant date. Turn on MicroBuzz, take a quick selfie, and we'll show nearby people who did the same. If you both tap Connect, it's an instant match."
   );
   const [error, setError] = useState("");
   const [debug, setDebug] = useState("");
   const [buzzRequest, setBuzzRequest] = useState(null);
-  const [matchData, setMatchData] = useState(null);
 
   // ---------- Media & Geolocation ----------
   const videoRef = useRef(null);
@@ -127,42 +127,28 @@ socket.on("buzz_request", (data) => {
 });
 
 
-    // 🎉 When a match happens
-    socket.on("match", (data) => {
-      console.log("🎉 Match event:", data);
-      alert("🎉 It's a match! Opening chat...");
-      const targetId = data?.otherUserId;
-      if (targetId) navigate(`/chat/${targetId}`);
-      setBuzzRequest(null);
-    });
+   socket.on("match", (data) => {
+  console.log("🎉 Match event:", data);
+
+  // Let the global overlay handle celebration + redirect
+  window.dispatchEvent(new CustomEvent("match:celebrate", { detail: data }));
+
+  // Hide MicroBuzz buzz popup
+  setBuzzRequest(null);
+});
+
 
     // 🚫 When your buzz is rejected
     socket.on("buzz_rejected", (data) => {
       console.log("❌ Buzz rejected:", data);
       alert("❌ Your buzz was rejected.");
     });
-  // 💥 When both should open each other's profile (match moment)
-  socket.on("buzz_match_open_profile", (data) => {
-    console.log("💫 buzz_match_open_profile:", data);
-    const targetId = data?.otherUserId;
-    const targetSelfie = data?.selfieUrl;
-    setMatchData({
-      otherUserId: targetId,
-      selfieUrl: targetSelfie,
-    });
-
-    // ⏳ After 2 seconds, open profile page
-    setTimeout(() => {
-      if (targetId) navigate(`/viewProfile/${targetId}`);
-      setMatchData(null);
-    }, 2000);
-  });
+  
 
     return () => {
   socket.off("buzz_request");
   socket.off("match");
   socket.off("buzz_rejected");
-  socket.off("buzz_match_open_profile");
 };
 
   }, [navigate]);
@@ -473,21 +459,32 @@ async function respondToBuzz(accepted) {
 
   try {
     if (accepted) {
-      // ✅ Send buzz back to confirm match
-      const res = await fetch(`${API_BASE}/microbuzz/buzz`, {
+      // ❤️ Correct flow: send LIKE → backend checks mutual like → match event emitted
+const res = await fetch(`${API_BASE}/microbuzz/buzz`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token()}`,
         },
-body: JSON.stringify({ toId: buzzRequest.fromId, confirm: true }),
+body: JSON.stringify({ toId: buzzRequest.fromId }),
       });
 
       const data = await res.json();
- 
+      console.log("👍 Accept like response:", data);
+
+      // Fallback direct redirect in case backend immediately returns matched:true
+   if (data?.matched) {
+  // Global overlay handles match UI + redirect
+  window.dispatchEvent(
+    new CustomEvent("match:celebrate", {
+      detail: { otherUserId: buzzRequest.fromId },
+    })
+  );
+}
+
 
     } else {
-      // ❌ Rejected buzz
+      // ❌ Rejected buzz → notify sender
       socket.emit("buzz_rejected", { toId: buzzRequest.fromId });
     }
   } catch (err) {
@@ -496,7 +493,6 @@ body: JSON.stringify({ toId: buzzRequest.fromId, confirm: true }),
     setBuzzRequest(null);
   }
 }
-
 
 
   // Cleanup on unmount + pause scanning when tab hidden
@@ -523,8 +519,15 @@ body: JSON.stringify({ toId: buzzRequest.fromId, confirm: true }),
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-900 to-pink-800 p-4 flex items-center justify-center relative overflow-hidden">
       {/* Animated Background Elements */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -left-40 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl animate-pulse"></div>
+<div
+  className="absolute inset-0 overflow-hidden"
+  style={{
+    // Disable heavy blur & glow only on mobile for stability
+    WebkitBackdropFilter: window.innerWidth < 640 ? "none" : undefined,
+    backdropFilter: window.innerWidth < 640 ? "none" : undefined,
+  }}
+>
+<div className="absolute -top-40 -left-40 w-80 h-80 bg-purple-500/20 rounded-full blur-xl sm:blur-3xl animate-pulse"></div>
         <div className="absolute -bottom-40 -right-40 w-80 h-80 bg-pink-500/20 rounded-full blur-3xl animate-pulse delay-1000"></div>
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl animate-pulse delay-500"></div>
       </div>
@@ -720,28 +723,7 @@ body: JSON.stringify({ toId: buzzRequest.fromId, confirm: true }),
           </div>
         </div>
       )}
-      {/* 💥 Match Overlay */}
-      {matchData && (
-        <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/80 backdrop-blur-md text-white animate-fade-in">
-          <h1 className="text-5xl font-extrabold mb-6 animate-bounce">💥 It’s a Match!</h1>
-          <div className="flex items-center justify-center gap-8">
-            <img
-              src={selfieUrl}
-              alt="You"
-              className="w-32 h-32 rounded-full border-4 border-pink-400 shadow-lg object-cover animate-pulse"
-            />
-            <span className="text-6xl animate-pulse">💖</span>
-            <img
-              src={matchData.selfieUrl || "https://via.placeholder.com/100"}
-              alt="Match"
-              className="w-32 h-32 rounded-full border-4 border-pink-400 shadow-lg object-cover animate-pulse"
-            />
-          </div>
-          <p className="text-white/80 mt-6 text-lg font-medium animate-fade-in">
-            Opening profiles...
-          </p>
-        </div>
-      )}
+    
 
       {/* Custom Animations */}
       <style>{`
@@ -765,8 +747,8 @@ body: JSON.stringify({ toId: buzzRequest.fromId, confirm: true }),
    Radar component (superstar edition)
 =============================== */
 function Radar({ you, users, orbits, nowMs, onBuzz }) {
-// ✅ responsive radar size: 90vw max 480px
-const size = Math.min(480, window.innerWidth * 0.9);
+// Smaller & safer on mobile → prevents cropping + reduces GPU load
+const size = Math.min(480, window.innerWidth * (window.innerWidth < 640 ? 0.78 : 0.9));
 const center = size / 2;
 
   const ringCount = 4;
@@ -941,7 +923,7 @@ const center = size / 2;
       <style>{`
                   @media (max-width: 640px) {
               .radar-container {
-                transform: scale(0.9);
+                transform: scale(0.88);
               }
             }
         @keyframes radar-sweep {

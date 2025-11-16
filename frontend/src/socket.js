@@ -119,17 +119,25 @@ socket.on("comment:new", (payload) => {
       } catch {}
     });
         // 💞 Match event → trigger global RomBuzz celebration
-    socket.on("match", (payload) => {
-      console.log("💞 match event received:", payload);
-      try {
-        // payload shape from backend: { otherUserId }
-        window.dispatchEvent(
-          new CustomEvent("match:celebrate", { detail: payload })
-        );
-      } catch (e) {
-        console.error("match:celebrate dispatch failed:", e);
-      }
-    });
+   socket.on("match", (payload) => {
+  console.log("💞 match event received:", payload);
+
+  // 💫 Play RomBuzz ding sound
+  try {
+    const audio = new Audio("https://assets.mixkit.co/sfx/preview/mixkit-achievement-bell-600.mp3");
+    audio.volume = 0.7;
+    audio.play().catch(() => {});
+  } catch {}
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent("match:celebrate", { detail: payload })
+    );
+  } catch (e) {
+    console.error("match:celebrate dispatch failed:", e);
+  }
+});
+
 
 
       // ✅ Optional badge reset listener
