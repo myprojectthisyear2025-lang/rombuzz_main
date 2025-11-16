@@ -180,8 +180,26 @@ router.post("/buzz", authMiddleware, async (req, res) => {
 const alreadyMatched = await Match.findOne({ users: { $all: [fromId, toId] } });
 
 if (alreadyMatched) {
+  // 🔁 They were matched before (Discover, old flow, etc.)
+  // Still behave like a fresh match so both see animation + redirect to chat.
+  const fromUser = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
+  const toUser = await MicroBuzzPresence.findOne({ userId: toId }).lean();
+
+  [fromId, toId].forEach((uid) => {
+    const other = uid === fromId ? toId : fromId;
+    const otherSelfie = uid === fromId ? toUser?.selfieUrl : fromUser?.selfieUrl;
+
+    if (onlineUsers[uid]) {
+      io.to(onlineUsers[uid]).emit("match", {
+        otherUserId: other,
+        selfieUrl: otherSelfie,
+      });
+    }
+  });
+
   return res.json({ matched: true });
 }
+
 
   /* ============================================================
      MUTUAL BUZZ → MATCH (loop-proof)
