@@ -1,9 +1,14 @@
+//frontend/src/pages/settings
+
+
 import React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   FaUserCog, FaShieldAlt, FaLock, FaBell, FaUserShield,
-  FaMapMarkerAlt, FaCreditCard, FaDownload, FaQuestionCircle, FaTrash
+  FaMapMarkerAlt, FaCreditCard, FaDownload, FaQuestionCircle, FaTrash,
+  FaSlidersH // 🎚 Preferences icon
 } from "react-icons/fa";
+
 
 const NAV = [
   { to: "", label: "Account", icon: <FaUserCog /> },
@@ -11,6 +16,10 @@ const NAV = [
   { to: "privacy", label: "Privacy", icon: <FaLock /> },
   { to: "notifications", label: "Notifications", icon: <FaBell /> },
   { to: "visibility", label: "Profile & Visibility", icon: <FaUserShield /> },
+
+  // 💖 New: global match preferences for Discover + MicroBuzz
+  { to: "preferences", label: "Preferences", icon: <FaSlidersH /> },
+
   { to: "blocking", label: "Blocking", icon: <FaUserShield /> },
   { to: "location", label: "Location", icon: <FaMapMarkerAlt /> },
   { to: "payments", label: "Payments", icon: <FaCreditCard /> },
@@ -18,6 +27,7 @@ const NAV = [
   { to: "help", label: "Help & Support", icon: <FaQuestionCircle /> },
   { to: "delete", label: "Delete Account", icon: <FaTrash />, danger: true },
 ];
+
 
 export default function SettingsLayout() {
   // useLocation can be removed if you don't need it anywhere else

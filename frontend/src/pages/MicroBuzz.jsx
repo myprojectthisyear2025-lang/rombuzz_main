@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 //const API_BASE = "http://localhost:4000/api";
 //const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com/api";
 import { API_BASE } from "../config";
+import Radar from "../components/Radar";   // ← ADD THIS
 
 const socket = io(process.env.REACT_APP_SOCKET_URL || "https://rombuzz-api.onrender.com");
 
@@ -57,12 +58,35 @@ export default function MicroBuzz({ user }) {
   const [error, setError] = useState("");
   const [debug, setDebug] = useState("");
   const [buzzRequest, setBuzzRequest] = useState(null);
+// ---------- Tips Carousel ----------
+const tips = [
+  "Long press any avatar to peek their selfie",
+  "People around you will appear here",
+  "Stay a little, someone may pop up",
+  "Blinking tiny dots = filtered out users",
+  "You're only shown to people you match with",
+  "MicroBuzz shows people of your preferences",
+  "You can extend your search by changing your preferences",
+  "If you both Buzz each other → instant match. No swiping, no waiting ⚡"
+];
+
+const [tipIndex, setTipIndex] = useState(0);
+
+useEffect(() => {
+  const interval = setInterval(() => {
+    setTipIndex((prev) => (prev + 1) % tips.length);
+  }, 3500);
+  return () => clearInterval(interval);
+}, []);
 
   // ---------- Media & Geolocation ----------
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const [selfieUrl, setSelfieUrl] = useState("");
+   const [selfieUrl, setSelfieUrl] = useState("");
   const [coords, setCoords] = useState(null);
+
+  // 🔍 Enlarged-preview target for long-press / right-click
+  const [previewUser, setPreviewUser] = useState(null);
 
   // ---------- Nearby Scanning ----------
   const [nearby, setNearby] = useState([]);
@@ -97,12 +121,18 @@ export default function MicroBuzz({ user }) {
     console.log("🟣 Socket connected & user:register:", currentUser.id);
   });
 }
-
-
     return () => {
       socket.off("connect");
     };
   }, []);
+  // 🔒 Freeze background scroll on mobile (prevents jump/glitch)
+useEffect(() => {
+  document.body.style.overflow = "hidden";
+  return () => {
+    document.body.style.overflow = "";
+  };
+}, []);
+
 
   // Listen for buzz requests, matches, and rejections
   useEffect(() => {
@@ -152,11 +182,9 @@ socket.on("buzz_accept", (data) => {
   socket.off("buzz_request");
   socket.off("match");
   socket.off("buzz_rejected");
-    socket.off("buzz_accept");   // ✅ REQUIRED FIX
-
-};
-
-  }, [navigate]);
+    socket.off("buzz_accept");   
+  };
+}, [navigate]);
 
   // =====================================================
   // 🔧 CAMERA + SCANNING (unchanged from your last version)
@@ -310,7 +338,18 @@ socket.on("buzz_accept", (data) => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token()}`,
       },
-      body: JSON.stringify({ lat: pos.lat, lng: pos.lng, selfieUrl: selfie }),
+body: JSON.stringify({
+  lat: pos.lat,
+  lng: pos.lng,
+  selfieUrl: selfie,
+
+  // NEW → preferences
+  gender: user?.gender,
+  lookingFor: user?.lookingFor,
+  interestedIn: user?.interestedIn || [],
+  minAge: user?.preferences?.minAge || 18,
+  maxAge: user?.preferences?.maxAge || 99,
+}),
       signal: abortRef.current.signal,
     });
     const data = await safeJson(res);
@@ -357,9 +396,16 @@ socket.on("buzz_accept", (data) => {
       setError("");
 
       const url = new URL(`${API_BASE}/microbuzz/nearby`);
-      url.searchParams.set("lat", String(pos.lat));
-      url.searchParams.set("lng", String(pos.lng));
-      url.searchParams.set("radius", "0.75"); // ~750m for testing
+    url.searchParams.set("lat", String(pos.lat));
+url.searchParams.set("lng", String(pos.lng));
+url.searchParams.set("radius", "0.75");
+
+// NEW → send user preferences
+url.searchParams.set("gender", user?.gender || "");
+url.searchParams.set("lookingFor", user?.lookingFor || "");
+url.searchParams.set("interestedIn", JSON.stringify(user?.interestedIn || []));
+url.searchParams.set("minAge", user?.preferences?.minAge || 18);
+url.searchParams.set("maxAge", user?.preferences?.maxAge || 99);
 
       abortRef.current?.abort();
       abortRef.current = new AbortController();
@@ -522,7 +568,10 @@ async function respondToBuzz(accepted) {
 
   // -------- Render
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-900 to-pink-800 p-4 flex items-center justify-center relative overflow-hidden">
+<div
+  className="bg-gradient-to-br from-purple-900 via-indigo-900 to-pink-800 p-4 flex items-center justify-center relative overflow-hidden"
+  style={{ height: "100dvh" }}   
+>
       {/* Animated Background Elements */}
 <div
   className="absolute inset-0 overflow-hidden"
@@ -638,19 +687,70 @@ async function respondToBuzz(accepted) {
             </div>
           )}
 
-          {/* Radar */}
-          {isActive && (
-            <div className="relative mx-auto mt-4 mb-4">
+                  {/* Radar + inline selfie preview */}
+              {/* Preference Selector */}
+              <div className="flex justify-center mb-4 gap-3">
+                <select
+                  className="bg-black/40 text-white px-4 py-2 rounded-xl border border-white/20"
+                  value={user?.lookingFor || ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    user.lookingFor = val;
+                    localStorage.setItem("user", JSON.stringify(user));
+                  }}
+                >
+                  <option value="">Show: Everyone</option>
+                  <option value="male">Show: Men</option>
+                  <option value="female">Show: Women</option>
+                  <option value="nonbinary">Show: Non-binary</option>
+                </select>
+              </div>
+
+                {/* Tips Carousel */}
+                <div className="w-full text-center mb-4">
+                  <p className="animate-fade-in text-white/80 text-sm font-medium bg-white/10 px-4 py-2 inline-block rounded-xl border border-white/20 shadow-lg">
+                    {tips[tipIndex]}
+                  </p>
+                </div>
+
               <Radar
                 you={selfieUrl}
                 users={nearby}
                 orbits={orbitsRef.current}
                 nowMs={now}
                 onBuzz={handleBuzz}
+                onPreviewStart={(u) => setPreviewUser(u)}
+                onPreviewEnd={() => setPreviewUser(null)}
               />
-            </div>
-          )}
 
+              {/* Long-press / hold preview overlay (same screen) */}
+              {previewUser && (
+                <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
+                  <div className="pointer-events-auto bg-black/40 rounded-full p-1 backdrop-blur-sm">
+                    <div className="relative w-56 h-56 sm:w-64 sm:h-64 rounded-3xl overflow-hidden border-4 border-pink-400 shadow-[0_20px_60px_rgba(0,0,0,0.65)] animate-soft-pop">
+                      <img
+                        src={
+                          previewUser.selfieUrl ||
+                          "https://via.placeholder.com/300?text=Nearby"
+                        }
+                        alt="MicroBuzz preview"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute bottom-3 left-3 text-[11px] sm:text-xs bg-black/50 text-white px-3 py-1.5 rounded-full flex items-center gap-2">
+                        <span>👀 Live preview</span>
+                        {typeof previewUser.distanceMeters === "number" && (
+                          <span className="text-white/70">
+                            · {Math.round(previewUser.distanceMeters)} m
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          
+    
           {/* Debug (optional) */}
           {debug && (
             <pre className="text-[11px] text-white/50 bg-black/30 border border-white/10 rounded-xl p-3 mt-4 overflow-x-auto backdrop-blur-sm">
@@ -667,8 +767,7 @@ async function respondToBuzz(accepted) {
             </div>
           )}
         </div>
-      </div>
-
+  
       {/* Buzz Request Popup */}
       {buzzRequest && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-xl">
@@ -688,13 +787,11 @@ async function respondToBuzz(accepted) {
                   <div className="absolute inset-0 rounded-2xl border-2 border-pink-400 animate-ping opacity-60"></div>
                 </div>
                 
-                <h3 className="text-2xl font-black text-white mt-6 mb-2">
-                  💌 Buzz Incoming!
-                </h3>
-                
-                <p className="text-xl font-semibold text-white/90 mb-1">
-                  {buzzRequest.name || "Someone nearby"}
-                </p>
+               <h3 className="text-2xl font-black text-white mt-6 mb-2">
+                💌 {buzzRequest.name || "Someone nearby"} wants to buzz you
+              </h3>
+
+
 
                 {buzzRequest.distanceMeters && (
                   <p className="text-white/60 text-sm mb-6">
@@ -702,9 +799,10 @@ async function respondToBuzz(accepted) {
                   </p>
                 )}
 
-                <p className="text-white/70 text-sm mb-8 leading-relaxed">
-                  Accept to start chatting instantly, or dismiss to pass on this connection.
+               <p className="text-white/70 text-sm mb-8 leading-relaxed">
+                  Accept to connect instantly, or dismiss to pass.
                 </p>
+
 
                 {/* Action Buttons */}
                 <div className="flex justify-center gap-4">
@@ -730,7 +828,7 @@ async function respondToBuzz(accepted) {
       )}
     
 
-      {/* Custom Animations */}
+        {/* Custom Animations */}
       <style>{`
         @keyframes fade-in {
           from { opacity: 0; transform: scale(0.95) translateY(10px); }
@@ -743,209 +841,29 @@ async function respondToBuzz(accepted) {
         }
         .animate-fade-in { animation: fade-in 0.3s ease-out; }
         .animate-pop-in { animation: pop-in 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+
+        /* Soft pop for long-press selfie preview */
+        @keyframes soft-pop {
+          0% { opacity: 0; transform: scale(0.85) translateY(10px); }
+          50% { opacity: 1; transform: scale(1.03) translateY(0); }
+          100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .animate-soft-pop {
+          animation: soft-pop 0.28s ease-out;
+        }
+          /* Fade animation for rotating tips */
+              @keyframes tip-fade {
+                0% { opacity: 0; transform: translateY(4px); }
+                10% { opacity: 1; transform: translateY(0); }
+                90% { opacity: 1; transform: translateY(0); }
+                100% { opacity: 0; transform: translateY(-4px); }
+              }
+              .animate-fade-in {
+                animation: tip-fade 0.5s ease-out;
+              }
+      
       `}</style>
+ 
     </div>
   );
-}
-
-/* ============================
-   Radar component (superstar edition)
-=============================== */
-function Radar({ you, users, orbits, nowMs, onBuzz }) {
-// Smaller & safer on mobile → prevents cropping + reduces GPU load
-const size = Math.min(480, window.innerWidth * (window.innerWidth < 640 ? 0.78 : 0.9));
-const center = size / 2;
-
-  const ringCount = 4;
-  const maxRadius = size / 2 - 20;
-
-  const tSec = (nowMs || 0) / 1000;
-
-  // Compute positions
-  const items = (users || []).map((u, idx) => {
-    const seed = orbits[u.id] || { angle0: 0, speed: 0.5, radiusFactor: 0.7 };
-    const radius = Math.max(60, maxRadius * seed.radiusFactor);
-    const angle = seed.angle0 + seed.speed * tSec + idx * 0.35;
-    const x = center + radius * Math.cos(angle);
-    const y = center + radius * Math.sin(angle);
-    return { ...u, x, y };
-  });
-
-  return (
-  <div className="w-full flex justify-center overflow-hidden">
-<div className="relative mx-auto radar-container" style={{ width: size, height: size }}>
-
-      {/* Outer glow container */}
-      <div className="absolute inset-0 rounded-full bg-gradient-to-r from-purple-500/30 to-pink-500/30 blur-xl animate-pulse"></div>
-      
-      {/* Main radar */}
-      <div
-        className="rounded-full shadow-2xl overflow-hidden relative border-2 border-white/10"
-        style={{
-          width: size,
-          height: size,
-          background: `
-            radial-gradient(
-              circle at center,
-              rgba(168, 85, 247, 0.15) 0%,
-              rgba(126, 34, 206, 0.25) 40%,
-              rgba(236, 72, 153, 0.35) 100%
-            )
-          `,
-          
-        }}
-        
-      >
-        {/* Grid rings with glow */}
-        {[...Array(ringCount)].map((_, i) => {
-          const r = ((i + 1) / ringCount) * maxRadius * 2;
-          return (
-            <div
-              key={i}
-              className="absolute rounded-full border border-purple-400/40 shadow-inner"
-              style={{
-                width: r,
-                height: r,
-                top: center - r / 2,
-                left: center - r / 2,
-                boxShadow: 'inset 0 0 20px rgba(168, 85, 247, 0.3)'
-              }}
-            />
-          );
-        })}
-
-        {/* Crosshairs */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-full h-px bg-purple-400/30"></div>
-        </div>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="h-full w-px bg-purple-400/30"></div>
-        </div>
-
-        {/* Sweep line with enhanced glow */}
-        <div
-          className="absolute"
-          style={{
-            width: size,
-            height: size,
-            top: 0,
-            left: 0,
-            background: `
-              conic-gradient(
-                from 0deg,
-                transparent 0deg,
-                rgba(236, 72, 153, 0.6) 15deg,
-                rgba(168, 85, 247, 0.8) 30deg,
-                transparent 60deg
-              )
-            `,
-            animation: "radar-sweep 3s linear infinite",
-            mixBlendMode: "screen",
-            pointerEvents: "none",
-          }}
-        />
-
-        {/* You (center) with enhanced styling */}
-        <div
-          className="absolute rounded-2xl border-4 border-pink-400 shadow-2xl transform hover:scale-110 transition-transform duration-300 cursor-pointer"
-          style={{
-            width: 80,
-            height: 80,
-            top: center - 40,
-            left: center - 40,
-            backgroundColor: "#fff",
-            overflow: "hidden",
-            boxShadow: `
-              0 0 0 8px rgba(236, 72, 153, 0.3),
-              0 0 30px rgba(236, 72, 153, 0.5)
-            `,
-          }}
-        >
-          {you ? (
-            <img src={you} alt="You" className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center">
-              <span className="text-white text-2xl">👤</span>
-            </div>
-          )}
-        </div>
-
-        {/* Nearby avatars (enhanced) */}
-        {items.map((u) => (
-          <div
-            key={u.id}
-            onClick={() => onBuzz(u.id)}
-            className="absolute rounded-2xl border-3 border-purple-400 hover:scale-125 transition-all duration-300 cursor-pointer shadow-2xl group"
-            title={`${u.name || "Nearby"} • ${
-              u.distanceMeters ? Math.round(u.distanceMeters) + "m" : ""
-            }`}
-            style={{
-              width: 68,
-              height: 68,
-              top: u.y - 34,
-              left: u.x - 34,
-              overflow: "hidden",
-              backgroundColor: "#fff",
-              boxShadow: `
-                0 10px 30px rgba(0,0,0,0.3),
-                0 0 0 3px rgba(168, 85, 247, 0.8)
-              `,
-            }}
-          >
-            <img
-              src={u.selfieUrl || "https://via.placeholder.com/68?text=User"}
-              alt={u.name || "Nearby"}
-              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-            />
-            
-            {/* Distance badge */}
-            {u.distanceMeters && (
-              <div className="absolute -bottom-2 -right-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg">
-                {Math.round(u.distanceMeters)}m
-              </div>
-            )}
-            
-            {/* Hover glow */}
-            <div className="absolute inset-0 rounded-2xl border-2 border-transparent group-hover:border-white group-hover:shadow-[0_0_20px_rgba(255,255,255,0.8)] transition-all duration-300"></div>
-          </div>
-        ))}
-
-        {/* Pulsing center dot */}
-        <div
-          className="absolute rounded-full bg-green-400 shadow-lg"
-          style={{
-            width: 12,
-            height: 12,
-            top: center - 6,
-            left: center - 6,
-            animation: "pulse 2s infinite",
-            boxShadow: "0 0 0 0 rgba(74, 222, 128, 0.7)"
-          }}
-        ></div>
-      </div>
-            
-      {/* Enhanced Styles */}
-      <style>{`
-                  @media (max-width: 640px) {
-              .radar-container {
-                transform: scale(0.88);
-              }
-            }
-        @keyframes radar-sweep {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        @keyframes pulse {
-          0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
-          70% { box-shadow: 0 0 0 10px rgba(74, 222, 128, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
-        }
-      `}</style>
-    </div>
-    
-      
-  
-    </div>
-    );
- 
 }

@@ -1,8 +1,9 @@
 // src/pages/settings/index.js  (a.k.a. Account page)
 import React, { useEffect, useMemo, useState } from "react";
+import { API_BASE } from "../../config";
 
-const API_BASE = "http://localhost:4000/api";
-const token = () => localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+const token = () =>
+  localStorage.getItem("token") || sessionStorage.getItem("token") || "";
 
 function msToDays(ms) {
   return Math.max(0, Math.ceil(ms / (24*60*60*1000)));

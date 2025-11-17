@@ -39,6 +39,7 @@ import Payments from "./pages/settings/Payments";
 import YourInfo from "./pages/settings/YourInfo";
 import Help from "./pages/settings/Help";
 import DeleteAccount from "./pages/settings/DeleteAccount";
+import Preferences from "./pages/settings/Preferences";
 import Signup from "./pages/Signup"; // ⬅️ Add this import near the top
 
 /*const API_BASE = "https://rombuzz-api.onrender.com/api";
@@ -228,7 +229,8 @@ useEffect(() => {
             <Route path="security" element={<Security />} />
             <Route path="privacy" element={<Privacy />} />
             <Route path="notifications" element={<Notifications />} />
-            <Route path="visibility" element={<Visibility />} />
+           <Route path="visibility" element={<Visibility />} />
+           <Route path="preferences" element={<Preferences />} />
             <Route path="blocking" element={<Blocking />} />
             <Route path="location" element={<Location />} />
             <Route path="payments" element={<Payments />} />
