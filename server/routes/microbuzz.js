@@ -38,6 +38,8 @@ const { getIO } = require("../socket");
 const MicroBuzzPresence = require("../models/MicroBuzzPresence");
 const MicroBuzzBuzz = require("../models/MicroBuzzBuzz");
 const Match = require("../models/Match");
+const User = require("../models/User"); // ✅ needed for gender/age filters
+
 
 /* ============================================================
    📸 SELFIE UPLOAD
@@ -101,42 +103,116 @@ router.post("/activate", authMiddleware, async (req, res) => {
 });
 
 /* ============================================================
-   🧭 FETCH NEARBY ACTIVE USERS
+   🧭 FETCH NEARBY ACTIVE USERS (with gender + age preferences)
 ============================================================ */
 router.get("/nearby", authMiddleware, async (req, res) => {
   try {
     const lat = parseFloat(req.query.lat);
     const lng = parseFloat(req.query.lng);
-    const radiusKm = parseFloat(req.query.radius || "1");
     const userId = req.user.id;
 
     if (isNaN(lat) || isNaN(lng)) {
       return res.status(400).json({ error: "lat/lng required" });
     }
 
+    // 🧑 Get current user + saved preferences
+    const self = await User.findOne({ id: userId }).lean();
+    if (!self) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const prefs = self.preferences || {};
+    const prefGender = (prefs.gender || "").toLowerCase();           // "male" | "female" | "everyone" | ""
+    const prefAgeMin = Number(prefs.ageMin) || null;                 // e.g. 21
+    const prefAgeMax = Number(prefs.ageMax) || null;                 // e.g. 35
+
+    // 🛰 Discover can go far, but MicroBuzz is ultra-local.
+    // Clamp max radius to ~100m in production.
+    const requestedRadiusKm = parseFloat(req.query.radius || "0.1"); // default 100m
+    const maxRadiusKm = process.env.NODE_ENV === "production" ? 0.1 : 1; // dev can scan wider
+    const radiusKm = Math.min(
+      Number.isFinite(requestedRadiusKm) ? requestedRadiusKm : 0.1,
+      maxRadiusKm
+    );
+
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
+    // 🌐 Raw active presences near me (except myself)
     const allActive = await MicroBuzzPresence.find({
       updatedAt: { $gte: fiveMinutesAgo },
       userId: { $ne: userId },
     }).lean();
 
+    if (!allActive.length) {
+      return res.json({ users: [] });
+    }
+
+    // 🔎 Load user profiles for these presences (to get gender + dob)
+    const candidateIds = [...new Set(allActive.map((u) => u.userId))];
+    const candidateUsers = await User.find({ id: { $in: candidateIds } })
+      .select("id gender dob")
+      .lean();
+
+    const usersById = new Map(candidateUsers.map((u) => [u.id, u]));
+
     const users = allActive
-      .map((u) => {
-        const d = Math.sqrt((u.lat - lat) ** 2 + (u.lng - lng) ** 2) * 111;
+      .map((presence) => {
+        const u = usersById.get(presence.userId);
+
+        // Distance in meters between me and this presence
+        const dKm =
+          Math.sqrt((presence.lat - lat) ** 2 + (presence.lng - lng) ** 2) *
+          111;
+        const distanceMeters = dKm * 1000;
+
         return {
-          id: u.userId,
-          selfieUrl: u.selfieUrl,
-          distanceMeters: d * 1000,
+          id: presence.userId,
+          selfieUrl: presence.selfieUrl,
+          distanceMeters,
+          _user: u || null, // attach for filtering only
         };
       })
-      .filter((u) => u.distanceMeters <= radiusKm * 1000 || process.env.NODE_ENV !== "production");
+      // 1) Distance cap: MicroBuzz hard-locked to ~0–100m in prod
+      .filter((item) => {
+        if (process.env.NODE_ENV !== "production") return true;
+        return item.distanceMeters <= radiusKm * 1000;
+      })
+      // 2) Gender preference filter
+      .filter((item) => {
+        const u = item._user;
+        if (!u) return true; // no profile -> keep (we just don't know)
+        if (!prefGender || prefGender === "everyone") return true;
 
-    res.json({ users });
+        const g = (u.gender || "").toLowerCase();
+        if (!g) return false; // user wants a specific gender, target has none -> skip
+
+        if (prefGender === "male") return g === "male";
+        if (prefGender === "female") return g === "female";
+        return true;
+      })
+      // 3) Age preference filter (mm/dd/yyyy or ISO dob)
+      .filter((item) => {
+        if (!prefAgeMin && !prefAgeMax) return true;
+        const u = item._user;
+        if (!u || !u.dob) return true; // unknown age -> keep
+
+        const age = computeAge(u.dob);
+        if (!age) return true;
+
+        const minAge = prefAgeMin || 18;
+        const maxAge = prefAgeMax || 120;
+        return age >= minAge && age <= maxAge;
+      })
+      // 4) Strip internal fields before sending to client
+      .map(({ _user, ...rest }) => rest);
+
+    return res.json({ users });
   } catch (err) {
     console.error("❌ /api/microbuzz/nearby error:", err);
     res.status(500).json({ error: "Nearby fetch failed" });
   }
 });
+
 
 /* ============================================================
    🚫 DEACTIVATE PRESENCE
@@ -280,5 +356,34 @@ if (reverseBuzz) {
     res.status(500).json({ error: "Buzz failed" });
   }
 });
+// Simple DOB → age helper (supports "mm/dd/yyyy" or ISO/Date-parsable)
+function computeAge(dobStr) {
+  if (!dobStr) return null;
+
+  let d;
+  const raw = String(dobStr).trim();
+
+  // mm/dd/yyyy (signup format)
+  if (raw.includes("/")) {
+    const parts = raw.split(/[\/\-]/).map((n) => parseInt(n, 10));
+    if (parts.length !== 3) return null;
+    const [month, day, year] = parts;
+    if (!month || !day || !year) return null;
+    d = new Date(year, month - 1, day);
+  } else {
+    // fallback: ISO or Date-parsable
+    d = new Date(raw);
+  }
+
+  if (Number.isNaN(d.getTime())) return null;
+
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) {
+    age--;
+  }
+  return age;
+}
 
 module.exports = router;

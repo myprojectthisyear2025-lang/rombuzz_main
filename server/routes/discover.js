@@ -54,7 +54,15 @@ router.get("/", authMiddleware, async (req, res) => {
 
     const me = self;
 
+    // 💖 Saved preferences (from Settings → Preferences)
+    const prefs = self.preferences || {};
+    const prefGender = (prefs.gender || "").toLowerCase();               // "male" | "female" | "everyone" | ""
+    const prefAgeMin = Number(prefs.ageMin) || null;                     // e.g. 21
+    const prefAgeMax = Number(prefs.ageMax) || null;                     // e.g. 35
+    const prefDiscoverKm = Number(prefs.discoverDistanceKm) || null;     // e.g. 25
+
     const requestedVibe = String(req.query.vibe || "").toLowerCase();
+
     let allowRequestedVibe = true;
 
     // Restricted vibes require premium/verified gate
@@ -131,15 +139,20 @@ router.get("/", authMiddleware, async (req, res) => {
     /* ---------------------------
        4) Base Mongo query (no distance yet)
     --------------------------- */
-    const baseQuery = {
+      const baseQuery = {
       id: { $nin: excludeIds },
       visibility: { $ne: "invisible" },
     };
 
     // Simple filters we can push into Mongo query
     if (gender) {
+      // explicit URL override
       baseQuery.gender = new RegExp(`^${escapeRegex(gender)}$`, "i");
+    } else if (prefGender && prefGender !== "everyone") {
+      // 💗 default from saved preference
+      baseQuery.gender = new RegExp(`^${escapeRegex(prefGender)}$`, "i");
     }
+
     if (intent) {
       baseQuery.intent = new RegExp(`^${escapeRegex(intent)}$`, "i");
     }
@@ -183,11 +196,25 @@ router.get("/", authMiddleware, async (req, res) => {
       return { ...u, distanceMeters, _lastActive: lastActive, _status: status };
     });
 
-    /* ---------------------------
+     /* ---------------------------
        6) Apply non-distance filters
-           interest / blur / online
+           age / interest / blur / online
            + hidden visibilityMode
     --------------------------- */
+
+    // 🎂 Age preference (from Settings → Preferences)
+    if (prefAgeMin || prefAgeMax) {
+      const minAge = prefAgeMin || 18;
+      const maxAge = prefAgeMax || 120;
+
+      candidates = candidates.filter((u) => {
+        if (!u.dob) return true; // keep if we don't know their DOB
+        const age = computeAge(u.dob);
+        if (!age) return true;
+        return age >= minAge && age <= maxAge;
+      });
+    }
+
     if (interest) {
       const interestLower = String(interest).toLowerCase();
       candidates = candidates.filter((u) =>
@@ -196,6 +223,7 @@ router.get("/", authMiddleware, async (req, res) => {
           .includes(interestLower)
       );
     }
+
 
     if (blur) {
       candidates = candidates.filter((u) =>
@@ -217,14 +245,25 @@ router.get("/", authMiddleware, async (req, res) => {
       (u) => (u.visibilityMode || "auto") !== "hidden"
     );
 
-    /* ---------------------------
+      /* ---------------------------
        7) Apply Option A fallback
           distance pools
-          - start with requested or 10km
+          - start with requested, else saved preference, else 10km
           - 25km → 50km → 100km → global
     --------------------------- */
-    const requestedRangeMeters =
-      Number(range) > 0 ? Number(range) : 10_000; // 10km default
+    let requestedRangeMeters;
+    const rangeFromQuery = Number(range);
+
+    if (rangeFromQuery > 0) {
+      // Explicit override from client
+      requestedRangeMeters = rangeFromQuery;
+    } else if (prefDiscoverKm && prefDiscoverKm > 0) {
+      // Saved preference (Settings → Preferences)
+      requestedRangeMeters = prefDiscoverKm * 1000;
+    } else {
+      // Safe default
+      requestedRangeMeters = 10_000; // 10km
+    }
 
     const radiusSteps = [
       requestedRangeMeters,
@@ -426,10 +465,40 @@ function getDistanceMeters(lat1, lon1, lat2, lon2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
-
 // Escape regex special chars for safe query building
 function escapeRegex(str = "") {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Simple DOB → age helper (supports "mm/dd/yyyy" or ISO/Date-parsable)
+function computeAge(dobStr) {
+  if (!dobStr) return null;
+
+  let d;
+  const raw = String(dobStr).trim();
+
+  // mm/dd/yyyy (your signup format)
+  if (raw.includes("/")) {
+    const parts = raw.split(/[\/\-]/).map((n) => parseInt(n, 10));
+    if (parts.length !== 3) return null;
+    const [month, day, year] = parts;
+    if (!month || !day || !year) return null;
+    d = new Date(year, month - 1, day);
+  } else {
+    // fallback for "YYYY-MM-DD" or ISO strings
+    d = new Date(raw);
+  }
+
+  if (Number.isNaN(d.getTime())) return null;
+
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) {
+    age--;
+  }
+  return age;
+}
+
 module.exports = router;
+

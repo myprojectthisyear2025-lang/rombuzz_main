@@ -176,7 +176,8 @@ router.put("/me", authMiddleware, async (req, res) => {
       "firstName", "lastName", "dob", "gender", "bio", "location",
       "visibility", "avatar", "phone", "interests", "favorites",
       "orientation", "hobbies", "vibe", "filterVibe", "premiumTier",
-      "settings", "visibilityMode", "fieldVisibility"
+      "settings", "visibilityMode", "fieldVisibility",
+      "preferences"
     ];
 
     const updates = {};
