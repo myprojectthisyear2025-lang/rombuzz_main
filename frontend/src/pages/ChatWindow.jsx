@@ -25,7 +25,7 @@ import { FullscreenViewer } from "../components/FullscreenViewer";
 import { API_BASE } from "../config";
 
 //const API_BASE = "http://localhost:4000";
-const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com";
+//const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com";
 
 // STUN for NAT traversal (add TURN in prod)
 const ICE_CONFIG = {
