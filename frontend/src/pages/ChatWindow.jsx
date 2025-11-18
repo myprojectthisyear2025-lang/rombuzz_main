@@ -1070,7 +1070,10 @@ const matchesQuery = (msg, q) => {
 
   // ============= render =============
   return (
-    <main className={`flex flex-col h-full min-h-0 ${themeCls.wrap}`}>
+<main
+  className={`flex flex-col ${themeCls.wrap}`}
+  style={{ height: "100vh", maxHeight: "100vh", overflow: "hidden" }}
+>
       {/* Header */}
       <div className={`h-[56px] sticky top-0 z-30 flex items-center justify-between px-3 border-b shadow-sm ${themeCls.pane}`}>
 <div className="flex flex-wrap items-center gap-2 sm:gap-3 overflow-x-auto">
@@ -1340,13 +1343,18 @@ onClose?.();
       </div>
 
             {/* Messages */}
-        <div
-          className={`
-            flex-1 min-h-0 overflow-y-auto px-3 md:px-4 py-2 space-y-1.5
-            ${themeCls.messages}
-          `}
-          style={{ paddingBottom: "90px" }} // ensure space above composer
-        >
+                <div
+            className={`
+              flex-1 overflow-y-auto px-3 md:px-4 py-2 space-y-1.5
+              ${themeCls.messages}
+            `}
+            style={{
+              height: "calc(100vh - 116px)", // header + composer height
+              maxHeight: "calc(100vh - 116px)",
+              paddingBottom: "80px",
+            }}
+          >
+
           {messages
           .filter((m) => !hiddenIds[m.id])
           .map((raw) => {
