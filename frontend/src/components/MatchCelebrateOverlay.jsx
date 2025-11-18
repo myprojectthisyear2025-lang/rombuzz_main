@@ -143,15 +143,14 @@ useEffect(() => {
   };
 
   if (!visible) return null;
+// Always show "You" on the left
+const myName = "You";
 
- const myName =
-  (myUser && myUser.firstName) ||
-  "You";
-
-
- const matchName =
+// Try to show real name only for the OTHER person
+const matchName =
   (matchUser && matchUser.firstName) ||
-  "Your new match";
+  "your match";
+
 
 
   const matchAvatar =
@@ -213,11 +212,10 @@ useEffect(() => {
           <h2 className="text-3xl md:text-4xl font-extrabold drop-shadow-sm">
             It&apos;s a Match! 💫
           </h2>
-         <p className="text-sm md:text-base text-rose-50/90 max-w-xs">
-  {myName} &amp; {matchName} just unlocked each other.<br />
-  Profiles are open, vibes are buzzing — start talking before the spark cools down.
-</p>
-
+      <p className="text-sm md:text-base text-rose-50/90 max-w-xs">
+        You &amp; {matchName} are a match!<br />
+        Profiles are open - start chatting before the spark cools down.
+      </p>
 
           {/* Avatar row */}
           <div className="mt-3 mb-4 flex items-center justify-center gap-6">

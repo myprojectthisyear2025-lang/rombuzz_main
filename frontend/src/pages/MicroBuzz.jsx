@@ -53,7 +53,7 @@ export default function MicroBuzz({ user }) {
   // ---------- UI States ----------
   const [isActive, setIsActive] = useState(false);
   const [status, setStatus] = useState(
-    "Ultra-local discovery for instant date. Turn on MicroBuzz, take a quick selfie, and we'll show nearby people who did the same. If you both tap Connect, it's an instant match."
+    "Super-fast way to find a date. Click on Activate MicroBuzz, take a quick selfie, and we'll show nearby people who did the same. If you both tap Connect, it's an instant match."
   );
   const [error, setError] = useState("");
   const [debug, setDebug] = useState("");
@@ -149,8 +149,14 @@ socket.on("buzz_request", (data) => {
 
   // Fallbacks so the popup always renders
   if (!data.selfieUrl) data.selfieUrl = "https://via.placeholder.com/100";
-  if (!data.name) data.name = "Someone nearby";
+  // Normalize name (priority: firstName → name → fallback)
+  const safeName =
+    data.firstName ||
+    data.name ||
+    (data.fromUser && (data.fromUser.firstName || data.fromUser.name)) ||
+    "Someone nearby";
 
+  data.name = safeName;
   // Confirm in console that it's being rendered
   console.log("✅ Showing buzz popup for:", data.name, data.selfieUrl);
 
@@ -606,7 +612,7 @@ async function respondToBuzz(accepted) {
                 <h1 className="text-3xl sm:text-4xl font-black bg-gradient-to-r from-white to-purple-200 bg-clip-text text-transparent">
                   MicroBuzz
                 </h1>
-                <p className="text-purple-200/80 text-sm font-medium">Live Nearby Discovery</p>
+                <p className="text-purple-200/80 text-sm font-medium">Real-time match finder</p>
               </div>
             </div>
             <span className="bg-gradient-to-r from-yellow-400 to-orange-500 text-black text-xs font-bold px-3 py-2 rounded-full shadow-lg animate-pulse">
@@ -683,7 +689,7 @@ async function respondToBuzz(accepted) {
                 />
               </div>
               <p className="text-white/60 text-xs text-center mt-3">
-                Position your face and click "📸 Take Selfie & Start".<br />
+                Click Activate Microbuzz, Position your face and click "📸 Take Selfie & Start".<br />
                 Your camera will turn off after the selfie is taken.
               </p>
             </div>
@@ -752,7 +758,7 @@ async function respondToBuzz(accepted) {
             <div className="text-center text-white/50 text-sm mt-6">
               <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
                 <p className="font-semibold text-white/70 mb-2">💡 Pro Tip</p>
-                <p>MicroBuzz works best in cafés, libraries, campuses, and social events where people are open to meeting new friends.</p>
+                <p>MicroBuzz works best in cafés, libraries, campuses, clubs, and bars where people are open to meeting new friends.</p>
               </div>
             </div>
           )}
