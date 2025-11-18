@@ -486,9 +486,113 @@ export default function Notifications() {
                 })}
               </p>
 
-              {/* Enhanced Action Buttons */}
-              {n.type === "buzz" && n.fromId && (
-                <div className="flex gap-2 mt-2">
+                {/* Enhanced Action Buttons */}
+                {/* ===========================
+                    DISCOVER LIKE REQUEST (buzz + via=discover_like)
+                    "X wants to match with you" → Accept / Reject
+                =========================== */}
+                {n.type === "buzz" && n.fromId && n.via === "discover_like" && (
+                  <div className="flex gap-2 mt-2">
+
+                    {/* ✅ Accept */}
+                    <button
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        markAsRead(n.id);
+
+                        try {
+                          await fetch(`${API_BASE}/likes/respond`, {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                              Authorization: `Bearer ${token()}`,
+                            },
+                            body: JSON.stringify({
+                              fromId: n.fromId,
+                              action: "accept",
+                            }),
+                          });
+                        } catch (err) {
+                          console.error("Accept like request failed", err);
+                        }
+                      }}
+                      className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-full hover:bg-green-200 transition"
+                    >
+                      ✅ Accept
+                    </button>
+
+                    {/* ❌ Reject */}
+                    <button
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        markAsRead(n.id);
+
+                        try {
+                          await fetch(`${API_BASE}/likes/respond`, {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                              Authorization: `Bearer ${token()}`,
+                            },
+                            body: JSON.stringify({
+                              fromId: n.fromId,
+                              action: "reject",
+                            }),
+                          });
+                        } catch (err) {
+                          console.error("Reject like request failed", err);
+                        }
+                      }}
+                      className="text-xs bg-red-100 text-red-700 px-3 py-1 rounded-full hover:bg-red-200 transition"
+                    >
+                      ❌ Reject
+                    </button>
+                  </div>
+                )}
+
+                /* ===========================
+                  MATCH NOTIFICATION ACTIONS
+                  =========================== */
+                {n.type === "match" && (
+                  <div className="flex gap-2 mt-2">
+
+                    {/* ❤️ View Profile (backend sends n.href) */}
+                    {n.href && (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          markAsRead(n.id);
+                          navigate(normalizeHref(n.href));
+                        }}
+                        className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition"
+                      >
+                        ❤️ View Profile
+                      </button>
+                    )}
+
+                    {/* 💬 Chat Now (backend sends entityId = roomId) */}
+                    {n.entity === "chat" && n.entityId && (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          markAsRead(n.id);
+                          navigate(`/chat/${n.entityId}`);
+                        }}
+                        className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-full hover:bg-green-200 transition"
+                      >
+                        💬 Chat Now
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                /* BUZZ ACTIONS (existing) */
+                {n.type === "buzz" && n.fromId && (
+                                <div className="flex gap-2 mt-2">
                   {/* For Match Requests (unmatched users) */}
                   {n.message?.includes("wants to match") && (
                     <>

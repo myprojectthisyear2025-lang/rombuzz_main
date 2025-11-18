@@ -605,27 +605,20 @@ export default function Discover() {
   /* ---------------------------
    Socket
   --------------------------- */
-  useEffect(() => {
-    const s = io(SOCKET_URL, { auth: { token: token() } });
-    socketRef.current = s;
+  s.on("match", (data) => {
+    console.log("🎉 Discover match event:", data);
+    const { otherUserId } = data || {};
 
-    s.on("connect", () => {
-      const uid = me?.id;
-      if (uid) s.emit("register", uid);
-    });
+    // 🔥 Global celebration overlay (same as MicroBuzz)
+    window.dispatchEvent(new CustomEvent("match:celebrate", { detail: data }));
 
-    s.on("match", ({ otherUserId }) => {
-      if (current && otherUserId === current.id) {
-        setMessage("💞 It's a match!");
-        setReveal(1);
-      }
-    });
+    // Optional: local message for the current top card
+    if (current && otherUserId === current.id) {
+      setMessage("💞 It's a match!");
+      setReveal(1);
+    }
+  });
 
-    s.on("buzz_request", () => setMessage("💌 Someone nearby buzzed you"));
-
-    return () => s.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   /* ---------------------------
    Premium status

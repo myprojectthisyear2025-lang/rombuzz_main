@@ -22,6 +22,7 @@ import MeetMap from "../components/MeetMap";
 import { FaMapMarkerAlt } from "react-icons/fa";
 import SnapCameraSheet from "../components/SnapCameraSheet";
 import { FullscreenViewer } from "../components/FullscreenViewer";
+import { API_BASE } from "../config";
 
 //const API_BASE = "http://localhost:4000";
 const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com";
@@ -348,10 +349,11 @@ const incomingToneRef = useRef(null); // ringtone for the receiver
   socket.emit("joinRoom", roomId);
 
   // ✅ fetch initial online/offline snapshot once
-  fetch(`${API_BASE}/api/presence/${peerId}`)
-    .then((r) => r.json())
-    .then((d) => setPeerOnline(!!d.online))
-    .catch(() => {});
+fetch(`${API_BASE}/presence/${peerId}`)
+  .then((r) => r.json())
+  .then((d) => setPeerOnline(!!d.online))
+  .catch(() => {});
+
 
   const onMsg = (raw) => {
     const msg = maybeDecode(raw);
@@ -640,11 +642,12 @@ useEffect(() => {
   // ============= per-message actions =============
   const openEmojiReact = async (msg, emoji) => {
     try {
-      const r = await fetch(`${API_BASE}/api/chat/rooms/${roomId}/${msg.id}/react`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ emoji }),
-      });
+    const r = await fetch(`${API_BASE}/chat/rooms/${roomId}/${msg.id}/react`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+  body: JSON.stringify({ emoji }),
+});
+
       await r.json();
     } catch (e) {
       console.error("react error", e);
@@ -656,11 +659,12 @@ useEffect(() => {
     const fresh = window.prompt("Edit message:", dec?.text || "");
     if (fresh == null) return;
     try {
-      const r = await fetch(`${API_BASE}/api/chat/rooms/${roomId}/${msg.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ text: fresh }),
-      });
+    const r = await fetch(`${API_BASE}/chat/rooms/${roomId}/${msg.id}`, {
+  method: "PATCH",
+  headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+  body: JSON.stringify({ text: fresh }),
+});
+
       const j = await r.json();
       if (!j?.ok) {
         alert(j?.error || "Edit failed");
@@ -672,10 +676,11 @@ useEffect(() => {
 
   const unsendForMe = async (msg) => {
     try {
-      const r = await fetch(`${API_BASE}/api/chat/rooms/${roomId}/${msg.id}?scope=me`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+     const r = await fetch(`${API_BASE}/chat/rooms/${roomId}/${msg.id}?scope=me`, {
+  method: "DELETE",
+  headers: { Authorization: `Bearer ${token}` },
+});
+
       const j = await r.json();
       if (j?.ok) setHiddenIds((h) => ({ ...h, [msg.id]: true }));
     } catch (e) {
@@ -685,10 +690,11 @@ useEffect(() => {
 
   const unsendForAll = async (msg) => {
     try {
-      const r = await fetch(`${API_BASE}/api/chat/rooms/${roomId}/${msg.id}?scope=all`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+   const r = await fetch(`${API_BASE}/chat/rooms/${roomId}/${msg.id}?scope=all`, {
+  method: "DELETE",
+  headers: { Authorization: `Bearer ${token}` },
+});
+
       const j = await r.json();
       if (!j?.ok) alert(j?.error || "Unsend failed");
     } catch (e) {
@@ -1333,13 +1339,19 @@ onClose?.();
         </div>
       </div>
 
-      {/* Messages */}
-      <div className={`flex-1 min-h-0 overflow-y-auto px-3 md:px-4 py-2 space-y-1.5 ${themeCls.messages}`}>
- {messages
-  .filter((m) => !hiddenIds[m.id])
-  .map((raw) => {
-    const m = maybeDecode(raw);
-    const isMine = mine(m);
+            {/* Messages */}
+        <div
+          className={`
+            flex-1 min-h-0 overflow-y-auto px-3 md:px-4 py-2 space-y-1.5
+            ${themeCls.messages}
+          `}
+          style={{ paddingBottom: "90px" }} // ensure space above composer
+        >
+          {messages
+          .filter((m) => !hiddenIds[m.id])
+          .map((raw) => {
+            const m = maybeDecode(raw);
+            const isMine = mine(m);
 
 
 // ✨ Detect ephemeral (view-once) mode for styling
@@ -1491,11 +1503,17 @@ onClick={() => setViewer({ open: true, message: m })}
         <div className="px-3 py-2 bg-gray-50 text-gray-700 text-sm border-y">You are marked offline. Others may see you as inactive.</div>
       )}
 
-      {/* Composer */}
-      <div
-        className={`h-[60px] border-t bg-white px-2 md:px-3 flex items-center gap-2 ${blockedBanner.iBlocked || blockedBanner.blockedMe ? "opacity-60 pointer-events-none" : ""
-          }`}
-      >
+     {/* Composer (fixed for mobile) */}
+        <div
+          className={`
+            h-[60px] border-t bg-white px-2 md:px-3 flex items-center gap-2
+            sticky bottom-0 z-30
+            pb-[env(safe-area-inset-bottom)] pb-3
+            ${blockedBanner.iBlocked || blockedBanner.blockedMe ? "opacity-60 pointer-events-none" : ""}
+          `}
+        >
+
+      
         {/* Emoji */}
         <button className="p-2 rounded-lg hover:bg-gray-100 relative" onClick={() => setShowEmoji((v) => !v)} title="Emoji">
           <FaSmile />
@@ -1553,10 +1571,11 @@ onClick={() => setViewer({ open: true, message: m })}
         try {
           await Promise.all(
             Object.keys(selectedIds).map(async (id) => {
-              const r = await fetch(`${API_BASE}/api/chat/rooms/${roomId}/${id}?scope=me`, {
+              const r = await fetch(`${API_BASE}/chat/rooms/${roomId}/${id}?scope=me`, {
                 method: "DELETE",
                 headers: { Authorization: `Bearer ${token}` },
               });
+
               await r.json();
             })
           );

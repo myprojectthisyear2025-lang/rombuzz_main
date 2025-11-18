@@ -167,12 +167,24 @@ socket.on("buzz_request", (data) => {
    socket.on("match", (data) => {
   console.log("🎉 Match event:", data);
 
-  // Let the global overlay handle celebration + redirect
+  const { otherUserId, otherName, roomId } = data;
+
+  // 1️⃣ Trigger celebration overlay (unchanged)
   window.dispatchEvent(new CustomEvent("match:celebrate", { detail: data }));
 
-  // Hide MicroBuzz buzz popup
+  // 2️⃣ Immediately show small in-app toast with actions
+  setTimeout(() => {
+    showMatchActions({
+      otherId: otherUserId,
+      otherName: otherName || "Someone",
+      roomId
+    });
+  }, 1200); // Delay so it shows right after celebration
+
+  // 3️⃣ Close buzz popup
   setBuzzRequest(null);
 });
+
 
 
     // 🚫 When your buzz is rejected
@@ -498,6 +510,19 @@ url.searchParams.set("maxAge", user?.preferences?.maxAge || 99);
       setError(err?.message || "Failed to stop");
     }
   }
+  // ===============================
+// 🔔 Small match action popup UI
+// ===============================
+const [matchActions, setMatchActions] = useState(null);
+
+function showMatchActions({ otherId, otherName, roomId }) {
+  setMatchActions({
+    otherId,
+    otherName,
+    roomId
+  });
+}
+
 
   // Safely decode JSON or return null
   async function safeJson(res) {
@@ -859,7 +884,48 @@ async function respondToBuzz(accepted) {
               }
       
       `}</style>
- 
+ {matchActions && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md">
+    <div className="bg-gradient-to-br from-purple-800 to-pink-700 p-8 rounded-3xl border border-white/20 shadow-2xl w-96 max-w-[90vw] text-center animate-pop-in relative">
+
+      <div className="absolute -inset-1 bg-gradient-to-r from-purple-500 to-pink-500 blur opacity-30 rounded-3xl"></div>
+
+      <div className="relative">
+        <h2 className="text-3xl font-black text-white mb-4">
+          🎉 It's a Match!
+        </h2>
+        <p className="text-white/80 text-lg mb-8">
+          You and <span className="font-bold text-white">{matchActions.otherName}</span> matched with each other!
+        </p>
+
+        <div className="flex flex-col gap-4">
+
+          <button
+            onClick={() => {
+              setMatchActions(null);
+              navigate(`/viewProfile/${matchActions.otherId}`);
+            }}
+            className="bg-white/10 border border-white/20 text-white py-3 px-6 rounded-2xl text-lg font-semibold shadow-lg hover:bg-white/20 transition"
+          >
+             View Profile
+          </button>
+
+          <button
+            onClick={() => {
+              setMatchActions(null);
+              navigate(`/chat/${matchActions.roomId}`);
+            }}
+            className="bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 px-6 rounded-2xl text-lg font-bold shadow-xl hover:opacity-90 transition"
+          >
+             Chat Now
+          </button>
+
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
     </div>
   );
 }
