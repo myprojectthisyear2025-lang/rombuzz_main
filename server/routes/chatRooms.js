@@ -26,8 +26,10 @@ const shortid = require("shortid");
 const authMiddleware = require("../routes/auth-middleware");
 const ChatRoom = require("../models/ChatRoom");
 
-// Safely bind socket globals if available
-const { io, onlineUsers } = global;
+// ✅ Proper Socket.IO + state wiring
+const { getIO } = require("../socket");
+const { onlineUsers } = require("../models/state");
+
 
 // =======================
 // 🧩 Utilities
@@ -105,37 +107,66 @@ router.post("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
     const fromId = req.user.id;
     const toId = fromId === a ? b : a;
 
-    const msg = {
-      id: shortid.generate(),
-      from: fromId,
-      to: toId,
-      text,
-      type: text.startsWith("::RBZ::") ? "media" : "text",
-      time: new Date(),
-      edited: false,
-      deleted: false,
-      reactions: {},
-      hiddenFor: [],
-      ephemeral: { mode: "none" },
-    };
+  // 🔍 Detect ephemeral "view-once" from ::RBZ:: payload
+let epMode = "none";
+if (text.startsWith("::RBZ::")) {
+  try {
+    const payload = JSON.parse(text.slice("::RBZ::".length));
+    if (
+      payload?.ephemeral === "once" ||
+      payload?.ephemeral?.mode === "once" ||
+      payload?.viewOnce === true
+    ) {
+      epMode = "once";
+    }
+  } catch (e) {
+    console.warn("RBZ payload parse failed for ephemeral:", e);
+  }
+}
 
-    const room = await getRoomDoc(roomId);
-    room.messages.push(msg);
-    await room.save();
+const msg = {
+  id: shortid.generate(),
+  from: fromId,
+  to: toId,
+  text,
+  type: text.startsWith("::RBZ::") ? "media" : "text",
+  time: new Date(),
+  edited: false,
+  deleted: false,
+  reactions: {},
+  hiddenFor: [],
+  ephemeral: { mode: epMode },
+};
 
-    // Socket events (room + direct)
-    io.to(roomId).emit("message", msg);
-    const sid = onlineUsers?.[toId];
-    if (sid)
-      io.to(sid).emit("direct:message", {
-        id: msg.id,
-        roomId,
-        from: fromId,
-        to: toId,
-        time: msg.time,
-        preview: (msg.text || "").slice(0, 80),
-        type: msg.type || "text",
-      });
+const room = await getRoomDoc(roomId);
+room.messages.push(msg);
+await room.save();
+
+// ✅ Socket events (room + direct)
+const io = getIO();
+
+// 🔥 FIX: Emit chat:message (frontend listens for this)
+io.to(roomId).emit("chat:message", msg);
+
+// 🔥 Also send to peer's private room in case they are not in the chat room
+const sid = onlineUsers?.[toId];
+if (sid) {
+  io.to(sid).emit("chat:message", msg);
+}
+
+// 🔥 Navbar/unread bubble handler
+if (sid) {
+  io.to(sid).emit("direct:message", {
+    id: msg.id,
+    roomId,
+    from: fromId,
+    to: toId,
+    time: msg.time,
+    preview: (msg.text || "").slice(0, 80),
+    type: msg.type || "text",
+  });
+}
+
 
     res.json({ message: msg });
   } catch (err) {
@@ -162,12 +193,14 @@ router.patch("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => {
     if (Date.now() - new Date(msg.time).getTime() > oneHour)
       return res.status(400).json({ error: "edit window expired" });
 
-    msg.text = text;
-    msg.edited = true;
-    await room.save();
+   msg.text = text;
+msg.edited = true;
+await room.save();
 
-    io.to(roomId).emit("message:edit", { msgId, text });
-    res.json({ ok: true });
+const io = getIO();
+io.to(roomId).emit("message:edit", { msgId, text });
+res.json({ ok: true });
+
   } catch (err) {
     console.error("❌ PATCH edit message error:", err);
     res.status(500).json({ error: "Failed to edit message" });
@@ -194,11 +227,14 @@ router.delete("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => 
 
     if (scope === "all") {
       if (msg.from !== req.user.id) return res.status(403).json({ error: "not owner" });
-      msg.deleted = true;
-      msg.text = "This message was unsent";
-      await room.save();
-      io.to(roomId).emit("message:delete", { msgId });
-      return res.json({ ok: true });
+     msg.deleted = true;
+msg.text = "This message was unsent";
+await room.save();
+
+const io = getIO();
+io.to(roomId).emit("message:delete", { msgId });
+return res.json({ ok: true });
+
     }
 
     res.status(400).json({ error: "invalid scope" });
@@ -252,15 +288,17 @@ router.post("/chat/rooms/:roomId/:msgId/react", authMiddleware, async (req, res)
       msg.reactions.set(req.user.id, emoji);
     }
 
-    await room.save();
+  await room.save();
 
-    io.to(roomId).emit("message:react", {
-      msgId,
-      userId: req.user.id,
-      emoji: msg.reactions.get(req.user.id) || null,
-    });
+const io = getIO();
+io.to(roomId).emit("message:react", {
+  msgId,
+  userId: req.user.id,
+  emoji: msg.reactions.get(req.user.id) || null,
+});
 
-    res.json({ ok: true, reactions: Object.fromEntries(msg.reactions) });
+res.json({ ok: true, reactions: Object.fromEntries(msg.reactions) });
+
   } catch (err) {
     console.error("❌ REACT message error:", err);
     res.status(500).json({ error: "Failed to react" });

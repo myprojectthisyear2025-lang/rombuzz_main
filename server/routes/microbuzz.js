@@ -35,10 +35,16 @@ const authMiddleware = require("../routes/auth-middleware");
 const { onlineUsers } = require("../models/state");
 const { getIO } = require("../socket");
 
+// Mongo + models
+const User = require("../models/User");
 const MicroBuzzPresence = require("../models/MicroBuzzPresence");
 const MicroBuzzBuzz = require("../models/MicroBuzzBuzz");
-const Match = require("../models/Match");
-const User = require("../models/User"); // ✅ needed for gender/age filters
+const Match = require("../models/MatchModel");
+const MicroBuzzSelfie = require("../models/MicroBuzzSelfie");
+
+// 🔔 Notifications helper
+const { sendNotification } = require("../utils/helpers");
+
 
 
 /* ============================================================
@@ -250,35 +256,76 @@ router.post("/buzz", authMiddleware, async (req, res) => {
       return Math.sqrt(dx * dx + dy * dy);
     };
 
-    const distanceMeters = calcDistance();
-    const reverseBuzz = await MicroBuzzBuzz.findOne({ fromId: toId, toId: fromId });
+ const distanceMeters = calcDistance();
+const reverseBuzz = await MicroBuzzBuzz.findOne({ fromId: toId, toId: fromId });
 // ✅ PREVENT LOOPING — If already matched, do NOT send any buzz popup again
 const alreadyMatched = await Match.findOne({ users: { $all: [fromId, toId] } });
 
 if (alreadyMatched) {
   // 🔁 They were matched before (Discover, old flow, etc.)
-  // Still behave like a fresh match so both see animation + redirect to chat.
-  const fromUser = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
-  const toUser = await MicroBuzzPresence.findOne({ userId: toId }).lean();
+  const fromPresence = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
+  const toPresence = await MicroBuzzPresence.findOne({ userId: toId }).lean();
 
+  // 🧑 Fetch profiles for names (John / Katy)
+  const [fromProfile, toProfile] = await Promise.all([
+    User.findOne({ id: fromId }).lean(),
+    User.findOne({ id: toId }).lean(),
+  ]);
+
+  const fromName = fromProfile?.firstName || "Someone";
+  const toName = toProfile?.firstName || "Someone";
+
+  // 🧵 Shared chat room id (sorted for consistency)
+  const roomId = [fromId, toId].sort().join("_");
+
+  // 🎉 Live "match" event for BOTH users (with extra data)
   [fromId, toId].forEach((uid) => {
     const other = uid === fromId ? toId : fromId;
-    const otherSelfie = uid === fromId ? toUser?.selfieUrl : fromUser?.selfieUrl;
+    const otherSelfie = uid === fromId ? toPresence?.selfieUrl : fromPresence?.selfieUrl;
+    const otherDisplayName = uid === fromId ? toName : fromName;
 
     if (onlineUsers[uid]) {
       io.to(onlineUsers[uid]).emit("match", {
         otherUserId: other,
+        otherName: otherDisplayName,
         selfieUrl: otherSelfie,
+        roomId,
+        via: "microbuzz",
       });
     }
   });
 
+  // 🔔 Personalized notifications with 2 clear actions:
+  //  - View Profile (href)
+  //  - Chat (entity: "chat", entityId: roomId)
+  try {
+    await Promise.all([
+      // 👤 For "from" user (e.g. John)
+      sendNotification(fromId, toId, "match", {
+        via: "microbuzz",
+        message: `You and ${toName} matched with each other 💞`,
+        href: `/viewProfile/${toId}`,   // View Katy
+        entity: "chat",
+        entityId: roomId,               // Direct chat
+      }),
+      // 👤 For "to" user (e.g. Katy)
+      sendNotification(toId, fromId, "match", {
+        via: "microbuzz",
+        message: `You and ${fromName} matched with each other 💞`,
+        href: `/viewProfile/${fromId}`, // View John
+        entity: "chat",
+        entityId: roomId,
+      }),
+    ]);
+  } catch (e) {
+    console.warn("❌ MicroBuzz match notification failed:", e);
+  }
+
   return res.json({ matched: true });
 }
 
-
-  /* ============================================================
-     MUTUAL BUZZ → MATCH (loop-proof)
+/* ============================================================
+   MUTUAL BUZZ → MATCH (loop-proof)
 ============================================================ */
 if (reverseBuzz) {
   if (confirm === true) {
@@ -295,30 +342,72 @@ if (reverseBuzz) {
     if (!exists) {
       await Match.create({
         id: `${fromId}_${toId}_${Date.now()}`,
-          user1: fromId,
-    user2: toId,
-    users: [fromId, toId],    // still included for array lookups
-    type: "microbuzz",
-
+        user1: fromId,
+        user2: toId,
+        users: [fromId, toId], // still included for array lookups
+        type: "microbuzz",
         createdAt: new Date(),
       });
     }
 
     // Notify both users: MATCHED!
-    const fromUser = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
-    const toUser = await MicroBuzzPresence.findOne({ userId: toId }).lean();
+    const fromPresence = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
+    const toPresence = await MicroBuzzPresence.findOne({ userId: toId }).lean();
 
+    // 🧑 Fetch profiles for names
+    const [fromProfile, toProfile] = await Promise.all([
+      User.findOne({ id: fromId }).lean(),
+      User.findOne({ id: toId }).lean(),
+    ]);
+
+    const fromName = fromProfile?.firstName || "Someone";
+    const toName = toProfile?.firstName || "Someone";
+
+    // 🧵 Shared chat room id (same for both sides)
+    const roomId = [fromId, toId].sort().join("_");
+
+    // 🎉 Live "match" event for BOTH users (with room + names)
     [fromId, toId].forEach((uid) => {
       const other = uid === fromId ? toId : fromId;
-      const otherSelfie = uid === fromId ? toUser?.selfieUrl : fromUser?.selfieUrl;
+      const otherSelfie = uid === fromId ? toPresence?.selfieUrl : fromPresence?.selfieUrl;
+      const otherDisplayName = uid === fromId ? toName : fromName;
 
       if (onlineUsers[uid]) {
         io.to(onlineUsers[uid]).emit("match", {
           otherUserId: other,
+          otherName: otherDisplayName,
           selfieUrl: otherSelfie,
+          roomId,
+          via: "microbuzz",
         });
       }
     });
+
+    // 🔔 Personalized match notifications for BOTH:
+    // John: "You and Katy matched..." → View Katy + Chat
+    // Katy: "You and John matched..." → View John + Chat
+    try {
+      await Promise.all([
+        // 👤 For "from" user (e.g. John)
+        sendNotification(fromId, toId, "match", {
+          via: "microbuzz",
+          message: `You and ${toName} matched with each other 💞`,
+          href: `/viewProfile/${toId}`,
+          entity: "chat",
+          entityId: roomId,
+        }),
+        // 👤 For "to" user (e.g. Katy)
+        sendNotification(toId, fromId, "match", {
+          via: "microbuzz",
+          message: `You and ${fromName} matched with each other 💞`,
+          href: `/viewProfile/${fromId}`,
+          entity: "chat",
+          entityId: roomId,
+        }),
+      ]);
+    } catch (e) {
+      console.warn("❌ MicroBuzz match notification failed:", e);
+    }
 
     // Final response
     return res.json({ matched: true });

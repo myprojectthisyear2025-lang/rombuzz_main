@@ -85,49 +85,81 @@ router.post("/likes", authMiddleware, async (req, res) => {
     const self = await User.findOne({ id: from }).lean();
     const other = await User.findOne({ id: to }).lean();
 
-    if (mutual) {
-      const existsMatch = await Match.findOne({ users: { $all: [from, to] } });
-      if (!existsMatch) {
-        await Match.create({
-          id: shortid.generate(),
-          users: [from, to],
-          createdAt: new Date(),
-        });
-      }
+  if (mutual) {
+  const existsMatch = await Match.findOne({ users: { $all: [from, to] } });
+  if (!existsMatch) {
+    await Match.create({
+      id: shortid.generate(),
+      users: [from, to],
+      createdAt: new Date(),
+    });
+  }
 
-      // 🧹 Cleanup
-      await Relationship.deleteMany({
-        $or: [
-          { from, to, type: "like" },
-          { from: to, to: from, type: "like" },
-        ],
-      });
+  // 🧹 Cleanup
+  await Relationship.deleteMany({
+    $or: [
+      { from, to, type: "like" },
+      { from: to, to: from, type: "like" },
+    ],
+  });
 
-      // 🔔 Socket
-      const selfSocket = onlineUsers[from];
-      const targetSocket = onlineUsers[to];
-      if (selfSocket) io.to(selfSocket).emit("match", { otherUserId: to });
-      if (targetSocket) io.to(targetSocket).emit("match", { otherUserId: from });
+  // ===============================
+  // 🔥 NEW: Unified Discover Match Logic
+  // ===============================
 
-      // 📨 Notifications
-      const fromName = self?.firstName || "Someone";
-      const otherName = other?.firstName || "Someone";
+  const fromName = self?.firstName || "Someone";
+  const toName = other?.firstName || "Someone";
 
-      await sendNotification(to, {
-        fromId: from,
-        type: "buzz",
-        message: `${fromName} wants to match with you! 💖`,
-        href: `/viewProfile/${from}`,
-      });
+  // Shared chat room id (consistent with MicroBuzz)
+  const roomId = [from, to].sort().join("_");
 
-      await sendNotification(from, {
-        fromId: to,
-        type: "match",
-        message: `💞 It's a match with ${otherName}!`,
-        href: `/viewProfile/${to}`,
-      });
-    } else {
-      // 💌 Buzz Request
+  // SOCKET MATCH EVENT FOR BOTH USERS
+  if (onlineUsers[from]) {
+    io.to(onlineUsers[from]).emit("match", {
+      otherUserId: to,
+      otherName: toName,
+      roomId,
+      via: "discover",
+    });
+  }
+
+  if (onlineUsers[to]) {
+    io.to(onlineUsers[to]).emit("match", {
+      otherUserId: from,
+      otherName: fromName,
+      roomId,
+      via: "discover",
+    });
+  }
+
+  // MATCH NOTIFICATIONS FOR BOTH USERS (Symmetrical)
+  await Promise.all([
+    // To USER B (to)
+    sendNotification(to, {
+      fromId: from,
+      type: "match",
+      message: `You and ${fromName} matched with each other 💞`,
+      href: `/viewProfile/${from}`,
+      entity: "chat",
+      entityId: roomId,
+    }),
+
+    // To USER A (from)
+    sendNotification(from, {
+      fromId: to,
+      type: "match",
+      message: `You and ${toName} matched with each other 💞`,
+      href: `/viewProfile/${to}`,
+      entity: "chat",
+      entityId: roomId,
+    }),
+  ]);
+
+  return res.json({ success: true, matched: true });
+}
+
+        else {
+      // 💌 Discover Like → Match Request
       const targetSocket = onlineUsers[to];
       if (targetSocket) {
         const fromUser = baseSanitizeUser(self);
@@ -142,13 +174,131 @@ router.post("/likes", authMiddleware, async (req, res) => {
       await sendNotification(to, {
         fromId: from,
         type: "buzz",
+        via: "discover_like", // 🔹 identify as Discover match request
         message: `${fromName} wants to match with you! 💖`,
       });
     }
 
+
     res.json({ success: true, matched: !!mutual });
   } catch (err) {
     console.error("❌ LIKE error:", err);
+    res.status(500).json({ error: "internal_error" });
+  }
+});
+
+/* ======================
+   ✅ RESPOND TO LIKE (ACCEPT / REJECT)
+====================== */
+router.post("/likes/respond", authMiddleware, async (req, res) => {
+  try {
+    const toId = req.user.id; // current user (e.g. Katy)
+    const { fromId, action } = req.body || {};
+
+    if (!fromId || !action) {
+      return res.status(400).json({ error: "fromId and action required" });
+    }
+
+    // Must be a pending like from John → Katy
+    const likeDoc = await Relationship.findOne({
+      from: fromId,
+      to: toId,
+      type: "like",
+    });
+
+    if (!likeDoc) {
+      return res.status(404).json({ error: "request_not_found" });
+    }
+
+    // ❌ REJECT – just clean up the like(s)
+    if (action === "reject") {
+      await Relationship.deleteMany({
+        $or: [
+          { from: fromId, to: toId, type: "like" },
+          { from: toId, to: fromId, type: "like" },
+        ],
+      });
+      return res.json({ success: true, matched: false });
+    }
+
+    if (action !== "accept") {
+      return res.status(400).json({ error: "invalid_action" });
+    }
+
+    // ✅ ACCEPT → create match, clean likes, notify both
+    const existsMatch = await Match.findOne({ users: { $all: [fromId, toId] } });
+    if (!existsMatch) {
+      await Match.create({
+        id: shortid.generate(),
+        users: [fromId, toId],
+        createdAt: new Date(),
+      });
+    }
+
+    // Clean up likes in both directions
+    await Relationship.deleteMany({
+      $or: [
+        { from: fromId, to: toId, type: "like" },
+        { from: toId, to: fromId, type: "like" },
+      ],
+    });
+
+    // Load names for pretty messages
+    const [fromUser, toUser] = await Promise.all([
+      User.findOne({ id: fromId }).lean(),
+      User.findOne({ id: toId }).lean(),
+    ]);
+
+    const fromName = fromUser?.firstName || "Someone";
+    const toName = toUser?.firstName || "Someone";
+
+    // Shared chat room id (same style as MicroBuzz)
+    const roomId = [fromId, toId].sort().join("_");
+
+    // 🎉 Socket "match" event for both users (Discover)
+    if (onlineUsers[fromId]) {
+      io.to(onlineUsers[fromId]).emit("match", {
+        otherUserId: toId,
+        otherName: toName,
+        roomId,
+        via: "discover",
+      });
+    }
+
+    if (onlineUsers[toId]) {
+      io.to(onlineUsers[toId]).emit("match", {
+        otherUserId: fromId,
+        otherName: fromName,
+        roomId,
+        via: "discover",
+      });
+    }
+
+    // 🔔 Match notifications for BOTH (same shape as MicroBuzz)
+    await Promise.all([
+      // For Katy (who accepted)
+      sendNotification(toId, {
+        fromId,
+        type: "match",
+        message: `You and ${fromName} matched with each other 💞`,
+        href: `/viewProfile/${fromId}`,
+        entity: "chat",
+        entityId: roomId,
+      }),
+      // For John
+      sendNotification(fromId, {
+        fromId: toId,
+        type: "match",
+        message: `You and ${toName} matched with each other 💞`,
+        href: `/viewProfile/${toId}`,
+        entity: "chat",
+        entityId: roomId,
+      }),
+    ]);
+
+    return res.json({ success: true, matched: true });
+  } catch (err) {
+    console.error("❌ LIKE respond error:", err);
     res.status(500).json({ error: "internal_error" });
   }
 });
