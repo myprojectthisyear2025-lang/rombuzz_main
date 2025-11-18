@@ -125,13 +125,14 @@ useEffect(() => {
       socket.off("connect");
     };
   }, []);
-  // 🔒 Freeze background scroll on mobile (prevents jump/glitch)
+// Allow scrolling on MicroBuzz
 useEffect(() => {
-  document.body.style.overflow = "hidden";
+  document.body.style.overflow = "";
   return () => {
     document.body.style.overflow = "";
   };
 }, []);
+
 
 
   // Listen for buzz requests, matches, and rejections
@@ -637,7 +638,7 @@ async function respondToBuzz(accepted) {
                   className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
                 >
                   <span>🚀</span>
-                  Activate MicroBuzz
+                  Turn on Camera
                 </button>
                 {!!streamRef.current && (
                   <button
@@ -689,39 +690,27 @@ async function respondToBuzz(accepted) {
 
                   {/* Radar + inline selfie preview */}
               {/* Preference Selector */}
-              <div className="flex justify-center mb-4 gap-3">
-                <select
-                  className="bg-black/40 text-white px-4 py-2 rounded-xl border border-white/20"
-                  value={user?.lookingFor || ""}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    user.lookingFor = val;
-                    localStorage.setItem("user", JSON.stringify(user));
-                  }}
-                >
-                  <option value="">Show: Everyone</option>
-                  <option value="male">Show: Men</option>
-                  <option value="female">Show: Women</option>
-                  <option value="nonbinary">Show: Non-binary</option>
-                </select>
-              </div>
 
-                {/* Tips Carousel */}
-                <div className="w-full text-center mb-4">
-                  <p className="animate-fade-in text-white/80 text-sm font-medium bg-white/10 px-4 py-2 inline-block rounded-xl border border-white/20 shadow-lg">
-                    {tips[tipIndex]}
-                  </p>
-                </div>
+              {isActive && selfieUrl && (
+                  <>
+                    {/* Tips Carousel */}
+                    <div className="w-full text-center mb-4">
+                      <p className="animate-fade-in text-white/80 text-sm font-medium bg-white/10 px-4 py-2 inline-block rounded-xl border border-white/20 shadow-lg">
+                        {tips[tipIndex]}
+                      </p>
+                    </div>
 
-              <Radar
-                you={selfieUrl}
-                users={nearby}
-                orbits={orbitsRef.current}
-                nowMs={now}
-                onBuzz={handleBuzz}
-                onPreviewStart={(u) => setPreviewUser(u)}
-                onPreviewEnd={() => setPreviewUser(null)}
-              />
+                    <Radar
+                      you={selfieUrl}
+                      users={nearby}
+                      orbits={orbitsRef.current}
+                      nowMs={now}
+                      onBuzz={handleBuzz}
+                      onPreviewStart={(u) => setPreviewUser(u)}
+                      onPreviewEnd={() => setPreviewUser(null)}
+                    />
+                  </>
+                )}
 
               {/* Long-press / hold preview overlay (same screen) */}
               {previewUser && (
