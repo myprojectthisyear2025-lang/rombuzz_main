@@ -52,13 +52,9 @@ export default function MicroBuzz({ user }) {
 
   // ---------- UI States ----------
   const [isActive, setIsActive] = useState(false);
-  // NEW → Step-based flow: Step 1 = Activate, Step 2 = Camera, Step 3 = Selfie
-const [step, setStep] = useState(1);
   const [status, setStatus] = useState(
-    "The exclusive way for instant date. Click on Start, you’ll be asked to turn on your camera next.Take a quick selfie to show it's you, and we'll show nearby people as per your preferences who did the same. If you both tap Connect, it's an instant match."
+    "Ultra-local discovery for instant date. Turn on MicroBuzz, take a quick selfie, and we'll show nearby people who did the same. If you both tap Connect, it's an instant match."
   );
-  
-
   const [error, setError] = useState("");
   const [debug, setDebug] = useState("");
   const [buzzRequest, setBuzzRequest] = useState(null);
@@ -230,11 +226,6 @@ socket.on("buzz_accept", (data) => {
   }
 
   // -------- Camera
-  // NEW → Step 1 handler
-function activateStepOne() {
-  setStep(2);
-  setStatus("Start Microbuzz");
-}
   async function startMicroBuzz() {
     try {
       setError("");
@@ -639,56 +630,25 @@ async function respondToBuzz(accepted) {
           </div>
 
           {/* Controls */}
-                    <div className="flex flex-wrap items-center gap-3 mb-8">
-                      {/* STEP 1 → Activate MicroBuzz */}
-            {step === 1 && !isActive && (
-              <button
-                onClick={activateStepOne}
-                className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-              >
-                
-                Activate MicroBuzz
-              </button>
-            )}
-            {/* STEP 2 → Turn Camera On */}
-            {step === 2 && !isActive && !streamRef.current && (
-              <button
-                onClick={startMicroBuzz}
-                className="bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-              >
-                
-                Turn on Camera
-              </button>
-            )}
-              {/* STEP 3 → Take Selfie */}
-            {!isActive && streamRef.current && (
-              <button
-                onClick={takeSelfieAndActivate}
-                className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-              >
-                
-                Take Selfie & Start
-              </button>
-            )}
-            {/* ACTIVE MODE */}
-                      {!isActive ? (
-                        <>
-                          <button
-                  onClick={stopMicroBuzz}
-                  className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-                >
-                  <span>⏹️</span>
-                  Stop MicroBuzz
-                </button>
-
+          <div className="flex flex-wrap items-center gap-3 mb-8">
+            {!isActive ? (
+              <>
                 <button
-                  onClick={() => coords && scanNearby(coords)}
-                  className="bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
+                  onClick={startMicroBuzz}
+                  className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
                 >
-                  <span>🔄</span>
-                  Refresh Scan
+                  <span>🚀</span>
+                  Turn on Camera
                 </button>
-             
+                {!!streamRef.current && (
+                  <button
+                    onClick={takeSelfieAndActivate}
+                    className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
+                  >
+                    <span>📸</span>
+                    Take Selfie & Start
+                  </button>
+                )}
               </>
             ) : (
               <>
