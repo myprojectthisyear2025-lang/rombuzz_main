@@ -93,24 +93,83 @@ export default function Radar({
     fakeDotsRef.current = arr;
   }
 
-  /* ============================
-        Static avatar positions
+    /* ============================
+        Drifting random positions
+        - inside radar
+        - avoid overlap
   ============================ */
-  const items = (visibleUsers || []).map((u, idx) => {
-    const seed =
-      orbits[u.id] || {
-        angle0: Math.random() * Math.PI * 2,
-        radiusFactor: 0.7,
+  const userLayoutRef = React.useRef({});
+
+  const items = [];
+  const t = (nowMs || 0) / 1000; // seconds
+
+  (visibleUsers || []).forEach((u, idx) => {
+    const layouts = userLayoutRef.current;
+
+    // Create a stable random layout for each user (per session)
+    if (!layouts[u.id]) {
+      const seed = orbits[u.id] || {};
+      const rf =
+        typeof seed.radiusFactor === "number"
+          ? seed.radiusFactor
+          : 0.45 + Math.random() * 0.35; // 0.45–0.8 baseline radius
+
+      layouts[u.id] = {
+        baseAngle: Math.random() * Math.PI * 2,
+        radiusFactor: rf,
+        driftPhase: Math.random() * Math.PI * 2,
+        speed: 0.2 + Math.random() * 0.4, // radians / second
       };
+    }
 
-    const radius = Math.max(60, maxRadius * seed.radiusFactor);
-    const angle = seed.angle0 + idx * 0.9;
+    const layout = layouts[u.id];
 
-    const x = center + radius * Math.cos(angle);
-    const y = center + radius * Math.sin(angle);
+    // Smooth radius breathing (drift)
+    const drift = Math.sin(t * 0.6 + layout.driftPhase) * 0.12;
+    const rawRadiusFactor = layout.radiusFactor + drift;
 
-    return { ...u, x, y };
+    // Keep whole avatar inside circle
+    const maxInnerRadius = maxRadius - halfAvatar;
+    const clampedFactor = Math.max(0.25, Math.min(0.95, rawRadiusFactor));
+    const radius = maxInnerRadius * clampedFactor;
+
+    // Angle drifts over time
+    let angle = layout.baseAngle + layout.speed * t + idx * 0.08;
+
+    // Initial position
+    let x = center + radius * Math.cos(angle);
+    let y = center + radius * Math.sin(angle);
+
+    // Simple overlap avoidance: if overlapping previous avatars, rotate around
+    const minDist = avatarSize * 0.95;
+    let attempts = 0;
+
+    while (attempts < 24) {
+      let hasOverlap = false;
+
+      for (const placed of items) {
+        const dx = x - placed.x;
+        const dy = y - placed.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < minDist) {
+          hasOverlap = true;
+          break;
+        }
+      }
+
+      if (!hasOverlap) break;
+
+      // Try another angle around the same radius
+      angle += (Math.PI * 2) / Math.max(1, userCount || 1);
+      x = center + radius * Math.cos(angle);
+      y = center + radius * Math.sin(angle);
+      attempts += 1;
+    }
+
+    items.push({ ...u, x, y });
   });
+
 
   /* ============================
         Long-press logic
@@ -272,7 +331,7 @@ export default function Radar({
 
           {/* YOU */}
           <div
-            className="absolute rounded-2xl border-4 border-pink-400 shadow-2xl cursor-pointer"
+            className="absolute rounded-full border-4 border-pink-400 shadow-2xl cursor-pointer"
             style={{
               width: 80,
               height: 80,
@@ -282,6 +341,7 @@ export default function Radar({
               overflow: "hidden",
             }}
           >
+
             {you ? (
               <img src={you} alt="You" className="w-full h-full object-cover" />
             ) : (
@@ -291,7 +351,7 @@ export default function Radar({
             )}
           </div>
 
-          {/* USERS */}
+                    {/* USERS */}
           {items.map((u) => (
             <div
               key={u.id}
@@ -302,7 +362,7 @@ export default function Radar({
               onTouchEnd={(e) => handlePointerUp(u, e)}
               onTouchCancel={handlePointerLeave}
               onContextMenu={(e) => handleContextMenu(u, e)}
-              className={`absolute rounded-2xl border-3 border-purple-400 cursor-pointer shadow-2xl group avatar-fade ${
+              className={`absolute rounded-full border-3 border-purple-400 cursor-pointer shadow-2xl group avatar-fade ${
                 u._fadeOut ? "avatar-fadeout" : ""
               }`}
               style={{
@@ -314,6 +374,7 @@ export default function Radar({
                 backgroundColor: "#fff",
               }}
             >
+
               <img
                 src={u.selfieUrl || "https://via.placeholder.com/68?text=User"}
                 alt={u.name || "Nearby"}

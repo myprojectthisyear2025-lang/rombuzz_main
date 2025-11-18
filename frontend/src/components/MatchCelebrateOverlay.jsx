@@ -93,20 +93,22 @@ useEffect(() => {
 
         // This route matches your existing public profile API:
         // routes/publicProfile.js → GET /api/public/profile/:id
-        const res = await fetch(
-          `${API_BASE}/public/profile/${encodeURIComponent(otherUserId)}`,
-          {
-            headers: token
-              ? { Authorization: `Bearer ${token}` }
-              : undefined,
-          }
-        );
+      const res = await fetch(
+  `${API_BASE}/users/${encodeURIComponent(otherUserId)}`,
+  {
+    headers: token
+      ? { Authorization: `Bearer ${token}` }
+      : undefined,
+  }
+);
 
-        if (!res.ok) throw new Error("Profile fetch failed");
+
+      if (!res.ok) throw new Error("Profile fetch failed");
         const data = await res.json();
         if (!cancelled) {
-          setMatchUser(data || null);
+          setMatchUser(data.user || null);
         }
+
       } catch (e) {
         console.warn("MatchCelebrateOverlay: profile fetch failed", e);
         if (!cancelled) setMatchUser(null);
