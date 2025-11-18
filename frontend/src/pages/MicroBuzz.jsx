@@ -570,9 +570,10 @@ async function respondToBuzz(accepted) {
   // -------- Render
   return (
 <div
-  className="bg-gradient-to-br from-purple-900 via-indigo-900 to-pink-800 p-4 flex items-center justify-center relative overflow-hidden"
-  style={{ height: "100dvh" }}   
+  className="bg-gradient-to-br from-purple-900 via-indigo-900 to-pink-800 p-4 flex items-center justify-center relative overflow-visible"
+  style={{ minHeight: "100dvh" }}
 >
+
       {/* Animated Background Elements */}
 <div
   className="absolute inset-0 overflow-hidden"
@@ -638,7 +639,7 @@ async function respondToBuzz(accepted) {
                   className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
                 >
                   <span>🚀</span>
-                  Turn on Camera
+                 Activate Microbuzz
                 </button>
                 {!!streamRef.current && (
                   <button

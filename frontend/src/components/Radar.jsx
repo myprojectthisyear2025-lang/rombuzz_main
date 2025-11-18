@@ -185,7 +185,7 @@ export default function Radar({
         Render Radar
   ============================ */
   return (
-    <div className="w-full flex justify-center overflow-hidden">
+<div className="w-full flex justify-center overflow-visible">
       <div
         className="relative mx-auto radar-container"
         style={{ width: size, height: size }}
