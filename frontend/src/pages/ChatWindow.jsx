@@ -1339,15 +1339,19 @@ onClose?.();
         </div>
       </div>
 
-             {/* Messages */}
-      <div
-        className={`
-          flex-1 min-h-0 overflow-y-auto px-3 md:px-4 py-2 space-y-1.5
-          ${themeCls.messages}
-        `}
-        style={{ paddingBottom: "90px" }} // space above composer
-        onClick={() => setActionBar(null)} // tap blank area closes long-press bar
-      >
+        {/* Messages (Facebook Messenger style, mobile fixed) */}
+<div
+  className={`
+    flex-1 overflow-y-auto px-3 md:px-4 py-2 space-y-1.5
+    ${themeCls.messages}
+  `}
+  style={{
+    paddingBottom: "120px",          // extra space for the input bar
+    WebkitOverflowScrolling: "touch" // smooth scrolling on iOS
+  }}
+  onClick={() => setActionBar(null)}
+>
+
         {messages
           .filter((m) => !hiddenIds[m.id])
           .map((raw) => {
@@ -1565,15 +1569,22 @@ onClose?.();
         <div className="px-3 py-2 bg-gray-50 text-gray-700 text-sm border-y">You are marked offline. Others may see you as inactive.</div>
       )}
 
-     {/* Composer (fixed for mobile) */}
-        <div
-          className={`
-            h-[60px] border-t bg-white px-2 md:px-3 flex items-center gap-2
-            sticky bottom-0 z-30
-            pb-[env(safe-area-inset-bottom)] pb-3
-            ${blockedBanner.iBlocked || blockedBanner.blockedMe ? "opacity-60 pointer-events-none" : ""}
-          `}
-        >
+    {/* Composer (fixed bottom, Messenger mobile perfect) */}
+<div
+  className={`
+    border-t bg-white px-2 md:px-3 flex items-center gap-2
+    sticky bottom-0 z-30
+    py-2
+    pb-[calc(env(safe-area-inset-bottom)+8px)]
+    ${blockedBanner.iBlocked || blockedBanner.blockedMe ? "opacity-60 pointer-events-none" : ""}
+  `}
+  style={{
+    minHeight: "64px",        // consistent bar height
+    maxHeight: "90px",        // prevents over-expansion
+    backgroundColor: "white"  // fixes pink bleed behind it
+  }}
+>
+
 
       
         {/* Emoji */}
