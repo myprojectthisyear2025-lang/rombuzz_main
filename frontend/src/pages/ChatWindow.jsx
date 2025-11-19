@@ -1070,15 +1070,7 @@ const matchesQuery = (msg, q) => {
 
   // ============= render =============
   return (
-      <main
-        className={`flex flex-col ${themeCls.wrap}`}
-        style={{
-          height: "100vh",
-          maxHeight: "100vh",
-          overflow: "hidden",
-          WebkitOverflowScrolling: "touch",
-        }}
-      >
+    <main className={`flex flex-col h-full min-h-0 ${themeCls.wrap}`}>
       {/* Header */}
       <div className={`h-[56px] sticky top-0 z-30 flex items-center justify-between px-3 border-b shadow-sm ${themeCls.pane}`}>
 <div className="flex flex-wrap items-center gap-2 sm:gap-3 overflow-x-auto">
@@ -1348,20 +1340,13 @@ onClose?.();
       </div>
 
             {/* Messages */}
-       <div
+        <div
           className={`
-            flex-1 overflow-y-auto px-3 md:px-4 py-2 space-y-1.5
+            flex-1 min-h-0 overflow-y-auto px-3 md:px-4 py-2 space-y-1.5
             ${themeCls.messages}
           `}
-          style={{
-            height: "calc(100vh - 120px)",  // header + composer height
-            maxHeight: "calc(100vh - 120px)",
-            overflowY: "auto",
-            WebkitOverflowScrolling: "touch",
-            scrollBehavior: "smooth",
-          }}
+          style={{ paddingBottom: "90px" }} // ensure space above composer
         >
-
           {messages
           .filter((m) => !hiddenIds[m.id])
           .map((raw) => {
@@ -1520,13 +1505,17 @@ onClick={() => setViewer({ open: true, message: m })}
 
      {/* Composer (fixed for mobile) */}
         <div
-          className={`
-            h-[60px] border-t bg-white px-2 md:px-3 flex items-center gap-2
-            sticky bottom-0 z-30
-            pb-[env(safe-area-inset-bottom)] pb-3
-            ${blockedBanner.iBlocked || blockedBanner.blockedMe ? "opacity-60 pointer-events-none" : ""}
-          `}
-        >
+            className={`
+              h-[60px] border-t bg-white px-2 md:px-3 flex items-center gap-2
+              z-30
+            `}
+            style={{
+              position: "relative",
+              bottom: 0,
+              flexShrink: 0,
+              paddingBottom: "env(safe-area-inset-bottom)",
+            }}
+          >
 
       
         {/* Emoji */}
