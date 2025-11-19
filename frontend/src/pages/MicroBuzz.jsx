@@ -1,15 +1,15 @@
-// src/pages/MicroBuzz.jsx
 import React, { useEffect, useRef, useState } from "react";
-import { io } from "socket.io-client";
 import { useNavigate } from "react-router-dom";
 
 //const socket = io("http://localhost:4000");
 //const API_BASE = "http://localhost:4000/api";
 //const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com/api";
 import { API_BASE } from "../config";
-import Radar from "../components/Radar";   // ← ADD THIS
+import Radar from "../components/Radar";
+import { ensureSocketAuth } from "../socket";
 
-const socket = io(process.env.REACT_APP_SOCKET_URL || "https://rombuzz-api.onrender.com");
+// Use the shared authenticated socket used across the app
+const socket = ensureSocketAuth();
 
 export default function MicroBuzz({ user }) {
   const navigate = useNavigate();
@@ -92,7 +92,7 @@ useEffect(() => {
   const [nearby, setNearby] = useState([]);
   const scanTimerRef = useRef(null);
   const isScanningRef = useRef(false);
-  const backoffRef = useRef(5000);
+  const backoffRef = useRef(2000);
 
   // ---------- Animation ----------
   const rafRef = useRef(null);
@@ -378,7 +378,7 @@ body: JSON.stringify({
   }
 
   // -------- Scanning
-  function startScanInterval() {
+   function startScanInterval() {
     stopScanInterval();
     scanTimerRef.current = setInterval(async () => {
       if (isScanningRef.current) return;
@@ -386,21 +386,22 @@ body: JSON.stringify({
       try {
         const pos = coords || (await getLocation());
         setCoords(pos);
-        // Re-activate to bump lastActive
+        // Re-activate to bump lastActive so you stay visible
         if (selfieUrl) await activatePresence(pos, selfieUrl);
         await scanNearby(pos);
-        backoffRef.current = 5000; // reset backoff on success
+        backoffRef.current = 2000; // keep base at 2s on success
       } catch (e) {
         console.warn("scan loop:", e);
         backoffRef.current = Math.min(
           20000,
-          (backoffRef.current || 5000) + 3000
+          (backoffRef.current || 2000) + 3000
         );
       } finally {
         isScanningRef.current = false;
       }
-    }, backoffRef.current);
+    }, 2000); // actual interval: 2s
   }
+
 
   function stopScanInterval() {
     if (scanTimerRef.current) {

@@ -377,16 +377,30 @@ useEffect(() => {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+  // Fix mobile viewport height (100vh issue on iOS/Android)
+  useEffect(() => {
+    const updateVh = () => {
+      document.documentElement.style.setProperty(
+        "--vh",
+        `${window.innerHeight * 0.01}px`
+      );
+    };
+    updateVh();
+    window.addEventListener("resize", updateVh);
+    return () => window.removeEventListener("resize", updateVh);
+  }, []);
 
   return (
-    <div
-      className={`fixed top-16 left-0 w-full h-[calc(100vh-64px)] overflow-hidden ${rootBg}`}
+   <div
+      className={`fixed top-16 left-0 w-full overflow-hidden ${rootBg}`}
       style={{
+        height: "calc(var(--vh, 1vh) * 100 - 64px)",
         fontSize: `${Number(gset.fontScale) || 100}%`,
         margin: 0,
         padding: 0,
       }}
     >
+
       {/* ==============================
           📱 MOBILE LAYOUT
       ============================== */}
@@ -462,14 +476,15 @@ useEffect(() => {
       </div>
     </motion.div>
   ) : (
-    <motion.div
+   <motion.div
       key="chat"
       initial={{ x: "100%", opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: "100%", opacity: 0 }}
       transition={{ duration: 0.20, ease: "easeInOut" }}
-      className="h-full"
+      className="h-[calc(100%-0px)] overflow-hidden"
     >
+
       <ChatWindowLazy
         socket={socketRef.current || getSocket()}
         me={user}
