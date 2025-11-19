@@ -1339,29 +1339,31 @@ onClose?.();
         </div>
       </div>
 
-            {/* Messages */}
-        <div
-          className={`
-            flex-1 min-h-0 overflow-y-auto px-3 md:px-4 py-2 space-y-1.5
-            ${themeCls.messages}
-          `}
-          style={{ paddingBottom: "90px" }} // ensure space above composer
-        >
-          {messages
+             {/* Messages */}
+      <div
+        className={`
+          flex-1 min-h-0 overflow-y-auto px-3 md:px-4 py-2 space-y-1.5
+          ${themeCls.messages}
+        `}
+        style={{ paddingBottom: "90px" }} // space above composer
+        onClick={() => setActionBar(null)} // tap blank area closes long-press bar
+      >
+        {messages
           .filter((m) => !hiddenIds[m.id])
           .map((raw) => {
             const m = maybeDecode(raw);
             const isMine = mine(m);
 
+            // ✨ Detect ephemeral (view-once) mode for styling
+            const isEphemeralOnce = m.ephemeral?.mode === "once";
 
-// ✨ Detect ephemeral (view-once) mode for styling
-const isEphemeralOnce = m.ephemeral?.mode === "once";
-
-            const bubbleBase = "max-w-[80%] md:max-w-[70%] px-3 py-2 rounded-2xl animate-chatfade break-words whitespace-pre-wrap [overflow-wrap:anywhere] inline-block";
-            const skin = isMine ? "bg-rose-500 text-white ml-auto" : "bg-white border border-gray-200 text-gray-800";
+            const bubbleBase =
+              "relative max-w-[80%] md:max-w-[70%] px-3 py-2 rounded-2xl animate-chatfade break-words whitespace-pre-wrap [overflow-wrap:anywhere] inline-block";
+            const skin = isMine
+              ? "bg-rose-500 text-white ml-auto"
+              : "bg-white border border-gray-200 text-gray-800";
 
             const canMsgEdit = canEdit(m);
-
             const showReplyHeader = !!m.replyTo;
 
             const reactions = m.reactions || {};
@@ -1371,17 +1373,30 @@ const isEphemeralOnce = m.ephemeral?.mode === "once";
             }, {});
 
             return (
-                    <div
+              <div
                 id={`msg-${m.id}`}
                 key={m.id}
-                className={`flex ${isMine ? "justify-end" : "justify-start"} ${selectMode && selectedIds[m.id] ? "ring-2 ring-rose-400 rounded-lg" : ""}`}
-                onClick={() => {
+                className={`flex ${
+                  isMine ? "justify-end" : "justify-start"
+                } ${
+                  selectMode && selectedIds[m.id]
+                    ? "ring-2 ring-rose-400 rounded-lg"
+                    : ""
+                }`}
+                onClick={(e) => {
+                  // don’t bubble to outer div (which closes bar)
+                  e.stopPropagation();
                   if (selectMode) {
-                    setSelectedIds(prev => ({ ...prev, [m.id]: !prev[m.id] }));
+                    setSelectedIds((prev) => ({
+                      ...prev,
+                      [m.id]: !prev[m.id],
+                    }));
                   }
                 }}
-                
-                onContextMenu={(e) => { e.preventDefault(); setActionBar(m); }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setActionBar(m);
+                }}
                 onMouseDown={() => startLongPress(m)}
                 onMouseUp={cancelLongPress}
                 onMouseLeave={cancelLongPress}
@@ -1389,88 +1404,134 @@ const isEphemeralOnce = m.ephemeral?.mode === "once";
                 onTouchMove={(e) => onTouchMove(e, m)}
                 onTouchEnd={() => onTouchEnd(m)}
               >
-                <div className={`items-end gap-2 ${isMine ? "flex-row-reverse justify-end" : "justify-start"} flex w-full`}>
+                <div
+                  className={`items-end gap-2 ${
+                    isMine
+                      ? "flex-row-reverse justify-end"
+                      : "justify-start"
+                  } flex w-full`}
+                >
                   {!isMine && (
-                    <img src={peer.avatar || "https://i.pravatar.cc/40"} alt="" className="h-7 w-7 rounded-full" />
+                    <img
+                      src={peer.avatar || "https://i.pravatar.cc/40"}
+                      alt=""
+                      className="h-7 w-7 rounded-full"
+                    />
                   )}
 
                   <div className={`${bubbleBase} ${skin}`}>
                     {/* Reply header */}
                     {showReplyHeader && (
-                      <div className={`text-[11px] mb-1 px-2 py-1 rounded-lg ${isMine ? "bg-white/20" : "bg-gray-100"}`}>
-                        Replying to: <span className="italic">{String(m.replyTo.preview || "").slice(0, 80)}</span>
+                      <div
+                        className={`text-[11px] mb-1 px-2 py-1 rounded-lg ${
+                          isMine ? "bg-white/20" : "bg-gray-100"
+                        }`}
+                      >
+                        Replying to:{" "}
+                        <span className="italic">
+                          {String(m.replyTo.preview || "").slice(0, 80)}
+                        </span>
                       </div>
                     )}
-{selectMode && (
-  <div className="mb-1 -mt-1 -mr-1 flex justify-end">
-    <input
-      type="checkbox"
-      className="h-4 w-4"
-      checked={!!selectedIds[m.id]}
-      onChange={(e) => {
-        const on = e.target.checked;
-        setSelectedIds(prev => {
-          const next = { ...prev };
-          if (on) next[m.id] = true; else delete next[m.id];
-          return next;
-        });
-      }}
-      onClick={(e) => e.stopPropagation()}
-    />
-  </div>
-)}
+
+                    {selectMode && (
+                      <div className="mb-1 -mt-1 -mr-1 flex justify-end">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={!!selectedIds[m.id]}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setSelectedIds((prev) => {
+                              const next = { ...prev };
+                              if (on) next[m.id] = true;
+                              else delete next[m.id];
+                              return next;
+                            });
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                    )}
 
                     {/* body (text/image/video) */}
-                   {/* body (text/image/video) */}
-   
-  {isEphemeralOnce && (
-    <div className="absolute -top-2 -right-2 text-xs bg-yellow-300 text-yellow-900 rounded-full px-1.5 py-0.5 shadow">
-      ⚡
-    </div>
-  )}
+                    {isEphemeralOnce && (
+                      <div className="absolute -top-2 -right-2 text-xs bg-yellow-300 text-yellow-900 rounded-full px-1.5 py-0.5 shadow">
+                        ⚡
+                      </div>
+                    )}
 
-{m.type === "image" && m.url ? (
-  <img
-    src={m.url}
-    alt=""
-    className="rounded-lg max-h-72 object-contain cursor-pointer"
-onClick={() => setViewer({ open: true, message: m })}
-  />
-) : m.type === "video" && m.url ? (
-  <video controls src={m.url} className="rounded-lg max-h-72" />
-) : (
-  <div className="break-words whitespace-pre-wrap [overflow-wrap:anywhere] inline-block max-w-full">
-    {(() => {
-      const hasText = typeof m.text === "string" && m.text.length > 0;
-      const isRBZ   = hasText && m.text.startsWith(RBZ_TAG);
-      const t = isRBZ ? (m.textFallback || "") : (hasText ? m.text : (m.textFallback || ""));
-      return t ? highlight(t, searchQuery) : "[empty]";
-    })()}
-  </div>
-
-
-)}
-
+                    {m.type === "image" && m.url ? (
+                      <img
+                        src={m.url}
+                        alt=""
+                        className="rounded-lg max-h-72 object-contain cursor-pointer"
+                        onClick={() =>
+                          setViewer({ open: true, message: m })
+                        }
+                      />
+                    ) : m.type === "video" && m.url ? (
+                      <video
+                        controls
+                        src={m.url}
+                        className="rounded-lg max-h-72"
+                      />
+                    ) : (
+                      <div className="break-words whitespace-pre-wrap [overflow-wrap:anywhere] inline-block max-w-full">
+                        {(() => {
+                          const hasText =
+                            typeof m.text === "string" &&
+                            m.text.length > 0;
+                          const isRBZ =
+                            hasText && m.text.startsWith(RBZ_TAG);
+                          const t = isRBZ
+                            ? m.textFallback || ""
+                            : hasText
+                            ? m.text
+                            : m.textFallback || "";
+                          return t ? highlight(t, searchQuery) : "[empty]";
+                        })()}
+                      </div>
+                    )}
 
                     {/* footer */}
                     <div className="text-[10px] opacity-70 mt-0.5 flex items-center gap-1">
-                      {new Date(m.time || m.createdAt || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {new Date(
+                        m.time || m.createdAt || Date.now()
+                      ).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                       {m.edited && <span>(edited)</span>}
                       {m._temp && <span>• sending…</span>}
                       {isMine && !m._temp && (
                         <>
                           <span>•</span>
-                          <span title={seenMap[m.id] ? "Seen" : "Sent"}>{seenMap[m.id] ? "✓✓" : "•"}</span>
+                          <span
+                            title={
+                              seenMap[m.id] ? "Seen" : "Sent"
+                            }
+                          >
+                            {seenMap[m.id] ? "✓✓" : "•"}
+                          </span>
                         </>
                       )}
                     </div>
 
                     {/* reactions row */}
                     {!!Object.keys(reactionCounts).length && (
-                      <div className={`mt-1 text-[12px] ${isMine ? "opacity-90" : "text-gray-600"}`}>
-                        {Object.entries(reactionCounts).map(([e, c]) => (
-                          <span key={e} className="mr-2">{e} {c}</span>
-                        ))}
+                      <div
+                        className={`mt-1 text-[12px] ${
+                          isMine ? "opacity-90" : "text-gray-600"
+                        }`}
+                      >
+                        {Object.entries(reactionCounts).map(
+                          ([e, c]) => (
+                            <span key={e} className="mr-2">
+                              {e} {c}
+                            </span>
+                          )
+                        )}
                       </div>
                     )}
                   </div>
@@ -1480,6 +1541,7 @@ onClick={() => setViewer({ open: true, message: m })}
           })}
         <div ref={chatEndRef} />
       </div>
+
 
       {/* Reply preview bar */}
       {replyTo && (
@@ -1600,96 +1662,138 @@ onClick={() => setViewer({ open: true, message: m })}
   </div>
 )}
 
-      {/* Long-press bottom action bar (like Messenger) */}
-     {actionBarVisible && (
-  <div className="fixed left-0 right-0 bottom-[60px] z-40">
-    <div className="mx-auto w-full max-w-md bg-white/95 backdrop-blur border rounded-2xl shadow-lg p-2 flex items-center justify-around">
-      {/* Reactions via emoji picker quick open */}
-      {/* Quick reactions row */}
-<div className="flex items-center gap-1">
-  {["❤️","😂","👍","😮","😍","😢"].map(e => (
-    <button
-      key={e}
-      className="px-2 py-1 rounded hover:bg-gray-100 text-lg"
-      onClick={() => { openEmojiReact(actionBar, e); setActionBar(null); }}
-      title={`React ${e}`}
-    >{e}</button>
-  ))}
-  <button
-    className="px-2 py-1 rounded hover:bg-gray-100 text-sm"
-    onClick={() => setReactFor(actionBar)}   // 👈 opens the EmojiPicker overlay you already added
-    title="More…"
-  >
-    More…
-  </button>
-</div>
-
-<button
-  className="px-3 py-1 rounded hover:bg-gray-100"
-  onClick={() => {
-    const dec = maybeDecode(actionBar);
-    setReplyTo({ id: actionBar.id, type: dec.type || "text", preview: dec.url || dec.text || "" });
-    setActionBar(null);
-  }}
->
-  Reply
-</button>
-
-<button
-  className="px-3 py-1 rounded hover:bg-gray-100"
-  onClick={() => {
-    const id = actionBar.id;
-    setPinnedIds(prev => {
-      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
-      setLS(k(roomId, "pinnedIds"), next);
-      return next;
-    });
-    setActionBar(null);
-  }}
->
-  {pinnedIds.includes(actionBar?.id) ? "Unpin" : "Pin"}
-</button>
-
-
-      {mine(actionBar) && (
-        <button
-          className="px-3 py-1 rounded hover:bg-gray-100"
-          onClick={() => {
-            if (!canEdit(actionBar)) return alert("Edit window expired (1h).");
-            editMessage(actionBar);
-            setActionBar(null);
-          }}
+         {/* Long-press overlay: tap outside to close (Messenger-style) */}
+      {actionBarVisible && (
+        <div
+          className="fixed inset-0 z-40 flex items-end justify-center bg-black/10"
+          onClick={() => setActionBar(null)} // tap backdrop closes
         >
-          Edit
-        </button>
+          <div
+            className="w-full max-w-md bg-white/95 backdrop-blur border rounded-2xl shadow-lg p-2 mb-[60px] flex flex-col gap-2"
+            onClick={(e) => e.stopPropagation()} // keep clicks on sheet itself
+          >
+            {/* Quick reaction row */}
+            <div className="flex items-center justify-center gap-1 pb-1 border-b">
+              {["❤️", "😂", "👍", "😮", "😍", "😢"].map((e) => (
+                <button
+                  key={e}
+                  className="px-2 py-1 rounded-full hover:bg-gray-100 text-lg"
+                  onClick={() => {
+                    openEmojiReact(actionBar, e);
+                    setActionBar(null);
+                  }}
+                  title={`React ${e}`}
+                >
+                  {e}
+                </button>
+              ))}
+              <button
+                className="ml-1 px-2 py-1 rounded-full hover:bg-gray-100 text-xs"
+                onClick={() => setReactFor(actionBar)}
+                title="More…"
+              >
+                More…
+              </button>
+            </div>
+
+            {/* Text actions row */}
+            <div className="flex flex-wrap items-center justify-between gap-1 text-sm">
+              <button
+                className="px-3 py-1 rounded-lg hover:bg-gray-100"
+                onClick={() => {
+                  const dec = maybeDecode(actionBar);
+                  setReplyTo({
+                    id: actionBar.id,
+                    type: dec.type || "text",
+                    preview: dec.url || dec.text || "",
+                  });
+                  setActionBar(null);
+                }}
+              >
+                Reply
+              </button>
+
+              <button
+                className="px-3 py-1 rounded-lg hover:bg-gray-100"
+                onClick={() => {
+                  const id = actionBar.id;
+                  setPinnedIds((prev) => {
+                    const next = prev.includes(id)
+                      ? prev.filter((x) => x !== id)
+                      : [...prev, id];
+                    setLS(k(roomId, "pinnedIds"), next);
+                    return next;
+                  });
+                  setActionBar(null);
+                }}
+              >
+                {pinnedIds.includes(actionBar?.id) ? "Unpin" : "Pin"}
+              </button>
+
+              {mine(actionBar) && (
+                <button
+                  className="px-3 py-1 rounded-lg hover:bg-gray-100"
+                  onClick={() => {
+                    if (!canEdit(actionBar)) {
+                      alert("Edit window expired (1h).");
+                      return;
+                    }
+                    editMessage(actionBar);
+                    setActionBar(null);
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+
+              {mine(actionBar) ? (
+                <button
+                  className="px-3 py-1 rounded-lg hover:bg-gray-100"
+                  onClick={() => {
+                    unsendForAll(actionBar);
+                    setActionBar(null);
+                  }}
+                >
+                  Unsend for everyone
+                </button>
+              ) : (
+                <button
+                  className="px-3 py-1 rounded-lg hover:bg-gray-100"
+                  onClick={() => {
+                    unsendForMe(actionBar);
+                    setActionBar(null);
+                  }}
+                >
+                  Delete for me
+                </button>
+              )}
+
+              {mine(actionBar) && (
+                <button
+                  className="px-3 py-1 rounded-lg hover:bg-gray-100"
+                  onClick={() => {
+                    unsendForMe(actionBar);
+                    setActionBar(null);
+                  }}
+                >
+                  Delete for all
+                </button>
+              )}
+
+              <button
+                className="px-3 py-1 rounded-lg hover:bg-gray-100"
+                onClick={() => {
+                  copyMessage(actionBar);
+                  setActionBar(null);
+                }}
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
-      {mine(actionBar) ? (
-        <button className="px-3 py-1 rounded hover:bg-gray-100" onClick={() => { unsendForAll(actionBar); setActionBar(null); }}>
-          Unsend for everyone
-        </button>
-      ) : (
-        <button className="px-3 py-1 rounded hover:bg-gray-100" onClick={() => { unsendForMe(actionBar); setActionBar(null); }}>
-          Delete for me
-        </button>
-      )}
-
-      {mine(actionBar) && (
-        <button className="px-3 py-1 rounded hover:bg-gray-100" onClick={() => { unsendForMe(actionBar); setActionBar(null); }}>
-          Unsend for me
-        </button>
-      )}
-
-      <button className="px-3 py-1 rounded hover:bg-gray-100" onClick={() => { copyMessage(actionBar); setActionBar(null); }}>
-        Copy
-      </button>
-
-      <button className="px-3 py-1 rounded hover:bg-gray-100 text-gray-500" onClick={() => setActionBar(null)}>
-        Close
-      </button>
-    </div>
-  </div>
-)}
 
 
 {/* Call modal */}
