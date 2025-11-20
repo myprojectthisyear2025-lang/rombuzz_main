@@ -604,20 +604,39 @@ export default function Discover() {
 
   /* ---------------------------
    Socket
-  --------------------------- */
+--------------------------- */
+useEffect(() => {
+  if (socketRef.current) return; // prevent re-init
+
+  const s = io(SOCKET_URL, {
+    auth: { token: token() },
+    transports: ["websocket", "polling"],
+  });
+
+  socketRef.current = s;
+
+  s.on("connect", () => {
+    console.log("🛰️ SOCKET connected in Discover:", s.id);
+    s.emit("user:register", me?.id);
+  });
+
   s.on("match", (data) => {
     console.log("🎉 Discover match event:", data);
     const { otherUserId } = data || {};
 
-    // 🔥 Global celebration overlay (same as MicroBuzz)
     window.dispatchEvent(new CustomEvent("match:celebrate", { detail: data }));
 
-    // Optional: local message for the current top card
     if (current && otherUserId === current.id) {
       setMessage("💞 It's a match!");
       setReveal(1);
     }
   });
+
+  return () => {
+    s.disconnect();
+  };
+}, [me, current]);
+
 
 
   /* ---------------------------
