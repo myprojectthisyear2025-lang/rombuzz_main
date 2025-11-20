@@ -98,18 +98,33 @@ const THEMES = {
 export default function ChatWindow({ socket, me, peer, onClose }) {
   const navigate = useNavigate();
 
-  // ============= computed & auth =============
+   // ============= computed & auth =============
   const myId = me.id || me._id;
   const peerId = peer.id || peer._id;
   const roomId = useMemo(() => {
     const a = String(myId), b = String(peerId);
     return a < b ? `${a}_${b}` : `${b}_${a}`;
   }, [myId, peerId]);
-  const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+  const token =
+    localStorage.getItem("token") || sessionStorage.getItem("token");
+
+  // 🔥 Tell the rest of the app which chat is currently active
+  useEffect(() => {
+    if (!peerId) return;
+
+    window.dispatchEvent(
+      new CustomEvent("chat:active", { detail: { peerId } })
+    );
+
+    return () => {
+      window.dispatchEvent(new Event("chat:inactive"));
+    };
+  }, [peerId]);
 
   // ============= state =============
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+
   const [typing, setTyping] = useState(false);
   const [peerOnline, setPeerOnline] = useState(false);
   const [viewer, setViewer] = useState({ open: false, message: null });
@@ -348,15 +363,35 @@ const incomingToneRef = useRef(null); // ringtone for the receiver
   // ✅ join room for messages
   socket.emit("joinRoom", roomId);
 
-  // ✅ fetch initial online/offline snapshot once
-fetch(`${API_BASE}/presence/${peerId}`)
-  .then((r) => r.json())
-  .then((d) => setPeerOnline(!!d.online))
-  .catch(() => {});
+    // ✅ fetch initial online/offline snapshot once
+  fetch(`${API_BASE}/presence/${peerId}`)
+    .then((r) => r.json())
+    .then((d) => setPeerOnline(!!d.online))
+    .catch(() => {});
 
-
+  // 🔥 Incoming message handler (auto-clears unread when chatting with this peer)
   const onMsg = (raw) => {
     const msg = maybeDecode(raw);
+
+    // If this message is from the person we are currently chatting with,
+    // clear unread for this peer and update navbar badge.
+    if (msg.fromId === peerId || msg.from === peerId) {
+      try {
+        let map = JSON.parse(
+          localStorage.getItem("RBZ:unread:map") || "{}"
+        );
+        map[peerId] = 0;
+        localStorage.setItem("RBZ:unread:map", JSON.stringify(map));
+
+        const total = Object.values(map).reduce((a, b) => a + b, 0);
+        localStorage.setItem("RBZ:unread:total", String(total));
+
+        window.dispatchEvent(
+          new CustomEvent("rbz:unread", { detail: { total } })
+        );
+      } catch {}
+    }
+
     setMessages((prev) =>
       prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
     );
@@ -365,10 +400,11 @@ fetch(`${API_BASE}/presence/${peerId}`)
   const onTyping = ({ fromId }) => {
     if (fromId === peerId) {
       setTyping(true);
-      clearTimeout(onTyping._t);
-      onTyping._t = setTimeout(() => setTyping(false), 1500);
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => setTyping(false), 2000);
     }
   };
+
 
   const onEdit = ({ msgId, text }) => {
     setMessages((prev) =>

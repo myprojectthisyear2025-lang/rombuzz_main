@@ -154,16 +154,31 @@ export default function Chat() {
 })
 
       .then((r) => r.json())
-      .then((data) => {
-        // server returns an array; also support { matches: [...] }
-        const list = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.matches)
-          ? data.matches
-          : [];
-        setMatches(list);
-        setFiltered(list);
-      })
+     .then((data) => {
+  let list = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.matches)
+    ? data.matches
+    : [];
+
+  // 🆕 Sort by most recent message (Facebook Messenger style)
+  list = list
+    .map((m) => {
+      const ts =
+        m.lastMessageTime ||
+        m.lastMessage?.time ||
+        m.lastMessage?.createdAt ||
+        m.updatedAt ||
+        m.createdAt ||
+        0;
+      return { ...m, _sortTime: new Date(ts).getTime() || 0 };
+    })
+    .sort((a, b) => b._sortTime - a._sortTime);
+
+  setMatches(list);
+  setFiltered(list);
+})
+
       .catch(() => {
         setMatches([]);
         setFiltered([]);
@@ -442,9 +457,25 @@ useEffect(() => {
           const count = unread[id] || 0;
 
           return (
-            <div
+           <div
               key={id}
-              onClick={() => setActiveMatch(m)}
+              onClick={() => {
+                // 🔥 Clear unread for this peer immediately
+                try {
+                  let map = JSON.parse(localStorage.getItem("RBZ:unread:map") || "{}");
+                  map[id] = 0;
+                  localStorage.setItem("RBZ:unread:map", JSON.stringify(map));
+
+                  const total = Object.values(map).reduce((a, b) => a + b, 0);
+                  localStorage.setItem("RBZ:unread:total", String(total));
+
+                  window.dispatchEvent(
+                    new CustomEvent("rbz:unread", { detail: { total } })
+                  );
+                } catch {}
+
+                setActiveMatch(m);
+              }}
               className="flex items-center gap-3 p-3 border-b hover:bg-rose-50 cursor-pointer"
             >
               <img
@@ -452,6 +483,7 @@ useEffect(() => {
                 alt=""
                 className="h-10 w-10 rounded-full object-cover border"
               />
+
               <div className="flex-1 min-w-0">
                 <div className="font-semibold truncate">{name}</div>
                 <div className="text-xs text-gray-500 flex items-center gap-1">

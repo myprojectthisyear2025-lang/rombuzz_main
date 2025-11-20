@@ -2,8 +2,18 @@
 import { io } from "socket.io-client";
 import { SOCKET_URL } from "./config";
 
+// Track currently active chat peer
+window.__activeChatId = null;
+window.addEventListener("chat:active", (e) => {
+  window.__activeChatId = e.detail.peerId;
+});
+window.addEventListener("chat:inactive", () => {
+  window.__activeChatId = null;
+});
+
 // Single socket instance (reused everywhere)
 let socket = null;
+
 
 // Get token from localStorage
 function getToken() {
@@ -102,11 +112,18 @@ socket.on("comment:new", (payload) => {
       window.dispatchEvent(new CustomEvent("meet:place:selected", { detail: data }));
     });
 
-    // ✅ NEW: direct message event (for chat + navbar badges)
+       // ✅ NEW: direct message event (patched for unread auto-clear)
     socket.on("direct:message", (msg) => {
       console.log("💬 direct:message received:", msg);
 
-      // 🔔 Broadcast globally so Navbar, Chat.jsx, etc. can update badges
+      // 🧠 If user is actively chatting with this peer → do NOT increment unread
+      if (window.__activeChatId && (msg.fromId === window.__activeChatId || msg.from === window.__activeChatId)) {
+        return window.dispatchEvent(
+          new CustomEvent("direct:message", { detail: msg })
+        );
+      }
+
+      // 🔔 Otherwise broadcast normally so unread count increases
       window.dispatchEvent(new CustomEvent("direct:message", { detail: msg }));
 
       // --- optional: sound or vibration (if enabled) ---
@@ -118,6 +135,7 @@ socket.on("comment:new", (payload) => {
         }
       } catch {}
     });
+
         // 💞 Match event → trigger global RomBuzz celebration
    socket.on("match", (payload) => {
   console.log("💞 match event received:", payload);

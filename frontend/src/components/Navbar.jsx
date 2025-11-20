@@ -227,15 +227,20 @@ if (!user && hideNavbar) return null;
                 {link.name}
                 {/* Chat badge */}
                 {isChat && chatUnread > 0 && (
-                  <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1 rounded-full text-[11px] leading-[18px] text-white bg-rose-600 text-center">
-                    {chatUnread > 99 ? "99+" : chatUnread}
-                  </span>
+                <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
+                    rounded-full text-[11px] leading-[18px] text-rose-600 bg-white text-center shadow-md">
+                      {chatUnread > 99 ? "99+" : chatUnread}
+                    </span>
+
+
                 )}
                 {/* Notifications badge */}
                 {isNotif && (unread > 0 || buzzUnread > 0) && (
-                  <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1 rounded-full text-[11px] leading-[18px] text-white bg-rose-600 text-center">
-                    {buzzUnread > 0 ? buzzUnread : unread > 99 ? "99+" : unread}
-                  </span>
+                 <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
+                    rounded-full text-[11px] leading-[18px] text-rose-600 bg-white text-center shadow-md">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+
                 )}
               </Link>
             );
@@ -280,14 +285,18 @@ if (!user && hideNavbar) return null;
                 <span className="text-lg">{link.icon}</span>
                 {link.name}
                 {isChat && chatUnread > 0 && (
-                  <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1 rounded-full text-[11px] leading-[18px] text-white bg-rose-600 text-center">
-                    {chatUnread > 99 ? "99+" : chatUnread}
-                  </span>
+                 <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
+                    rounded-full text-[11px] leading-[18px] text-rose-600 bg-white text-center shadow-md">
+                      {chatUnread > 99 ? "99+" : chatUnread}
+                    </span>
+
                 )}
                 {isNotif && (unread > 0 || buzzUnread > 0) && (
-                  <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1 rounded-full text-[11px] leading-[18px] text-white bg-rose-600 text-center">
-                    {buzzUnread > 0 ? buzzUnread : unread > 99 ? "99+" : unread}
-                  </span>
+                  <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
+                    rounded-full text-[11px] leading-[18px] text-rose-600 bg-white text-center shadow-md">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+
                 )}
               </Link>
             );
