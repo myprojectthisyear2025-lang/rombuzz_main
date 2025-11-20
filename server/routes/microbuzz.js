@@ -299,24 +299,28 @@ if (alreadyMatched) {
   //  - View Profile (href)
   //  - Chat (entity: "chat", entityId: roomId)
   try {
-    await Promise.all([
-      // 👤 For "from" user (e.g. John)
-      sendNotification(fromId, toId, "match", {
-        via: "microbuzz",
-        message: `You and ${toName} matched with each other 💞`,
-        href: `/viewProfile/${toId}`,   // View Katy
-        entity: "chat",
-        entityId: roomId,               // Direct chat
-      }),
-      // 👤 For "to" user (e.g. Katy)
-      sendNotification(toId, fromId, "match", {
-        via: "microbuzz",
-        message: `You and ${fromName} matched with each other 💞`,
-        href: `/viewProfile/${fromId}`, // View John
-        entity: "chat",
-        entityId: roomId,
-      }),
-    ]);
+  await Promise.all([
+  sendNotification(fromId, {
+    type: "match",
+    fromId: toId,
+    via: "microbuzz",
+    message: `You and ${toName} matched with each other 💞`,
+    href: `/viewProfile/${toId}`,
+    entity: "chat",
+    entityId: roomId,
+  }),
+
+  sendNotification(toId, {
+    type: "match",
+    fromId: fromId,
+    via: "microbuzz",
+    message: `You and ${fromName} matched with each other 💞`,
+    href: `/viewProfile/${fromId}`,
+    entity: "chat",
+    entityId: roomId,
+  }),
+]);
+
   } catch (e) {
     console.warn("❌ MicroBuzz match notification failed:", e);
   }
@@ -387,24 +391,28 @@ if (reverseBuzz) {
     // John: "You and Katy matched..." → View Katy + Chat
     // Katy: "You and John matched..." → View John + Chat
     try {
-      await Promise.all([
-        // 👤 For "from" user (e.g. John)
-        sendNotification(fromId, toId, "match", {
-          via: "microbuzz",
-          message: `You and ${toName} matched with each other 💞`,
-          href: `/viewProfile/${toId}`,
-          entity: "chat",
-          entityId: roomId,
-        }),
-        // 👤 For "to" user (e.g. Katy)
-        sendNotification(toId, fromId, "match", {
-          via: "microbuzz",
-          message: `You and ${fromName} matched with each other 💞`,
-          href: `/viewProfile/${fromId}`,
-          entity: "chat",
-          entityId: roomId,
-        }),
-      ]);
+     await Promise.all([
+  sendNotification(fromId, {
+    type: "match",
+    fromId: toId,
+    via: "microbuzz",
+    message: `You and ${toName} matched with each other 💞`,
+    href: `/viewProfile/${toId}`,
+    entity: "chat",
+    entityId: roomId,
+  }),
+
+  sendNotification(toId, {
+    type: "match",
+    fromId: fromId,
+    via: "microbuzz",
+    message: `You and ${fromName} matched with each other 💞`,
+    href: `/viewProfile/${fromId}`,
+    entity: "chat",
+    entityId: roomId,
+  }),
+]);
+
     } catch (e) {
       console.warn("❌ MicroBuzz match notification failed:", e);
     }
