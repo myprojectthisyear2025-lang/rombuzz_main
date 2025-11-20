@@ -46,7 +46,17 @@ const {
   incMatchStreakOut,
 } = require("../utils/helpers");
 
-const { io, onlineUsers } = global;
+// Socket helpers – defer lookup so we don't capture undefined at require-time
+function getIO() {
+  return global.io || null;
+}
+
+function getOnlineUsers() {
+  if (!global.onlineUsers) {
+    global.onlineUsers = {};
+  }
+  return global.onlineUsers;
+}
 const ENABLE_LIKES_MATCHES = true;
 const buzzLocks = new Set();
 
@@ -113,9 +123,15 @@ router.post("/likes", authMiddleware, async (req, res) => {
   // Shared chat room id (consistent with MicroBuzz)
   const roomId = [from, to].sort().join("_");
 
-  // SOCKET MATCH EVENT FOR BOTH USERS
-  if (onlineUsers[from]) {
-    io.to(onlineUsers[from]).emit("match", {
+   // ===========================
+  // SAFE SOCKET LOOKUP
+  // ===========================
+  const io = getIO();
+  const onlineUsers = getOnlineUsers();
+
+  // SOCKET MATCH EVENT FOR BOTH USERS (safe guarded)
+  if (io && onlineUsers[from]) {
+    io.to(String(onlineUsers[from])).emit("match", {
       otherUserId: to,
       otherName: toName,
       roomId,
@@ -123,14 +139,15 @@ router.post("/likes", authMiddleware, async (req, res) => {
     });
   }
 
-  if (onlineUsers[to]) {
-    io.to(onlineUsers[to]).emit("match", {
+  if (io && onlineUsers[to]) {
+    io.to(String(onlineUsers[to])).emit("match", {
       otherUserId: from,
       otherName: fromName,
       roomId,
       via: "discover",
     });
   }
+
 
   // MATCH NOTIFICATIONS FOR BOTH USERS (Symmetrical)
   await Promise.all([
@@ -160,15 +177,19 @@ router.post("/likes", authMiddleware, async (req, res) => {
 
         else {
       // 💌 Discover Like → Match Request
+          const io = getIO();
+      const onlineUsers = getOnlineUsers();
+
       const targetSocket = onlineUsers[to];
-      if (targetSocket) {
+      if (io && targetSocket) {
         const fromUser = baseSanitizeUser(self);
-        io.to(targetSocket).emit("buzz_request", {
+        io.to(String(targetSocket)).emit("buzz_request", {
           fromId: from,
           name: fromUser.firstName || "Someone nearby",
           selfieUrl: fromUser.avatar || "",
         });
       }
+
 
       const fromName = self?.firstName || "Someone nearby";
       await sendNotification(to, {
@@ -256,8 +277,11 @@ router.post("/likes/respond", authMiddleware, async (req, res) => {
     const roomId = [fromId, toId].sort().join("_");
 
     // 🎉 Socket "match" event for both users (Discover)
-    if (onlineUsers[fromId]) {
-      io.to(onlineUsers[fromId]).emit("match", {
+     const io = getIO();
+    const onlineUsers = getOnlineUsers();
+
+    if (io && onlineUsers[fromId]) {
+      io.to(String(onlineUsers[fromId])).emit("match", {
         otherUserId: toId,
         otherName: toName,
         roomId,
@@ -265,14 +289,15 @@ router.post("/likes/respond", authMiddleware, async (req, res) => {
       });
     }
 
-    if (onlineUsers[toId]) {
-      io.to(onlineUsers[toId]).emit("match", {
+    if (io && onlineUsers[toId]) {
+      io.to(String(onlineUsers[toId])).emit("match", {
         otherUserId: fromId,
         otherName: fromName,
         roomId,
         via: "discover",
       });
     }
+
 
     // 🔔 Match notifications for BOTH (same shape as MicroBuzz)
     await Promise.all([
