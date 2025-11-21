@@ -15,30 +15,28 @@ const matchSchema = new mongoose.Schema(
   {
     id: { type: String, required: true, unique: true, index: true },
 
-    // For compatibility with older routes
-    user1: { type: String, required: true, index: true },
-    user2: { type: String, required: true, index: true },
-
-    // ✅ Added field used by all migrated routes (array-based lookups)
-    users: { type: [String], required: true, index: true },
+    // ⭐ Clean modern style (this is what the entire backend uses)
+    users: {
+      type: [String],
+      required: true,
+      validate: {
+        validator: (arr) => Array.isArray(arr) && arr.length === 2,
+        message: "Match.users must contain exactly 2 user IDs",
+      },
+      index: true,
+    },
 
     status: {
       type: String,
-      enum: ["pending", "matched", "rejected", "blocked"],
+      enum: ["matched"],
       default: "matched",
     },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
 
-// 🧠 Automatically fill `users` array
-matchSchema.pre("save", function (next) {
-  if (!this.users || this.users.length !== 2) {
-    this.users = [this.user1, this.user2];
-  }
-  next();
-});
-
-module.exports = mongoose.models.Match || mongoose.model("Match", matchSchema);
+module.exports =
+  mongoose.models.Match || mongoose.model("Match", matchSchema);
