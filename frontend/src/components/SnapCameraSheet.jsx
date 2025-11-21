@@ -5,46 +5,24 @@ import React, { useEffect, useRef, useState } from "react";
  * ============================================================
  * 📸 SnapCameraSheet (RomBuzz Premium Snapchat-style camera)
  *
- * Behavior:
- * - Fullscreen overlay when `open` is true
- * - Live camera preview (front/back toggle)
- * - Flash:
- *    • Back camera → tries to use real torch if supported
- *    • Front camera → white-screen flash effect when taking photo
- * - Mood filters (exclusive Snapchat-style slide filters):
- *    • Natural
- *    • Flirty Mode
- *    • Cute Mode
- *    • Mystery Mode
- *    • Calm Vibes
- *    • Romantic Glow
- *    • Portrait Blur
- * - Pick photo from gallery instead of camera
- * - After capture:
- *    • "View once"  vs  "Keep in chat" toggle
- *    • Add caption text
- *    • AI-style caption suggestions (client-side)
- *    • Simple toolbar buttons: Text, Draw, Sticker, Crop, Close (draw/sticker/crop show "coming soon" alert for now)
- *    • Big SEND button
+ * Layout:
+ * - Fullscreen overlay
+ * - Inside camera frame (capture mode):
+ *     • Top-left: flash button
+ *     • Top-right: close (X)
+ *     • Center: live camera with mood filter overlay
+ *     • Above bottom: current filter pill (emoji + label)
+ *     • Bottom-left: gallery picker
+ *     • Bottom-center: shutter button
+ *     • Bottom-right: flip front/back camera
  *
- * Payload back to parent (ChatWindow) via onSend:
- *   {
- *     type: "image",
- *     url: string,
- *     ephemeral: { mode: "once" | "keep" },
- *     filter: { key: string, mood: string, label: string },
- *     caption?: string,
- *     aiCaption?: string,
- *     source: "camera" | "gallery"
- *   }
+ * Filters:
+ * - Swipe left/right on the camera area to change filters
+ *   (Snapchat-style slider filters, no visible row of buttons)
  *
- * Props:
- *   open: boolean
- *   onClose(): void
- *   onSend(payload): Promise<void>
- *   cloudName: string         // Cloudinary cloud
- *   uploadPreset: string      // Cloudinary unsigned preset
- *   defaultViewOnce?: boolean // defaults to true
+ * After capture (review mode):
+ * - Caption, AI caption, view-once/keep toggle, send button
+ * - Same logic as before, layout adjusted but behavior unchanged
  * ============================================================
  */
 
@@ -52,6 +30,7 @@ const MOOD_FILTERS = [
   {
     key: "natural",
     label: "Natural",
+    emoji: "🌿",
     mood: "none",
     css: "none",
     overlay:
@@ -60,6 +39,7 @@ const MOOD_FILTERS = [
   {
     key: "flirty",
     label: "Flirty Mode",
+    emoji: "😏",
     mood: "flirty",
     css: "saturate(1.35) contrast(1.1) brightness(1.05)",
     overlay:
@@ -68,6 +48,7 @@ const MOOD_FILTERS = [
   {
     key: "cute",
     label: "Cute Mode",
+    emoji: "🧁",
     mood: "cute",
     css: "saturate(1.4) brightness(1.08)",
     overlay:
@@ -76,6 +57,7 @@ const MOOD_FILTERS = [
   {
     key: "mystery",
     label: "Mystery Mode",
+    emoji: "🕶️",
     mood: "mystery",
     css: "contrast(1.2) brightness(0.9) saturate(0.95)",
     overlay:
@@ -84,6 +66,7 @@ const MOOD_FILTERS = [
   {
     key: "calm",
     label: "Calm Vibes",
+    emoji: "🌙",
     mood: "calm",
     css: "saturate(0.9) brightness(1.02)",
     overlay:
@@ -92,6 +75,7 @@ const MOOD_FILTERS = [
   {
     key: "romantic",
     label: "Romantic Glow",
+    emoji: "❤️",
     mood: "romantic",
     css: "saturate(1.25) contrast(1.05) hue-rotate(10deg)",
     overlay:
@@ -100,6 +84,7 @@ const MOOD_FILTERS = [
   {
     key: "portrait",
     label: "Portrait Blur",
+    emoji: "🔆",
     mood: "portrait",
     css: "blur(1px) contrast(1.12) saturate(1.15)",
     overlay:
@@ -184,6 +169,9 @@ function SnapCameraSheet({
   const [caption, setCaption] = useState("");
   const [aiCaption, setAiCaption] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+
+  // swipe state for filters
+  const [swipeStartX, setSwipeStartX] = useState(null);
 
   // Clean up ObjectURL when preview changes
   useEffect(() => {
@@ -314,10 +302,10 @@ function SnapCameraSheet({
     canvas.height = vh;
     const ctx = canvas.getContext("2d");
 
+    // NOTE: CSS filter is applied on <video>, this is a visual match
     const filterCss = getActiveFilter().css;
     if (filterCss && filterCss !== "none") {
-      // approximate filter by drawing normally; true CSS filter is on video element only
-      // (this is a visual match, not pixel-perfect)
+      // could apply additional processing here in future
     }
     ctx.drawImage(video, 0, 0, vw, vh);
 
@@ -456,68 +444,60 @@ function SnapCameraSheet({
     onClose?.();
   };
 
+  const changeFilterBy = (delta) => {
+    const currentIndex = MOOD_FILTERS.findIndex(
+      (f) => f.key === activeFilterKey
+    );
+    if (currentIndex === -1) return;
+    let nextIndex = currentIndex + delta;
+    if (nextIndex < 0) nextIndex = 0;
+    if (nextIndex >= MOOD_FILTERS.length)
+      nextIndex = MOOD_FILTERS.length - 1;
+    setActiveFilterKey(MOOD_FILTERS[nextIndex].key);
+  };
+
+  const handleSwipeStart = (clientX) => {
+    if (mode !== "capture") return;
+    setSwipeStartX(clientX);
+  };
+
+  const handleSwipeEnd = (clientX) => {
+    if (mode !== "capture") return;
+    if (swipeStartX == null) return;
+    const dx = clientX - swipeStartX;
+    const threshold = 40; // px
+    if (Math.abs(dx) > threshold) {
+      if (dx < 0) {
+        // swipe left → next filter
+        changeFilterBy(1);
+      } else {
+        // swipe right → previous filter
+        changeFilterBy(-1);
+      }
+    }
+    setSwipeStartX(null);
+  };
+
   if (!open) return null;
 
   const filter = getActiveFilter();
 
   return (
-    <div className="fixed inset-0 z-[999] bg-black/90 text-white flex flex-col">
-      {/* HEADER BAR */}
-      <div className="h-14 flex items-center justify-between px-4 pt-1">
-        <button
-          onClick={closeSheet}
-          className="h-8 w-8 rounded-full bg-black/40 flex items-center justify-center text-lg"
-          title="Close"
-        >
-          ✕
-        </button>
-
-        {mode === "capture" && (
-          <div className="flex items-center gap-3">
-            {/* Flash toggle */}
-            <button
-              onClick={toggleTorch}
-              className={`h-8 px-3 rounded-full text-xs font-medium border ${
-                torchOn
-                  ? "bg-amber-400 text-black border-amber-300"
-                  : "bg-black/40 border-white/30"
-              }`}
-            >
-              {usingFront
-                ? torchOn
-                  ? "Front flash ON"
-                  : "Front flash"
-                : torchOn
-                ? "Flash ON"
-                : "Flash"}
-            </button>
-
-            {/* Gallery pick */}
-            <label className="h-8 px-3 rounded-full bg-black/40 border border-white/20 text-xs font-medium flex items-center gap-1 cursor-pointer">
-              <span>Gallery</span>
-              <input
-                type="file"
-                accept="image/*,video/*"
-                className="hidden"
-                onChange={handlePickFromGallery}
-              />
-            </label>
-          </div>
-        )}
-
-        {mode === "review" && (
-          <div className="flex items-center gap-2 text-xs">
-            {/* Tiny hint for view-once vs keep */}
-            <span className="px-2 py-1 rounded-full bg-black/40 border border-white/10">
-              {viewOnce ? "View once" : "Keeps in chat"}
-            </span>
-          </div>
-        )}
-      </div>
-
+    <div className="fixed inset-0 z-[999] bg-black/90 text-white flex flex-col pt-2">
       {/* MAIN CAMERA / PREVIEW AREA */}
       <div className="flex-1 flex items-center justify-center px-3 pb-3">
-        <div className="relative w-full max-w-sm aspect-[9/16] rounded-[32px] overflow-hidden bg-black shadow-2xl">
+        <div
+          className="relative w-full max-w-sm aspect-[9/16] rounded-[32px] overflow-hidden bg-black shadow-2xl"
+          // capture swipe gestures on the whole frame
+          onMouseDown={(e) => handleSwipeStart(e.clientX)}
+          onMouseUp={(e) => handleSwipeEnd(e.clientX)}
+          onTouchStart={(e) =>
+            handleSwipeStart(e.touches[0]?.clientX ?? 0)
+          }
+          onTouchEnd={(e) =>
+            handleSwipeEnd(e.changedTouches[0]?.clientX ?? 0)
+          }
+        >
           {/* Live camera (capture mode) */}
           {mode === "capture" && (
             <>
@@ -554,6 +534,74 @@ function SnapCameraSheet({
                   {errorMsg}
                 </div>
               )}
+
+              {/* TOP CONTROLS INSIDE FRAME */}
+              <button
+                onClick={toggleTorch}
+                className={`absolute top-3 left-3 h-9 px-3 rounded-full text-xs font-medium border flex items-center gap-1 bg-black/45 ${
+                  torchOn
+                    ? "border-amber-300 text-amber-300"
+                    : "border-white/40 text-white"
+                }`}
+                title="Flash"
+              >
+                ⚡
+                <span className="hidden sm:inline">
+                  {usingFront
+                    ? "Front"
+                    : torchOn
+                    ? "On"
+                    : "Off"}
+                </span>
+              </button>
+
+              <button
+                onClick={closeSheet}
+                className="absolute top-3 right-3 h-9 w-9 rounded-full bg-black/55 flex items-center justify-center text-lg border border-white/40"
+                title="Close"
+              >
+                ✕
+              </button>
+
+              {/* CURRENT FILTER PILL */}
+              <div className="absolute inset-x-0 bottom-24 flex justify-center pointer-events-none">
+                <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-black/60 border border-white/25 text-xs pointer-events-auto">
+                  <span>{filter.emoji}</span>
+                  <span>{filter.label}</span>
+                </div>
+              </div>
+
+              {/* BOTTOM CONTROLS INSIDE FRAME */}
+              <div className="absolute inset-x-0 bottom-4 px-6 flex items-center justify-between">
+                {/* Gallery */}
+                <label className="h-12 w-12 rounded-full bg-black/55 border border-white/35 flex items-center justify-center text-xl cursor-pointer">
+                  📷
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    className="hidden"
+                    onChange={handlePickFromGallery}
+                  />
+                </label>
+
+                {/* Shutter */}
+                <button
+                  onClick={handleCapture}
+                  className="h-16 w-16 rounded-full bg-white flex items-center justify-center relative shadow-[0_0_0_4px_rgba(255,255,255,0.25)]"
+                  title="Take photo"
+                >
+                  <div className="h-12 w-12 rounded-full bg-rose-500" />
+                </button>
+
+                {/* Flip camera */}
+                <button
+                  onClick={() => setUsingFront((v) => !v)}
+                  className="h-12 w-12 rounded-full bg-black/55 border border-white/35 flex items-center justify-center text-xl"
+                  title="Flip camera"
+                >
+                  🔁
+                </button>
+              </div>
             </>
           )}
 
@@ -569,68 +617,29 @@ function SnapCameraSheet({
                 className={`absolute inset-0 pointer-events-none ${filter.overlay}`}
               />
               <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
+              {/* Close button in review as well */}
+              <button
+                onClick={closeSheet}
+                className="absolute top-3 right-3 h-9 w-9 rounded-full bg-black/55 flex items-center justify-center text-lg border border-white/40"
+                title="Close"
+              >
+                ✕
+              </button>
             </>
           )}
         </div>
       </div>
 
-      {/* FILTER SLIDER (only in capture mode) */}
-      {mode === "capture" && (
-        <div className="mb-2 px-4">
-          <div className="flex items-center justify-center gap-2 overflow-x-auto no-scrollbar pb-1">
-            {MOOD_FILTERS.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setActiveFilterKey(f.key)}
-                className={`px-3 py-1.5 rounded-full text-[11px] whitespace-nowrap border ${
-                  activeFilterKey === f.key
-                    ? "bg-rose-500 text-white border-rose-400 shadow"
-                    : "bg-black/40 border-white/20 text-gray-100 hover:bg-black/60"
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* BOTTOM CONTROLS */}
+      {/* BOTTOM PANEL (mainly for review mode) */}
       <div className="pb-[max(env(safe-area-inset-bottom),8px)] pt-2 px-6">
-        {mode === "capture" && (
-          <div className="flex items-center justify-between gap-6">
-            {/* Flip camera */}
-            <button
-              onClick={() => setUsingFront((v) => !v)}
-              className="h-12 w-12 rounded-full bg-black/40 border border-white/25 flex items-center justify-center text-xl"
-              title="Flip camera"
-            >
-              🔁
-            </button>
-
-            {/* Shutter */}
-            <button
-              onClick={handleCapture}
-              className="h-16 w-16 rounded-full bg-white flex items-center justify-center relative shadow-[0_0_0_4px_rgba(255,255,255,0.25)]"
-              title="Take photo"
-            >
-              <div className="h-12 w-12 rounded-full bg-rose-500" />
-            </button>
-
-            {/* (reserved spot - could be for future video switch) */}
-            <div className="h-12 w-12" />
-          </div>
-        )}
-
         {mode === "review" && (
           <>
             {/* Tools row */}
             <div className="flex items-center justify-between text-xs mb-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   className="px-3 py-1.5 rounded-full bg-black/40 border border-white/15"
                   onClick={() => {
-                    // Text is handled by the caption box below; this button just scrolls focus there.
                     const el = document.getElementById(
                       "rbz-snap-caption-input"
                     );
