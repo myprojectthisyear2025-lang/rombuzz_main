@@ -63,10 +63,27 @@ const makeRoomId = (a, b) => {
   return A < B ? `${A}_${B}` : `${B}_${A}`;
 };
 
-// Simple ID generator to replace shortid
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 };
+
+// 🔁 MOVE CHAT TO TOP (Messenger-style)
+const reorderMatches = (list, peerId) => {
+  if (!Array.isArray(list) || !list.length) return list;
+
+  const target = String(peerId);
+  const idx = list.findIndex(
+    (m) => String(m.id || m._id) === target
+  );
+  if (idx === -1) return list;
+
+  const copy = [...list];
+  const [item] = copy.splice(idx, 1);
+  item._lastActive = Date.now();
+  copy.unshift(item);
+  return copy;
+};
+
 
 export default function Chat() {
   const navigate = useNavigate();
@@ -134,15 +151,22 @@ export default function Chat() {
     dnd: getLS(GK.dnd, false),
   }));
 
-  // Restore unread map from storage (set by Navbar while user is off the chat page)
+    // Restore unread map from storage (set by Navbar while user is off the chat page)
   const [unread, setUnread] = useState(() => getLS(UNREAD_MAP_KEY, {}));
 
-  // On mount, broadcast the current total so Navbar can show the correct badge
+  // When the user opens the Chat page, treat everything as read immediately.
+  // This clears the navbar Chat badge and wipes the per-peer unread map.
   useEffect(() => {
-    const total = Object.values(unread).reduce((a, b) => a + b, 0);
-    localStorage.setItem(UNREAD_TOTAL_KEY, String(total));
-    window.dispatchEvent(new CustomEvent("rbz:unread", { detail: { total } }));
-  }, []); // run once
+    const empty = {};
+    setUnread(empty);
+    setLS(UNREAD_MAP_KEY, empty);
+    localStorage.setItem(UNREAD_TOTAL_KEY, "0");
+
+    window.dispatchEvent(
+      new CustomEvent("rbz:unread", { detail: { total: 0 } })
+    );
+  }, []); // run once when /chat mounts
+
 
    // load matches (use correct backend route + flexible parsing)
   useEffect(() => {
@@ -222,7 +246,7 @@ useEffect(() => {
         return n;
       });
 
-    const handleIncoming = (raw) => {
+      const handleIncoming = (raw) => {
       if (!raw) return;
 
       const toId =
@@ -265,7 +289,15 @@ useEffect(() => {
       const sender = String(fromId || viaRoomPeer || "");
       if (!sender) return;
 
-      const openId = activeMatch ? String(activeMatch.id || activeMatch._id) : null;
+      const openId = activeMatch
+        ? String(activeMatch.id || activeMatch._id)
+        : null;
+
+      // 🔁 Always move this peer to the top of the sidebar
+      setMatches((prev) => reorderMatches(prev, sender));
+      setFiltered((prev) => reorderMatches(prev, sender));
+
+      // If this is the chat currently open, do NOT create unread count
       if (openId && openId === sender) return;
 
       setUnread((prev) => {
@@ -279,20 +311,23 @@ useEffect(() => {
             a.play().catch(() => {});
           } catch {}
         }
-        if (gset.vibrate && navigator.vibrate && !gset.dnd) navigator.vibrate([50]);
+        if (gset.vibrate && navigator.vibrate && !gset.dnd) {
+          navigator.vibrate([50]);
+        }
 
         // Broadcast aggregate
         const total = Object.values(next).reduce((a, b) => a + b, 0);
         localStorage.setItem(UNREAD_TOTAL_KEY, String(total));
         if (gset.showNavBadge) {
-          window.dispatchEvent(new CustomEvent("rbz:unread", { detail: { total } }));
+          window.dispatchEvent(
+            new CustomEvent("rbz:unread", { detail: { total } })
+          );
         }
 
         return next;
       });
 
-      // 🔥 FIX: Emit direct:message event for navbar to catch
-      // This ensures navbar gets notified even when user is not on chat page
+      // 🔥 Keep notifying Navbar for global chat badge
       const directMessagePayload = {
         id: raw.id || generateId(),
         roomId: raw.roomId || makeRoomId(myId, sender),
@@ -303,9 +338,9 @@ useEffect(() => {
         type: raw.type || "text",
       };
 
-      // Emit to the user's private room (navbar listens here)
       s.emit("direct:message", directMessagePayload);
     };
+
 
     s.on("presence:online", onOnline);
     s.on("presence:offline", onOffline);
@@ -327,7 +362,21 @@ useEffect(() => {
       s.off("direct:message", handleIncoming);
       // NOTE: do NOT s.disconnect() — shared singleton
     };
-  }, [user, activeMatch, gset.msgSound, gset.vibrate, gset.dnd, gset.showNavBadge]);
+}, [user, activeMatch, gset.msgSound, gset.vibrate, gset.dnd, gset.showNavBadge]);
+
+// 🔁 When we send a message from ChatWindow, bump that peer to the top
+useEffect(() => {
+  const onActivity = (e) => {
+    const peerId = e?.detail?.peerId;
+    if (!peerId) return;
+
+    setMatches((prev) => reorderMatches(prev, peerId));
+    setFiltered((prev) => reorderMatches(prev, peerId));
+  };
+
+  window.addEventListener("chat:activity", onActivity);
+  return () => window.removeEventListener("chat:activity", onActivity);
+}, []);
 
   // Join all match rooms so room broadcasts reach the sidebar
   useEffect(() => {

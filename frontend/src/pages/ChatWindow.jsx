@@ -565,7 +565,7 @@ useEffect(() => {
       ? null
       : { text }; // for now we store within ::RBZ::
 
-    // Optimistic local insert
+     // Optimistic local insert
     const temp = {
       id: tempId,
       roomId,
@@ -580,8 +580,16 @@ useEffect(() => {
 
     setMessages((prev) => [...prev, temp]);
 
+    // 🔁 Tell the Chat sidebar this peer is now the most recently active
+    try {
+      window.dispatchEvent(
+        new CustomEvent("chat:activity", { detail: { peerId } })
+      );
+    } catch {}
+
     try {
       const r = await fetch(`${API_BASE}/chat/rooms/${roomId}`, {
+
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ text: text || payloadObj?.text || "" }),

@@ -296,44 +296,48 @@ export default function Notifications() {
   };
 
   // ---------- Accept Match Request ----------
-  const handleAcceptMatch = async (fromId, e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    if (!token) return;
+   // Unified helper for Discover "wants to match with you" requests
+  const handleAcceptMatch = async (fromId, notifId, action, e) => {
+    if (e) e.stopPropagation();
 
     try {
-      const r = await fetch(`${API_BASE}/likes`, {
+      const res = await fetch(`${API_BASE}/likes/respond`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ to: fromId }),
+        body: JSON.stringify({ fromId, action }), // "accept" or "reject"
       });
 
-      if (!r.ok) {
-        const errorData = await r.json().catch(() => ({}));
-        if (r.status === 400) {
-          alert("You've already matched with this user!");
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (data?.error === "request_not_found") {
+          alert("This match request is no longer available.");
+        } else if (data?.error === "invalid_action") {
+          alert("Invalid match action.");
         } else {
-          alert("Could not accept match right now.");
+          alert(data?.error || "Something went wrong");
         }
         return;
       }
 
-      const data = await r.json();
-      if (data.matched) {
-        alert(`💞 It's a match! You can now view their profile and chat!`);
-      } else {
-        alert("Match request sent! ❤️");
+      // Remove this notification once we handled it
+      if (notifId) {
+        setNotifications((list) => list.filter((n) => n.id !== notifId));
+      }
+
+      if (action === "accept" && data.matched) {
+        // Match celebration is already handled via sockets
+        console.log("✅ Match accepted from notifications.");
       }
     } catch (err) {
-      console.error("Accept match error:", err);
-      alert("Network error. Please check your connection.");
+      console.error("Match respond error:", err);
+      alert("Network error. Please try again.");
     }
   };
+
 
   // ---------- View Profile Handler ----------
   const handleViewProfile = (fromId, e) => {
