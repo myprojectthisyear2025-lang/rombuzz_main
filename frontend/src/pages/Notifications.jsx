@@ -297,10 +297,22 @@ export default function Notifications() {
 
   // ---------- Accept Match Request ----------
    // Unified helper for Discover "wants to match with you" requests
-  const handleAcceptMatch = async (fromId, notifId, action, e) => {
-    if (e) e.stopPropagation();
+   const handleAcceptMatch = async (fromId, notifId, action, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
 
     try {
+      // mark this notification as read first (optimistic)
+      if (notifId) {
+        try {
+          await markAsRead(notifId);
+        } catch (err) {
+          console.warn("Failed to mark match notification read", err);
+        }
+      }
+
       const res = await fetch(`${API_BASE}/likes/respond`, {
         method: "POST",
         headers: {
@@ -337,6 +349,7 @@ export default function Notifications() {
       alert("Network error. Please try again.");
     }
   };
+
 
 
   // ---------- View Profile Handler ----------
@@ -493,68 +506,42 @@ export default function Notifications() {
                 {/* Enhanced Action Buttons */}
                 {/* ===========================
                     DISCOVER LIKE REQUEST (buzz + via=discover_like)
-                    "X wants to match with you" → Accept / Reject
+                    "X wants to match with you" → Match / View / Reject
                 =========================== */}
                 {n.type === "buzz" && n.fromId && n.via === "discover_like" && (
-                  <div className="flex gap-2 mt-2">
-
-                    {/* ✅ Accept */}
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {/* ✅ Match Back (accept like) */}
                     <button
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        markAsRead(n.id);
-
-                        try {
-                          await fetch(`${API_BASE}/likes/respond`, {
-                            method: "POST",
-                            headers: {
-                              "Content-Type": "application/json",
-                              Authorization: `Bearer ${token()}`,
-                            },
-                            body: JSON.stringify({
-                              fromId: n.fromId,
-                              action: "accept",
-                            }),
-                          });
-                        } catch (err) {
-                          console.error("Accept like request failed", err);
-                        }
-                      }}
+                      onClick={(e) =>
+                        handleAcceptMatch(n.fromId, n.id, "accept", e)
+                      }
                       className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-full hover:bg-green-200 transition"
                     >
-                      ✅ Accept
+                      ❤️ Accept
                     </button>
 
-                    {/* ❌ Reject */}
+                    {/* ❌ Reject match request */}
                     <button
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        markAsRead(n.id);
-
-                        try {
-                          await fetch(`${API_BASE}/likes/respond`, {
-                            method: "POST",
-                            headers: {
-                              "Content-Type": "application/json",
-                              Authorization: `Bearer ${token()}`,
-                            },
-                            body: JSON.stringify({
-                              fromId: n.fromId,
-                              action: "reject",
-                            }),
-                          });
-                        } catch (err) {
-                          console.error("Reject like request failed", err);
-                        }
-                      }}
+                      onClick={(e) =>
+                        handleAcceptMatch(n.fromId, n.id, "reject", e)
+                      }
                       className="text-xs bg-red-100 text-red-700 px-3 py-1 rounded-full hover:bg-red-200 transition"
                     >
                       ❌ Reject
                     </button>
+
+                    {/* 👀 View profile of requester */}
+                    <button
+                      onClick={(e) => handleViewProfile(n.fromId, e)}
+                      className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition"
+                    >
+                      👀 View Profile
+                    </button>
                   </div>
                 )}
+
+                {/* Legacy / general actions below */}
+
 
                 /* ===========================
                   MATCH NOTIFICATION ACTIONS
