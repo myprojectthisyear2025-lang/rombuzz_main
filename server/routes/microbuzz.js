@@ -437,15 +437,20 @@ if (reverseBuzz) {
     }
 
     if (onlineUsers[toId]) {
-      io.to(onlineUsers[toId]).emit("buzz_request", {
-        fromId,
-        selfieUrl: fromPresence?.selfieUrl,
-        name: fromPresence?.name || "Nearby user",
-        distanceMeters,
-        message: "Someone nearby buzzed you!",
-        type: "microbuzz",
-      });
-    }
+  // Fetch real user profile to get firstName
+  const fromProfile = await User.findOne({ id: fromId }).lean();
+  const firstName = fromProfile?.firstName || "Someone";
+
+  io.to(onlineUsers[toId]).emit("buzz_request", {
+    fromId,
+    selfieUrl: fromPresence?.selfieUrl,
+    name: firstName,
+    distanceMeters,
+    message: `${firstName} wants to buzz you!`,
+    type: "microbuzz",
+  });
+}
+
 
     res.json({ success: true });
   } catch (err) {
