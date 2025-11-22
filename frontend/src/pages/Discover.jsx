@@ -7,7 +7,7 @@ import React, {
   useCallback,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { io } from "socket.io-client";
+//import { io } from "socket.io-client";
 import {
   FaHeart,
   FaTimes,
@@ -29,7 +29,7 @@ const PLACEHOLDER = "https://via.placeholder.com/600x800?text=RomBuzz";
 //const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com/api";
 import { API_BASE } from "../config";
 
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "https://rombuzz-api.onrender.com";
+//const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "https://rombuzz-api.onrender.com";
 const PLACEHOLDER = "https://via.placeholder.com/600x800?text=RomBuzz";
 
 /* ============================================================
@@ -602,42 +602,54 @@ export default function Discover() {
     };
   }, []);
 
-  /* ---------------------------
-   Socket
+   /* ---------------------------
+   Socket (reuse global singleton)
 --------------------------- */
-useEffect(() => {
-  if (socketRef.current) return; // prevent re-init
+  useEffect(() => {
+    if (socketRef.current) return; // prevent re-init
 
-  const s = io(SOCKET_URL, {
-    auth: { token: token() },
-    transports: ["websocket", "polling"],
-  });
-
-  socketRef.current = s;
-
-  s.on("connect", () => {
-    console.log("🛰️ SOCKET connected in Discover:", s.id);
-    s.emit("user:register", me?.id);
-  });
-
-  s.on("match", (data) => {
-    console.log("🎉 Discover match event:", data);
-    const { otherUserId } = data || {};
-
-    window.dispatchEvent(new CustomEvent("match:celebrate", { detail: data }));
-
-    if (current && otherUserId === current.id) {
-      setMessage("💞 It's a match!");
-      setReveal(1);
+    const s = ensureSocketAuth();
+    if (!s) {
+      console.warn("⚠️ Discover: no authenticated socket available");
+      return;
     }
-  });
 
-  return () => {
-    s.disconnect();
-  };
-}, [me, current]);
+    socketRef.current = s;
 
+    const onConnect = () => {
+      const u = me;
+      if (u?.id) {
+        console.log("🛰️ SOCKET connected in Discover:", s.id);
+        s.emit("user:register", u.id);
+      }
+    };
 
+    const onMatch = (data) => {
+      console.log("🎉 Discover match event:", data);
+      const { otherUserId } = data || {};
+
+      // Trigger global celebration overlay
+      window.dispatchEvent(
+        new CustomEvent("match:celebrate", { detail: data })
+      );
+
+      // Keep existing behavior for current card
+      if (current && otherUserId === current.id) {
+        setMessage("💞 It's a match!");
+        setReveal(1);
+      }
+    };
+
+    s.on("connect", onConnect);
+    s.on("match", onMatch);
+
+    return () => {
+      if (!socketRef.current) return;
+      s.off("connect", onConnect);
+      s.off("match", onMatch);
+      socketRef.current = null;
+    };
+  }, [me, current]);
 
   /* ---------------------------
    Premium status
