@@ -74,15 +74,27 @@ export default function Notifications() {
     };
 
      // 🔔 Standard generic notification event
-  socket.on("notification", onNotif);
+  socket.on("notification", (n) => {
+  onNotif(n);
+
+  // 🔥 Notify Navbar immediately
+  try {
+    window.dispatchEvent(new CustomEvent("notification:new", { detail: n }));
+  } catch {}
+});
 
   // 📸 NEW: Listen for 'notification:new_post' from profile completion
-  socket.on("notification:new_post", (notif) => {
-    if (!notif?.id) return;
-    if (seenIds.current.has(notif.id)) return;
-    seenIds.current.add(notif.id);
-    setNotifications((prev) => [notif, ...prev]);
-  });
+socket.on("notification:new_post", (notif) => {
+  if (!notif?.id) return;
+  if (seenIds.current.has(notif.id)) return;
+  seenIds.current.add(notif.id);
+  setNotifications((prev) => [notif, ...prev]);
+
+  // 🔥 Notify Navbar immediately
+  try {
+    window.dispatchEvent(new CustomEvent("notification:new", { detail: notif }));
+  } catch {}
+});
 
    return () => {
   try {
@@ -540,7 +552,6 @@ export default function Notifications() {
                 </div>
               )}
 
-                /* BUZZ ACTIONS (existing) */
                 {n.type === "buzz" && n.fromId && (
                                 <div className="flex gap-2 mt-2">
                   {/* For Match Requests (unmatched users) */}
