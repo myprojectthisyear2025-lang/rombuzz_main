@@ -105,13 +105,20 @@ function RadarCanvas({ users = [] }) {
   const animRef = useRef(null);
   const tRef = useRef(0);
 
-  const phaseMap = useMemo(() => {
+ const phaseMap = useMemo(() => {
   const map = new Map();
   displayUsers.forEach((u) => {
-    map.set(u.id, (u.id.charCodeAt(0) % 360) * (Math.PI / 180));
+    // fake users: assign fully random angles
+    if (u.id.startsWith("fake_")) {
+      map.set(u.id, Math.random() * Math.PI * 2);
+    } else {
+      // real users: keep stable angle
+      map.set(u.id, (u.id.charCodeAt(0) % 360) * (Math.PI / 180));
+    }
   });
   return map;
 }, [displayUsers]);
+
 
 
   const draw = useCallback(() => {
