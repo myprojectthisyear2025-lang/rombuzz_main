@@ -347,22 +347,34 @@ socket.on("notification:new_post", (notif) => {
         return;
       }
 
-      // Remove this notification once we handled it
+         // Remove this notification once we handled it
       if (notifId) {
         setNotifications((list) => list.filter((n) => n.id !== notifId));
       }
 
       if (action === "accept" && data.matched) {
-        // Match celebration is already handled via sockets
-        console.log("✅ Match accepted from notifications.");
+        // 🔥 Trigger global match celebration overlay directly
+        const detail = {
+          otherUserId: data.otherUserId || fromId,
+          roomId: data.roomId || undefined,
+          via: data.via || "discover",
+        };
+
+        try {
+          window.dispatchEvent(
+            new CustomEvent("match:celebrate", { detail })
+          );
+        } catch (e) {
+          console.warn("Failed to dispatch match:celebrate from notifications", e);
+        }
+
+        console.log("✅ Match accepted from notifications (overlay fired).");
       }
     } catch (err) {
       console.error("Match respond error:", err);
       alert("Network error. Please try again.");
     }
   };
-
-
 
   // ---------- View Profile Handler ----------
   const handleViewProfile = (fromId, e) => {

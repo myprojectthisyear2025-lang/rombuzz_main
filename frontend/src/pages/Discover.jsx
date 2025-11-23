@@ -86,13 +86,28 @@ async function putMe(body) {
    Radar (moves to side on desktop, bottom on mobile)
 ============================================================ */
 function RadarCanvas({ users = [] }) {
+    // 👉 Add 20 fake users to always fill the radar
+  const fakeDots = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i < 20; i++) {
+      arr.push({
+        id: `fake_${i}`,
+        // random distance (meters) so they spread naturally
+        distanceMeters: Math.random() * 1500 + 200, // 200m – 1700m
+      });
+    }
+    return arr;
+  }, []);
+
+  // Combine real + fake dots
+  const displayUsers = [...fakeDots, ...users];
   const canvasRef = useRef(null);
   const animRef = useRef(null);
   const tRef = useRef(0);
 
   const phaseMap = useMemo(() => {
     const map = new Map();
-    users.forEach((u) => {
+displayUsers.forEach((u) => {
       map.set(u.id, (u.id.charCodeAt(0) % 360) * (Math.PI / 180));
     });
     return map;
