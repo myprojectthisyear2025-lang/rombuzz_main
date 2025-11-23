@@ -106,12 +106,13 @@ function RadarCanvas({ users = [] }) {
   const tRef = useRef(0);
 
   const phaseMap = useMemo(() => {
-    const map = new Map();
-displayUsers.forEach((u) => {
-      map.set(u.id, (u.id.charCodeAt(0) % 360) * (Math.PI / 180));
-    });
-    return map;
-  }, [users]);
+  const map = new Map();
+  displayUsers.forEach((u) => {
+    map.set(u.id, (u.id.charCodeAt(0) % 360) * (Math.PI / 180));
+  });
+  return map;
+}, [displayUsers]);
+
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -154,7 +155,7 @@ displayUsers.forEach((u) => {
     ctx.fill();
 
     const t = tRef.current;
-    users.forEach((u) => {
+displayUsers.forEach((u) => {
       const phi = phaseMap.get(u.id) || 0;
       const spin = 0.3 + (u.id.charCodeAt(0) % 7) * 0.05;
       const dist = u.distanceMeters == null ? 800 : u.distanceMeters;
