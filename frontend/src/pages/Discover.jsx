@@ -119,6 +119,20 @@ function RadarCanvas({ users = [] }) {
   return map;
 }, [displayUsers]);
 
+const speedMap = useMemo(() => {
+  const map = new Map();
+  displayUsers.forEach((u) => {
+    if (u.id.startsWith("fake_")) {
+      // fake dots: each gets unique random speed
+      map.set(u.id, 0.2 + Math.random() * 0.8); // 0.2–1.0
+    } else {
+      // real users: stable but slightly varied spin
+      map.set(u.id, 0.3 + (u.id.charCodeAt(1) % 5) * 0.07);
+    }
+  });
+  return map;
+}, [displayUsers]);
+
 
 
   const draw = useCallback(() => {
@@ -164,7 +178,7 @@ function RadarCanvas({ users = [] }) {
     const t = tRef.current;
 displayUsers.forEach((u) => {
       const phi = phaseMap.get(u.id) || 0;
-      const spin = 0.3 + (u.id.charCodeAt(0) % 7) * 0.05;
+const spin = speedMap.get(u.id) || 0.4;
       const dist = u.distanceMeters == null ? 800 : u.distanceMeters;
       const rFrac = clamp((dist / 2000) * 0.8 + 0.2, 0.2, 1);
       const r = radius * rFrac;
