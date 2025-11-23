@@ -35,38 +35,50 @@ const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000; // 30 days in ms
    Mongo-only notification dispatcher + Socket.IO emit
 ============================================================ */
 async function sendNotification(toId, data = {}) {
-  const notif = {
-    id: shortid.generate(),
-    toId,
-    fromId: data.fromId || "",
-    type: data.type || "system",
-    message: data.message || "",
-    href: data.href || "",
-    entity: data.entity || "",
-    entityId: data.entityId || "",
-    postId: data.postId || "",
-    postOwnerId: data.postOwnerId || "",
-    createdAt: Date.now(),
-    read: false,
-  };
-
   try {
-    // ✅ Store in MongoDB
-    const mongoNotif = await Notification.create(notif);
-
-    // 🔔 Real-time socket emit (use latest globals)
-    const { io, onlineUsers } = global || {};
-    if (io && onlineUsers && onlineUsers[toId]) {
-      io.to(onlineUsers[toId]).emit("notification", mongoNotif);
+    if (!toId) {
+      console.warn("sendNotification called without toId");
+      return null;
     }
 
-    console.log(`🔔 Notification (Mongo) → ${toId}: ${notif.message}`);
+    const notif = {
+      id: shortid.generate(),
+      toId,
+      fromId: data.fromId || "",
+      type: data.type || "system",
+      message: data.message || "",
+      href: data.href || "",
+      entity: data.entity || "",
+      entityId: data.entityId || "",
+      postId: data.postId || "",
+      postOwnerId: data.postOwnerId || "",
+      createdAt: Date.now(),
+      read: false,
+    };
+
+    // 1️⃣ Store in MongoDB
+    const mongoNotif = await Notification.create(notif);
+
+    // 2️⃣ Real-time socket emit (this fixes Navbar unread issue)
+    const io = global.io || null;
+    const onlineUsers = global.onlineUsers || {};
+
+    const socketId = onlineUsers[toId];
+    if (io && socketId) {
+      io.to(String(socketId)).emit(
+        "notification",
+        mongoNotif.toObject ? mongoNotif.toObject() : mongoNotif
+      );
+    }
+
+    console.log(`🔔 Notification → ${toId}: ${notif.message}`);
     return mongoNotif;
   } catch (err) {
-    console.error("❌ Notification failed:", err);
+    console.error("❌ sendNotification error:", err);
     return null;
   }
 }
+
 
 /* ============================================================
    🧼 baseSanitizeUser(user)
