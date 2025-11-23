@@ -218,16 +218,44 @@ function SnapCameraSheet({
         return;
       }
 
-      const constraints = {
-        video: {
-          facingMode: front ? "user" : "environment",
-        },
-        audio: false,
-      };
+     // TRY MULTIPLE CONSTRAINTS TO ENSURE BACK CAMERA WORKS ON ALL ANDROID DEVICES
+let stream = null;
 
-      const stream = await navigator.mediaDevices.getUserMedia(
-        constraints
-      );
+const candidates = [
+  {
+    video: {
+      facingMode: front ? "user" : { exact: "environment" },
+    },
+    audio: false,
+  },
+  {
+    video: {
+      facingMode: front ? "user" : { ideal: "environment" },
+    },
+    audio: false,
+  },
+  {
+    video: true,
+    audio: false,
+  },
+];
+
+for (const c of candidates) {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(c);
+    if (stream) break;
+  } catch (e) {
+    continue;
+  }
+}
+
+if (!stream) {
+  setErrorMsg("Could not open camera.");
+  return;
+}
+
+streamRef.current = stream;
+
       streamRef.current = stream;
 
       const track = stream
@@ -633,59 +661,70 @@ function SnapCameraSheet({
       {/* BOTTOM PANEL (only in review mode) */}
       {mode === "review" && (
         <div className="pb-[max(env(safe-area-inset-bottom),8px)] pt-2 px-6">
-          {/* Tools row */}
-          <div className="flex items-center justify-between text-xs mb-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                className="px-3 py-1.5 rounded-full bg-black/40 border border-white/15"
-                onClick={() => {
-                  const el = document.getElementById(
-                    "rbz-snap-caption-input"
-                  );
-                  el?.focus();
-                }}
-              >
-                Add text
-              </button>
-              <button
-                className="px-3 py-1.5 rounded-full bg-black/40 border border-white/15"
-                onClick={() =>
-                  alert(
-                    "Drawing tools are coming soon to RomBuzz ✏️"
-                  )
-                }
-              >
-                Draw
-              </button>
-              <button
-                className="px-3 py-1.5 rounded-full bg-black/40 border border-white/15"
-                onClick={() =>
-                  alert(
-                    "Stickers are coming soon to RomBuzz 💫"
-                  )
-                }
-              >
-                Sticker
-              </button>
-              <button
-                className="px-3 py-1.5 rounded-full bg-black/40 border border-white/15"
-                onClick={() =>
-                  alert(
-                    "Crop & edit are coming soon to RomBuzz ✂️"
-                  )
-                }
-              >
-                Crop
-              </button>
-            </div>
+       {/* Vertical tool bar on right side */}
+<div className="absolute top-20 right-3 flex flex-col items-center gap-3 z-[1000]">
 
-            <button
-              onClick={handleRetake}
-              className="px-3 py-1.5 rounded-full bg-black/40 border border-white/20 text-xs"
-            >
-              Retake
-            </button>
-          </div>
+  <button className="h-10 w-10 rounded-full bg-black/50 border border-white/20 text-xs flex items-center justify-center"
+    onClick={() => {
+      const el = document.getElementById("rbz-snap-caption-input");
+      el?.focus();
+    }}>
+    ✏️
+  </button>
+
+  <button className="h-10 w-10 rounded-full bg-black/50 border border-white/20 text-xs flex items-center justify-center"
+    onClick={() => alert("Drawing tools coming soon")}>
+    🎨
+  </button>
+
+  <button className="h-10 w-10 rounded-full bg-black/50 border border-white/20 text-xs flex items-center justify-center"
+    onClick={() => alert("Stickers coming soon")}>
+    🌟
+  </button>
+
+  <button className="h-10 w-10 rounded-full bg-black/50 border border-white/20 text-xs flex items-center justify-center"
+    onClick={() => alert("Crop tool coming soon")}>
+    ✂️
+  </button>
+
+  <button
+    className="h-10 w-10 rounded-full bg-black/50 border border-white/20 text-xs flex items-center justify-center"
+    onClick={handleRetake}>
+    🔁
+  </button>
+
+  <button
+    className="h-10 w-10 rounded-full bg-rose-500 border border-rose-300/40 text-xs flex items-center justify-center"
+    onClick={handleAiCaption}>
+    ✨
+  </button>
+</div>
+
+{/* Bottom view-once + send row */}
+<div className="flex items-center justify-between px-4 mt-56 mb-2">
+  <div className="inline-flex rounded-full bg-black/40 border border-white/20 overflow-hidden text-xs">
+    <button
+      onClick={() => setViewOnce(true)}
+      className={`px-3 py-1 ${viewOnce ? "bg-rose-500 text-white" : "text-gray-200"}`}>
+      View once
+    </button>
+    <button
+      onClick={() => setViewOnce(false)}
+      className={`px-3 py-1 ${!viewOnce ? "bg-rose-500 text-white" : "text-gray-200"}`}>
+      Keep in chat
+    </button>
+  </div>
+
+  <button
+    onClick={handleSend}
+    disabled={isUploading}
+    className={`px-6 py-2 rounded-full text-sm font-semibold shadow-lg ml-3 ${
+      isUploading ? "bg-gray-500" : "bg-rose-500 hover:bg-rose-600"
+    }`}>
+    {isUploading ? "Sending…" : "Send"}
+  </button>
+</div>
+
 
           {/* Caption + AI + view-once toggle */}
           <div className="space-y-2 mb-2">
