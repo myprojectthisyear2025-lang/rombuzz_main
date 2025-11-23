@@ -213,7 +213,7 @@ const spin = speedMap.get(u.id) || 0.4;
     <div className="relative w-full aspect-square mx-auto max-w-xs md:max-w-sm">
       <canvas ref={canvasRef} className="w-full h-full rounded-full shadow-inner" />
       <div className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[10px] text-rose-600/70">
-        <FaMapMarkerAlt className="inline mr-1" /> Orbit radius ≈ distance
+        <FaMapMarkerAlt className="inline mr-1" /> Each dot represents people around
       </div>
     </div>
   );
