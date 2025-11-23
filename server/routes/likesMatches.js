@@ -299,7 +299,7 @@ router.post("/likes/respond", authMiddleware, async (req, res) => {
     }
 
 
-    // 🔔 Match notifications for BOTH (same shape as MicroBuzz)
+      // 🔔 Match notifications for BOTH (same shape as MicroBuzz)
     await Promise.all([
       // For Katy (who accepted)
       sendNotification(toId, {
@@ -321,7 +321,15 @@ router.post("/likes/respond", authMiddleware, async (req, res) => {
       }),
     ]);
 
-    return res.json({ success: true, matched: true });
+    // ✅ Return rich payload for frontend celebrations
+    return res.json({
+      success: true,
+      matched: true,
+      roomId,
+      via: "discover",
+      otherUserId: fromId, // fromId = the person Katy accepted
+    });
+
   } catch (err) {
     console.error("❌ LIKE respond error:", err);
     res.status(500).json({ error: "internal_error" });
