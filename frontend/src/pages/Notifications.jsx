@@ -519,17 +519,16 @@ socket.on("notification:new_post", (notif) => {
                   DISCOVER LIKE REQUEST
                   "X wants to match with you"
               =========================== */}
-              {n.type === "buzz" && n.fromId && n.via === "discover_like" && (
+                {n.type === "buzz" && n.fromId && n.via === "discover_like" && (
                 <div className="flex flex-wrap gap-2 mt-2">
-
-                  {/* ❤️ Match Back */}
+                  {/* ❤️ Match Back (Discover Like – new system) */}
                   <button
                     onClick={(e) =>
                       handleAcceptMatch(n.fromId, n.id, "accept", e)
                     }
                     className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-full hover:bg-green-200 transition"
                   >
-                    ❤️ Match Back
+                    ❤️ Accept
                   </button>
 
                   {/* ❌ Reject */}
@@ -552,25 +551,39 @@ socket.on("notification:new_post", (notif) => {
                 </div>
               )}
 
-                {n.type === "buzz" && n.fromId && (
-                                <div className="flex gap-2 mt-2">
-                  {/* For Match Requests (unmatched users) */}
-                  {n.message?.includes("wants to match") && (
-                    <>
-                      <button
-                        onClick={(e) => handleAcceptMatch(n.fromId, e)}
-                        className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-full hover:bg-green-200 transition"
-                      >
-                        ✅ Match Back
-                      </button>
-                      <button
-                        onClick={(e) => handleViewProfile(n.fromId, e)}
-                        className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition"
-                      >
-                        👀 View Profile
-                      </button>
-                    </>
-                  )}
+              {/* Legacy buzz / match actions (non-discover_like) */}
+              {n.type === "buzz" && n.fromId && (
+                <div className="flex gap-2 mt-2">
+                  {/* For Match Requests (unmatched users, NOT discover_like) */}
+                  {n.message?.includes("wants to match") &&
+                    n.via !== "discover_like" && (
+                      <>
+                        <button
+                          onClick={(e) =>
+                            handleAcceptMatch(n.fromId, n.id, "accept", e)
+                          }
+                          className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-full hover:bg-green-200 transition"
+                        >
+                          ❤️ Accept
+                        </button>
+
+                        <button
+                          onClick={(e) =>
+                            handleAcceptMatch(n.fromId, n.id, "reject", e)
+                          }
+                          className="text-xs bg-red-100 text-red-700 px-3 py-1 rounded-full hover:bg-red-200 transition"
+                        >
+                          ❌ Reject
+                        </button>
+
+                        <button
+                          onClick={(e) => handleViewProfile(n.fromId, e)}
+                          className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition"
+                        >
+                          👀 View Profile
+                        </button>
+                      </>
+                    )}
 
                   {/* For Regular Buzzes (matched users _ Poke system) */}
                   {n.message?.includes("buzzed you") && (
