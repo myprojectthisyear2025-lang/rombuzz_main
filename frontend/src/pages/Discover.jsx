@@ -1,4 +1,5 @@
 // src/pages/Discover.jsx
+
 import React, {
   useEffect,
   useMemo,
@@ -21,6 +22,8 @@ import {
   FaChevronDown,
   FaStar,
 } from "react-icons/fa";
+import { ensureSocketAuth } from "../socket";
+
 /*
 const API_BASE = "http://localhost:4000/api";
 const SOCKET_URL = "http://localhost:4000";
