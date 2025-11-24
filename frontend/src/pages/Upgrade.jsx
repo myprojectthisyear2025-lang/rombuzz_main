@@ -16,7 +16,7 @@ export default function Upgrade() {
         <h1 className="text-4xl md:text-5xl font-extrabold bg-gradient-to-r from-pink-600 to-red-500 bg-clip-text text-transparent drop-shadow-sm">
           Upgrade Your Buzz
         </h1>
-        <p className="text-gray-600 text-lg mt-3 max-w-2xl mx-auto">
+        <p className="text-gray-600 text-lg mt-6 max-w-2xl mx-auto">
           Choose your vibe: stay Free, boost with RomBuzz+, or go all-in with
           Elite and sit at the top of every stack.
         </p>
