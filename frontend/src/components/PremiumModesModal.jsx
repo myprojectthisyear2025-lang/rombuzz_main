@@ -168,10 +168,10 @@ export default function PremiumModesModal({
     onSelectMode?.(key, { tier: mode.tier });
   };
 
-  const modesToShow =
-    activeTab === "plus"
-      ? PLUS_MODES
-      : [...PLUS_MODES.map((m) => ({ ...m, tier: "elite" })), ...ELITE_MODES];
+const modesToShow =
+  activeTab === "plus"
+    ? PLUS_MODES
+    : ELITE_MODES;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm">
