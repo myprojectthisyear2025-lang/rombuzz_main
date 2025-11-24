@@ -119,12 +119,14 @@ const ELITE_MODES = [
 
 export default function PremiumModesModal({
   open,
+  initialTab = "plus",   // NEW
   onClose,
   premiumTier = "free",
   onSelectMode,
   onUpgrade,
 }) {
-  const [activeTab, setActiveTab] = useState("plus"); // "plus" | "elite"
+
+const [activeTab, setActiveTab] = useState(initialTab || "plus"); // UPDATED
   const [selectedKey, setSelectedKey] = useState(null);
   const [showConfetti, setShowConfetti] = useState(false);
 
@@ -134,6 +136,11 @@ export default function PremiumModesModal({
   }
 }, [open]);
 
+useEffect(() => {
+  if (open) {
+    setActiveTab(initialTab);   // NEW — auto open correct tab
+  }
+}, [open, initialTab]);
 
   useEffect(() => {
     if (!showConfetti) return;

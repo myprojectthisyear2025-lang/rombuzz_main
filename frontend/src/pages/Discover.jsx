@@ -633,6 +633,7 @@ export default function Discover() {
 
 // Premium modes modal (RomBuzz+ / Elite)
 const [premiumModal, setPremiumModal] = useState(false);
+const [premiumInitialTab, setPremiumInitialTab] = useState("plus"); // NEW
 
   // Sockets
   const socketRef = useRef(null);
@@ -1132,19 +1133,27 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
 
     {/* RomBuzz+ */}
     <button
-      onClick={() => setPremiumModal(true)}
-      className="px-4 py-1.5 rounded-full bg-gradient-to-r from-rose-400 to-pink-500 text-white shadow-md text-xs font-semibold hover:scale-105 transition"
-    >
-      ⭐ RomBuzz+
-    </button>
+  onClick={() => {
+    setPremiumInitialTab("plus");   // NEW
+    setPremiumModal(true);
+  }}
+  className="px-4 py-1.5 rounded-full bg-gradient-to-r from-rose-400 to-pink-500 text-white shadow-md text-xs font-semibold hover:scale-105 transition"
+>
+  ⭐ RomBuzz+
+</button>
+
 
     {/* Elite */}
-    <button
-      onClick={() => setPremiumModal(true)}
-      className="px-4 py-1.5 rounded-full bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-md text-xs font-semibold hover:scale-105 transition"
-    >
-      🔥 Elite
-    </button>
+   <button
+  onClick={() => {
+    setPremiumInitialTab("elite");  // NEW
+    setPremiumModal(true);
+  }}
+  className="px-4 py-1.5 rounded-full bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-md text-xs font-semibold hover:scale-105 transition"
+>
+  🔥 Elite
+</button>
+
 
     {/* Wingman pick */}
     {UX.SHOW_WINGMAN && (
@@ -1406,8 +1415,10 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
 
          {/* Premium modes (RomBuzz+ / Elite) */}
       <PremiumModesModal
-        open={premiumModal}
-        onClose={() => setPremiumModal(false)}
+  open={premiumModal}
+  initialTab={premiumInitialTab}   // NEW
+  onClose={() => setPremiumModal(false)}
+
         // later, when you store premiumTier on the user object,
         // this will automatically start respecting real payment state
         premiumTier={me?.premiumTier || "free"}
