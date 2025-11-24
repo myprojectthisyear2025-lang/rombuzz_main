@@ -615,6 +615,8 @@ export default function Discover() {
   // Premium gate
   const [gateOpen, setGateOpen] = useState(false);
   const [restrictedEligible, setRestrictedEligible] = useState(false);
+// Premium upgrade modal (RomBuzz+ / Elite)
+const [premiumModal, setPremiumModal] = useState(false);
 
   // Sockets
   const socketRef = useRef(null);
@@ -1039,12 +1041,10 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
             <Segmented value={myMood} onChange={updateMyMood} options={PRIMARY_PUBLIC} />
           </div>
 
-     {/* Filter + actions */}
-<div className="flex items-center gap-2">
-  <span className="text-xs text-gray-600">Filter:</span>
-  <FilterDropdown value={filterMood} onPick={pickFilterMood} />
+  {/* Filter + actions */}
+<div className="flex items-center gap-2 flex-wrap">
 
-  {/* ⬇️ New: Restricted “Modes” dropdown */}
+  {/* Restricted “Modes” dropdown */}
   <RestrictedModesDropdown
     restrictedEligible={restrictedEligible}
     onOpenGate={() => setGateOpen(true)}
@@ -1061,6 +1061,25 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
   >
     <FaSyncAlt /> Refresh
   </button>
+
+  {/* ⭐ NEW: RomBuzz+ Button */}
+  <button
+    onClick={() => setPremiumModal(true)}
+    className="px-4 py-1.5 rounded-full bg-gradient-to-r from-pink-400 to-rose-500 text-white shadow-md text-xs font-semibold hover:scale-105 transition"
+    title="RomBuzz+"
+  >
+    ⭐ RomBuzz+
+  </button>
+
+  {/* 🔥 NEW: Elite Button */}
+  <button
+    onClick={() => setPremiumModal(true)}
+    className="px-4 py-1.5 rounded-full bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-md text-xs font-semibold hover:scale-105 transition"
+    title="Elite"
+  >
+    🔥 Elite
+  </button>
+
   {UX.SHOW_WINGMAN && (
     <button
       onClick={fetchWingman}

@@ -41,6 +41,7 @@ import Help from "./pages/settings/Help";
 import DeleteAccount from "./pages/settings/DeleteAccount";
 import Preferences from "./pages/settings/Preferences";
 import Signup from "./pages/Signup"; // ⬅️ Add this import near the top
+import Upgrade from "./pages/Upgrade";
 
 /*const API_BASE = "https://rombuzz-api.onrender.com/api";
 
@@ -246,7 +247,16 @@ useEffect(() => {
     </ProtectedRoute>
   }
 />
-     
+     {/* UPGRADE PAGE */}
+<Route
+  path="/upgrade"
+  element={
+    <ProtectedRoute>
+      <Upgrade />
+    </ProtectedRoute>
+  }
+/>
+
      
 
 <Route

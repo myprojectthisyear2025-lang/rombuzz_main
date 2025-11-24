@@ -10,6 +10,7 @@ import {
   FaBell,
   FaBars,
   FaTimes,
+  FaStar,
 } from "react-icons/fa";
 import logo from "../assets/logo.png";
 import { getSocket } from "../socket";
@@ -183,6 +184,8 @@ if (!user && hideNavbar) return null;
     { name: "Chat", path: "/chat", icon: <FaComments /> },
     { name: "Notifications", path: "/notifications", icon: <FaBell /> },
     { name: "Profile", path: "/profile", icon: <FaUser /> },
+    { name: "Upgrade", path: "/upgrade", icon: <FaStar /> },
+
   ];
 
   return (
