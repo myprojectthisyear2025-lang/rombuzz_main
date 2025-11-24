@@ -31,6 +31,8 @@ const PLACEHOLDER = "https://via.placeholder.com/600x800?text=RomBuzz";
 */
 //const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com/api";
 import { API_BASE } from "../config";
+//premium features
+import PremiumModesModal from "../components/PremiumModesModal";
 
 //const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "https://rombuzz-api.onrender.com";
 const PLACEHOLDER = "https://via.placeholder.com/600x800?text=RomBuzz";
@@ -255,24 +257,37 @@ const RESTRICTED_LIST = [
 
 function Segmented({ value, onChange, options }) {
   return (
-    <div className="inline-flex bg-white rounded-full p-1 shadow-sm border">
-      {options.map((opt) => {
-        const active = opt.key === value;
-        return (
-          <button
-            key={opt.key}
-            onClick={() => onChange(opt.key)}
-            className={`px-3 py-1.5 text-sm rounded-full transition ${
-              active ? "bg-rose-500 text-white" : "text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
+    <div className="w-full md:w-auto">
+      <div
+        className="
+          flex md:inline-flex
+          items-stretch md:items-center
+          gap-2 md:gap-0
+          overflow-x-auto
+          bg-white rounded-full p-1 shadow-sm border
+        "
+      >
+        {options.map((opt) => {
+          const active = opt.key === value;
+          return (
+            <button
+              key={opt.key}
+              onClick={() => onChange(opt.key)}
+              className={`px-3 py-1.5 text-sm rounded-full whitespace-nowrap flex-shrink-0 transition ${
+                active
+                  ? 'bg-rose-500 text-white'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
+
 
 function FilterDropdown({ value, onPick, buttonClass = "" }) {
   const [open, setOpen] = useState(false);
@@ -615,7 +630,8 @@ export default function Discover() {
   // Premium gate
   const [gateOpen, setGateOpen] = useState(false);
   const [restrictedEligible, setRestrictedEligible] = useState(false);
-// Premium upgrade modal (RomBuzz+ / Elite)
+
+// Premium modes modal (RomBuzz+ / Elite)
 const [premiumModal, setPremiumModal] = useState(false);
 
   // Sockets
@@ -764,13 +780,15 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
   /* ---------------------------
    Mood persistence & filter picking
   --------------------------- */
-  const updateMyMood = async (key) => {
-    setMyMood(key);
-    try {
-      await putMe({ vibe: key });
-    } catch {}
-    fetchDiscover();
-  };
+ const updateMyMood = async (key) => {
+  setMyMood(key);
+  setFilterMood(key);
+  try {
+    await putMe({ vibe: key });
+  } catch {}
+  // Make sure Discover immediately uses the same vibe as a filter
+  fetchDiscover({ vibe: key });
+};
 
   const pickFilterMood = (key) => {
     setFilterMood(key);
@@ -1033,13 +1051,18 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
   return (
     <div className={`min-h-screen bg-gradient-to-br ${moodBg}`}>
       <div className="max-w-6xl mx-auto px-4 pt-6 pb-24">
-        {/* Top controls row */}
+       {/* Top controls row */}
 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8 md:mb-10">
-          {/* My vibe */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-600">My vibe:</span>
-            <Segmented value={myMood} onChange={updateMyMood} options={PRIMARY_PUBLIC} />
-          </div>
+  {/* My vibe */}
+  <div className="w-full md:w-auto flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
+    <span className="text-xs text-gray-600">My vibe:</span>
+    <Segmented
+      value={myMood}
+      onChange={updateMyMood}
+      options={PRIMARY_PUBLIC}
+    />
+  </div>
+
 
   {/* Filter + actions */}
 <div className="flex items-center gap-2 flex-wrap">
@@ -1336,6 +1359,24 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
           )}
         </div>
       </div>
+
+      {/* Premium modes (RomBuzz+ / Elite) */}
+      <PremiumModesModal
+        open={premiumModal}
+        onClose={() => setPremiumModal(false)}
+        premiumTier="free" // TODO: wire this to real premium status later
+        onSelectMode={(modeKey) => {
+          // When user picks a mode, apply it as Discover vibe filter
+          setFilterMood(modeKey);
+          fetchDiscover({ vibe: modeKey });
+          setPremiumModal(false);
+        }}
+        onUpgrade={(tier) => {
+          // Placeholder: later this should navigate to your Upgrade page
+          const label = tier === "elite" ? "RomBuzz Elite" : "RomBuzz+";
+          alert(`${label} coming soon. This will open the Upgrade screen.`);
+        }}
+      />
 
       {/* Premium gate */}
       <PremiumGate
