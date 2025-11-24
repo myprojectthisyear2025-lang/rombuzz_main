@@ -17,6 +17,22 @@ import { getSocket } from "../socket";
 
 const UNREAD_MAP_KEY = "RBZ:unread:map"; // { [senderId]: count }
 const UNREAD_TOTAL_KEY = "RBZ:unread:total"; // number
+const MODE_LABELS = {
+  cute: "Cute & Soft",
+  flirty: "Flirty",
+  mystery: "Mystery",
+  chill: "Chill",
+  timepass: "Timepass",
+  serious: "Long-term",
+  friends: "Friendship",
+  gymbuddy: "GymBuddy",
+  ons: "One-night vibe",
+  threesome: "Threesome / Group date",
+  onlyfans: "OnlyFans-friendly",
+  kink: "Kink-friendly",
+  latenight: "Late-night mode",
+  secret: "Secret / Incognito",
+};
 
 export default function Navbar({ user, setUser }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -25,7 +41,16 @@ export default function Navbar({ user, setUser }) {
   const [chatUnread, setChatUnread] = useState(() =>
     Number(localStorage.getItem(UNREAD_TOTAL_KEY) || "0")
   );
+  const [activeMode, setActiveMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem("RBZ:mode") || "";
+      return saved || null;
+    } catch {
+      return null;
+    }
+  });
   const navigate = useNavigate();
+
 
   // de-dupe guards
   const processedMessages = useRef(new Set());
@@ -53,6 +78,20 @@ export default function Navbar({ user, setUser }) {
       window.removeEventListener("rbz:unread", onChatUnread);
       window.removeEventListener("notifications:clear", onClear);
     };
+  }, []);
+  // Track active discover mode (for navbar badge)
+  useEffect(() => {
+    const handler = (e) => {
+      const key = e?.detail?.key;
+      if (!key) return;
+      setActiveMode(key);
+      try {
+        localStorage.setItem("RBZ:mode", key);
+      } catch {}
+    };
+
+    window.addEventListener("mode:changed", handler);
+    return () => window.removeEventListener("mode:changed", handler);
   }, []);
 
   // ✅ NEW: Listen for global notification events broadcasted from socket.js
@@ -210,6 +249,7 @@ if (!user && hideNavbar) return null;
         </Link>
 
         {/* Desktop Links */}
+            {/* Desktop Links */}
         <div className="hidden md:flex items-center space-x-8">
           {links.map((link) => {
             const isNotif = link.name === "Notifications";
@@ -230,24 +270,31 @@ if (!user && hideNavbar) return null;
                 {link.name}
                 {/* Chat badge */}
                 {isChat && chatUnread > 0 && (
-                <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
+                  <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
                     rounded-full text-[11px] leading-[18px] text-rose-600 bg-white text-center shadow-md">
-                      {chatUnread > 99 ? "99+" : chatUnread}
-                    </span>
-
-
+                    {chatUnread > 99 ? "99+" : chatUnread}
+                  </span>
                 )}
                 {/* Notifications badge */}
                 {isNotif && (unread > 0 || buzzUnread > 0) && (
-                 <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
+                  <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
                     rounded-full text-[11px] leading-[18px] text-rose-600 bg-white text-center shadow-md">
-                      {unread > 99 ? "99+" : unread}
-                    </span>
-
+                    {unread > 99 ? "99+" : unread}
+                  </span>
                 )}
               </Link>
             );
           })}
+
+          {/* Active mode badge */}
+          {activeMode && (
+            <div className="flex items-center px-3 py-1 rounded-full bg-white/20 text-xs font-semibold shadow-sm">
+              <span className="mr-1 opacity-80">Mode:</span>
+              <span className="text-yellow-200">
+                {MODE_LABELS[activeMode] || activeMode}
+              </span>
+            </div>
+          )}
 
           <button
             onClick={handleLogout}
@@ -258,6 +305,7 @@ if (!user && hideNavbar) return null;
           </button>
         </div>
 
+
         {/* Mobile Menu Button */}
         <div className="md:hidden">
           <button onClick={toggleMenu} className="focus:outline-none">
@@ -267,7 +315,7 @@ if (!user && hideNavbar) return null;
       </div>
 
       {/* Mobile Dropdown */}
-      {isOpen && (
+           {isOpen && (
         <div className="md:hidden bg-red-600 text-white flex flex-col space-y-3 px-4 py-4 transition-all duration-300">
           {links.map((link) => {
             const isNotif = link.name === "Notifications";
@@ -288,22 +336,29 @@ if (!user && hideNavbar) return null;
                 <span className="text-lg">{link.icon}</span>
                 {link.name}
                 {isChat && chatUnread > 0 && (
-                 <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
+                  <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
                     rounded-full text-[11px] leading-[18px] text-rose-600 bg-white text-center shadow-md">
-                      {chatUnread > 99 ? "99+" : chatUnread}
-                    </span>
-
+                    {chatUnread > 99 ? "99+" : chatUnread}
+                  </span>
                 )}
                 {isNotif && (unread > 0 || buzzUnread > 0) && (
                   <span className="absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1
                     rounded-full text-[11px] leading-[18px] text-rose-600 bg-white text-center shadow-md">
-                      {unread > 99 ? "99+" : unread}
-                    </span>
-
+                    {unread > 99 ? "99+" : unread}
+                  </span>
                 )}
               </Link>
             );
           })}
+
+          {activeMode && (
+            <div className="text-xs text-yellow-100 mt-1">
+              Active mode:{" "}
+              <span className="font-semibold">
+                {MODE_LABELS[activeMode] || activeMode}
+              </span>
+            </div>
+          )}
 
           <button
             onClick={() => {
@@ -317,6 +372,7 @@ if (!user && hideNavbar) return null;
           </button>
         </div>
       )}
+
     </nav>
   );
 }

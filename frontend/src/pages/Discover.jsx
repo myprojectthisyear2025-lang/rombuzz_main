@@ -1404,23 +1404,38 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
         </div>
       </div>
 
-      {/* Premium modes (RomBuzz+ / Elite) */}
+         {/* Premium modes (RomBuzz+ / Elite) */}
       <PremiumModesModal
         open={premiumModal}
         onClose={() => setPremiumModal(false)}
-        premiumTier="free" // TODO: wire this to real premium status later
+        // later, when you store premiumTier on the user object,
+        // this will automatically start respecting real payment state
+        premiumTier={me?.premiumTier || "free"}
         onSelectMode={(modeKey) => {
-          // When user picks a mode, apply it as Discover vibe filter
+          // 1) Apply as Discover vibe filter
           setFilterMood(modeKey);
           fetchDiscover({ vibe: modeKey });
           setPremiumModal(false);
+
+          // 2) Persist to backend (so you can reload later)
+          putMe({ vibe: modeKey }).catch(() => {});
+
+          // 3) Broadcast to the whole app (Navbar, etc.)
+          window.dispatchEvent(
+            new CustomEvent("mode:changed", { detail: { key: modeKey } })
+          );
+
+          // 4) Also stash locally (for initial load on refresh)
+          try {
+            localStorage.setItem("RBZ:mode", modeKey);
+          } catch {}
         }}
-        onUpgrade={(tier) => {
-          // Placeholder: later this should navigate to your Upgrade page
-          const label = tier === "elite" ? "RomBuzz Elite" : "RomBuzz+";
-          alert(`${label} coming soon. This will open the Upgrade screen.`);
+        onUpgrade={() => {
+          // For now just go straight to your Upgrade page
+          window.location.href = "/upgrade";
         }}
       />
+
 
       {/* Premium gate */}
       <PremiumGate

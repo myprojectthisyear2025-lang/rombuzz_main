@@ -1,6 +1,6 @@
 // src/components/PremiumModesModal.jsx
 import React, { useState, useEffect } from "react";
-import { FaTimes, FaCrown, FaBolt, FaStar, FaLock } from "react-icons/fa";
+import { FaTimes, FaCrown, FaBolt, FaStar } from "react-icons/fa";
 
 /**
  * PremiumModesModal
@@ -10,7 +10,7 @@ import { FaTimes, FaCrown, FaBolt, FaStar, FaLock } from "react-icons/fa";
  *  - onClose: () => void
  *  - premiumTier: "free" | "plus" | "elite"
  *  - onSelectMode: (modeKey: string, meta: { tier: "plus" | "elite" }) => void
- *  - onUpgrade: (tier: "plus" | "elite") => void
+ *  - onUpgrade: () => void   // we'll just route to /upgrade from parent
  */
 
 const PLUS_MODES = [
@@ -125,46 +125,48 @@ export default function PremiumModesModal({
   onUpgrade,
 }) {
   const [activeTab, setActiveTab] = useState("plus"); // "plus" | "elite"
+  const [selectedKey, setSelectedKey] = useState(null);
+  const [showConfetti, setShowConfetti] = useState(false);
 
   useEffect(() => {
     if (open) {
       setActiveTab("plus");
+      setShowConfetti(false);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!showConfetti) return;
+    const t = setTimeout(() => setShowConfetti(false), 1000);
+    return () => clearTimeout(t);
+  }, [showConfetti]);
 
   if (!open) return null;
 
   const handleCardClick = (mode) => {
-    const { tier, key } = mode;
+    const { key } = mode;
 
-    // If user does not have required tier → ask to upgrade
-    if (tier === "elite" && premiumTier !== "elite") {
-      onUpgrade?.("elite");
+    // TEMP PAYMENT CHECK:
+    // later you can wire this to real payment/verification state.
+    const hasPaid = premiumTier !== "free";
+
+    if (!hasPaid) {
+      // No payment → send user to Upgrade page
+      if (onUpgrade) {
+        onUpgrade();
+      } else {
+        window.location.href = "/upgrade";
+      }
       return;
     }
-    if (tier === "plus" && premiumTier === "free") {
-      onUpgrade?.("plus");
-      return;
-    }
 
-    // Otherwise, apply mode
-    onSelectMode?.(key, { tier });
-  };
+    // Paid:
+    setSelectedKey(key);
+    setShowConfetti(true);
 
-//premium modes we will lock them once payment system is set up
-  /*  
-  const isModeLocked = (mode) => {
-    if (mode.tier === "elite") {
-      return premiumTier !== "elite";
-    }
-    if (mode.tier === "plus") {
-      return premiumTier === "free";
-    }
-    return false;
+    // Notify parent (Discover) to apply filter + save + broadcast
+    onSelectMode?.(key, { tier: mode.tier });
   };
-  */
-// TEMPORARY — unlock everything until payments are ready
-const isModeLocked = () => false;
 
   const modesToShow =
     activeTab === "plus"
@@ -174,7 +176,27 @@ const isModeLocked = () => false;
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm">
       {/* Sheet container */}
-      <div className="w-full max-w-2xl bg-white rounded-t-3xl md:rounded-3xl shadow-2xl overflow-hidden animate-[slideUp_0.25s_ease-out] max-h-[90vh] flex flex-col">
+      <div className="relative w-full max-w-2xl bg-white rounded-t-3xl md:rounded-3xl shadow-2xl overflow-hidden animate-[slideUp_0.25s_ease-out] max-h-[90vh] flex flex-col">
+        {/* Confetti overlay (simple, lightweight) */}
+        {showConfetti && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="relative w-full h-full">
+              <span className="absolute left-1/4 top-1/4 text-2xl md:text-3xl animate-bounce">
+                ✨
+              </span>
+              <span className="absolute right-1/4 top-1/3 text-2xl md:text-3xl animate-bounce">
+                💖
+              </span>
+              <span className="absolute left-1/3 bottom-1/4 text-2xl md:text-3xl animate-bounce">
+                🎉
+              </span>
+              <span className="absolute right-1/5 bottom-1/5 text-2xl md:text-3xl animate-bounce">
+                🌟
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b">
           <div>
@@ -224,11 +246,9 @@ const isModeLocked = () => false;
           </button>
 
           <div className="ml-auto text-[11px] text-gray-500 hidden md:block">
-            {premiumTier === "elite"
-              ? "You’re on Elite. All modes unlocked."
-              : premiumTier === "plus"
-              ? "You’re on RomBuzz+. Elite modes locked."
-              : "You’re on Free. Try modes, then upgrade."}
+            {premiumTier !== "free"
+              ? "Premium active. All modes available."
+              : "You’re on Free. Selecting a mode will open Upgrade."}
           </div>
         </div>
 
@@ -237,7 +257,7 @@ const isModeLocked = () => false;
           {/* 2 square tiles per row */}
           <div className="grid grid-cols-2 gap-3 sm:gap-4 md:gap-5">
             {modesToShow.map((mode) => {
-              const locked = isModeLocked(mode);
+              const isSelected = selectedKey === mode.key;
               return (
                 <button
                   key={`${activeTab}-${mode.key}`}
@@ -250,6 +270,11 @@ const isModeLocked = () => false;
                       activeTab === "elite" || mode.tier === "elite"
                         ? "bg-gradient-to-br from-violet-50 via-purple-50 to-rose-50"
                         : "bg-gradient-to-br from-rose-50 via-pink-50 to-amber-50"
+                    }
+                    ${
+                      isSelected
+                        ? "ring-2 ring-rose-500 border-rose-400"
+                        : "border-white/60"
                     }`}
                 >
                   {/* Subtle glow layer */}
@@ -284,23 +309,6 @@ const isModeLocked = () => false;
                       {mode.desc}
                     </p>
                   </div>
-
-                  {/* Lock overlay */}
-                 {/* 
-                  {locked && (
-                    <div className="absolute inset-0 bg-white/75 backdrop-blur-sm flex flex-col items-center justify-center text-center px-4">
-                      <FaLock className="mb-1 text-gray-500" />
-                      <p className="text-[11px] text-gray-700 font-semibold">
-                        {mode.tier === "elite"
-                          ? "Unlock with RomBuzz Elite"
-                          : "Unlock with RomBuzz+"}
-                      </p>
-                      <p className="text-[10px] text-gray-500">
-                        Tap to view upgrade options.
-                      </p>
-                    </div>
-                  )}
-                  */}
                 </button>
               );
             })}
@@ -316,25 +324,15 @@ const isModeLocked = () => false;
         {/* Bottom actions (for free users) */}
         {premiumTier === "free" && (
           <div className="border-t px-5 py-3 bg-gray-50 text-center text-[11px] text-gray-600">
-            <span className="font-semibold text-rose-500">Tip:</span> Upgrade to{" "}
-            <button
-              onClick={() => onUpgrade?.("plus")}
-              className="underline font-semibold"
-            >
-              RomBuzz+
-            </button>{" "}
-            or{" "}
-            <button
-              onClick={() => onUpgrade?.("elite")}
-              className="underline font-semibold"
-            >
-              Elite
-            </button>{" "}
-            later to unlock all modes permanently.
+            <span className="font-semibold text-rose-500">Tip:</span> Upgrade on
+            the{" "}
+            <span className="font-semibold underline cursor-pointer">
+              Upgrade
+            </span>{" "}
+            page later to unlock all modes permanently.
           </div>
         )}
       </div>
     </div>
   );
 }
-
