@@ -151,6 +151,8 @@ export default function PremiumModesModal({
     onSelectMode?.(key, { tier });
   };
 
+//premium modes we will lock them once payment system is set up
+  /*  
   const isModeLocked = (mode) => {
     if (mode.tier === "elite") {
       return premiumTier !== "elite";
@@ -160,6 +162,9 @@ export default function PremiumModesModal({
     }
     return false;
   };
+  */
+// TEMPORARY — unlock everything until payments are ready
+const isModeLocked = () => false;
 
   const modesToShow =
     activeTab === "plus"
@@ -281,6 +286,7 @@ export default function PremiumModesModal({
                   </div>
 
                   {/* Lock overlay */}
+                 {/* 
                   {locked && (
                     <div className="absolute inset-0 bg-white/75 backdrop-blur-sm flex flex-col items-center justify-center text-center px-4">
                       <FaLock className="mb-1 text-gray-500" />
@@ -294,6 +300,7 @@ export default function PremiumModesModal({
                       </p>
                     </div>
                   )}
+                  */}
                 </button>
               );
             })}
@@ -330,3 +337,4 @@ export default function PremiumModesModal({
     </div>
   );
 }
+
