@@ -1051,70 +1051,114 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
   return (
     <div className={`min-h-screen bg-gradient-to-br ${moodBg}`}>
       <div className="max-w-6xl mx-auto px-4 pt-6 pb-24">
-       {/* Top controls row */}
-<div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8 md:mb-10">
-  {/* My vibe */}
-  <div className="w-full md:w-auto flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
-    <span className="text-xs text-gray-600">My vibe:</span>
-    <Segmented
-      value={myMood}
-      onChange={updateMyMood}
-      options={PRIMARY_PUBLIC}
-    />
+  {/* NEW Top controls row */}
+<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-8">
+
+  {/* LEFT SIDE — Vibe Buttons */}
+  <div className="flex items-center gap-2 flex-wrap">
+
+    {/* All */}
+    <button
+      onClick={() => { setFilterMood(""); fetchDiscover({ vibe: "" }); }}
+      className={`px-4 py-1.5 rounded-full text-xs font-semibold shadow-md transition ${
+        filterMood === "" 
+          ? "bg-gradient-to-r from-rose-500 to-pink-500 text-white" 
+          : "bg-white text-gray-700 border"
+      }`}
+    >
+      All
+    </button>
+
+    {/* Long-term */}
+    <button
+      onClick={() => { setFilterMood("serious"); fetchDiscover({ vibe: "serious" }); }}
+      className={`px-4 py-1.5 rounded-full text-xs font-semibold shadow-md transition ${
+        filterMood === "serious"
+          ? "bg-gradient-to-r from-rose-500 to-pink-500 text-white"
+          : "bg-white text-gray-700 border"
+      }`}
+    >
+      Long-term
+    </button>
+
+    {/* Casual */}
+    <button
+      onClick={() => { setFilterMood("casual"); fetchDiscover({ vibe: "casual" }); }}
+      className={`px-4 py-1.5 rounded-full text-xs font-semibold shadow-md transition ${
+        filterMood === "casual"
+          ? "bg-gradient-to-r from-rose-500 to-pink-500 text-white"
+          : "bg-white text-gray-700 border"
+      }`}
+    >
+      Casual
+    </button>
+
+    {/* Friends */}
+    <button
+      onClick={() => { setFilterMood("friends"); fetchDiscover({ vibe: "friends" }); }}
+      className={`px-4 py-1.5 rounded-full text-xs font-semibold shadow-md transition ${
+        filterMood === "friends"
+          ? "bg-gradient-to-r from-rose-500 to-pink-500 text-white"
+          : "bg-white text-gray-700 border"
+      }`}
+    >
+      Friends
+    </button>
+
+    {/* GymBuddy */}
+    <button
+      onClick={() => { setFilterMood("gymbuddy"); fetchDiscover({ vibe: "gymbuddy" }); }}
+      className={`px-4 py-1.5 rounded-full text-xs font-semibold shadow-md transition ${
+        filterMood === "gymbuddy"
+          ? "bg-gradient-to-r from-rose-500 to-pink-500 text-white"
+          : "bg-white text-gray-700 border"
+      }`}
+    >
+      GymBuddy
+    </button>
+
   </div>
 
+  {/* RIGHT SIDE — Action Buttons */}
+  <div className="flex items-center gap-2 flex-wrap">
 
-  {/* Filter + actions */}
-<div className="flex items-center gap-2 flex-wrap">
-
-  {/* Restricted “Modes” dropdown */}
-  <RestrictedModesDropdown
-    restrictedEligible={restrictedEligible}
-    onOpenGate={() => setGateOpen(true)}
-    onPick={(key) => {
-      setFilterMood(key);
-      fetchDiscover({ vibe: key });
-    }}
-  />
-
-  <button
-    onClick={() => fetchDiscover()}
-    className="px-3 py-1.5 rounded-full bg-white shadow text-rose-600 flex items-center gap-2"
-    title="Refresh"
-  >
-    <FaSyncAlt /> Refresh
-  </button>
-
-  {/* ⭐ NEW: RomBuzz+ Button */}
-  <button
-    onClick={() => setPremiumModal(true)}
-    className="px-4 py-1.5 rounded-full bg-gradient-to-r from-pink-400 to-rose-500 text-white shadow-md text-xs font-semibold hover:scale-105 transition"
-    title="RomBuzz+"
-  >
-    ⭐ RomBuzz+
-  </button>
-
-  {/* 🔥 NEW: Elite Button */}
-  <button
-    onClick={() => setPremiumModal(true)}
-    className="px-4 py-1.5 rounded-full bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-md text-xs font-semibold hover:scale-105 transition"
-    title="Elite"
-  >
-    🔥 Elite
-  </button>
-
-  {UX.SHOW_WINGMAN && (
+    {/* Refresh */}
     <button
-      onClick={fetchWingman}
-      className="px-3 py-1.5 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow flex items-center gap-2"
-      title="Wingman pick"
+      onClick={() => fetchDiscover()}
+      className="px-4 py-1.5 rounded-full bg-white border text-gray-700 shadow-md text-xs font-semibold hover:scale-105 transition flex items-center gap-2"
     >
-      <FaMagic /> Wingman pick
+      <FaSyncAlt /> Refresh
     </button>
-  )}
+
+    {/* RomBuzz+ */}
+    <button
+      onClick={() => setPremiumModal(true)}
+      className="px-4 py-1.5 rounded-full bg-gradient-to-r from-rose-400 to-pink-500 text-white shadow-md text-xs font-semibold hover:scale-105 transition"
+    >
+      ⭐ RomBuzz+
+    </button>
+
+    {/* Elite */}
+    <button
+      onClick={() => setPremiumModal(true)}
+      className="px-4 py-1.5 rounded-full bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-md text-xs font-semibold hover:scale-105 transition"
+    >
+      🔥 Elite
+    </button>
+
+    {/* Wingman pick */}
+    {UX.SHOW_WINGMAN && (
+      <button
+        onClick={fetchWingman}
+        className="px-4 py-1.5 rounded-full bg-gradient-to-r from-rose-500 to-pink-600 text-white shadow-md text-xs font-semibold hover:scale-105 transition flex items-center gap-2"
+      >
+        <FaMagic /> Wingman pick
+      </button>
+    )}
+
+  </div>
 </div>
 
-        </div>
 
         {/* BuzzZone banner */}
         {UX.SHOW_BUZZZONE && buzzZoneCount >= 2 && (

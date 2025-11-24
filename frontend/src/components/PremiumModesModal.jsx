@@ -229,56 +229,68 @@ export default function PremiumModesModal({
 
         {/* Scrollable body */}
         <div className="px-5 pb-4 pt-1 overflow-y-auto">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* 2 square tiles per row */}
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 md:gap-5">
             {modesToShow.map((mode) => {
               const locked = isModeLocked(mode);
               return (
                 <button
                   key={`${activeTab}-${mode.key}`}
                   onClick={() => handleCardClick(mode)}
-                  className={`relative text-left rounded-2xl p-4 shadow-sm border transition transform hover:-translate-y-0.5 hover:shadow-xl overflow-hidden ${
-                    activeTab === "elite" || mode.tier === "elite"
-                      ? "bg-gradient-to-br from-violet-50 via-purple-50 to-rose-50"
-                      : "bg-gradient-to-br from-rose-50 via-pink-50 to-amber-50"
-                  }`}
+                  className={`relative aspect-square rounded-2xl p-4 shadow-sm border overflow-hidden
+                    transition-transform transition-shadow duration-200
+                    hover:-translate-y-1 hover:shadow-xl hover:scale-[1.03]
+                    active:scale-95
+                    ${
+                      activeTab === "elite" || mode.tier === "elite"
+                        ? "bg-gradient-to-br from-violet-50 via-purple-50 to-rose-50"
+                        : "bg-gradient-to-br from-rose-50 via-pink-50 to-amber-50"
+                    }`}
                 >
-                  {/* Glow layer */}
-                  <div className="pointer-events-none absolute inset-0 opacity-30 bg-gradient-to-br from-white/40 to-transparent" />
+                  {/* Subtle glow layer */}
+                  <div className="pointer-events-none absolute inset-0 opacity-40 bg-gradient-to-br from-white/40 to-transparent" />
 
-                  <div className="relative flex items-start gap-3">
-                    <div className="text-2xl">{mode.emoji}</div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-semibold text-gray-900">
-                          {mode.title}
-                        </h3>
-                        {mode.tier === "elite" && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-600 text-white">
-                            Elite
-                          </span>
-                        )}
-                        {mode.tier === "plus" && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500 text-white">
-                            Plus
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-1 text-xs text-gray-600 leading-snug">
-                        {mode.desc}
-                      </p>
+                  {/* Content inside square */}
+                  <div className="relative flex h-full flex-col items-center justify-center text-center">
+                    {/* Emoji bubble */}
+                    <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-white/70 shadow-sm">
+                      <span className="text-2xl md:text-3xl">{mode.emoji}</span>
                     </div>
+
+                    {/* Title + tier */}
+                    <div className="mt-1 flex items-center justify-center gap-2">
+                      <h3 className="text-sm font-semibold text-gray-900">
+                        {mode.title}
+                      </h3>
+                      {mode.tier === "elite" && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-600 text-white shadow-sm">
+                          Elite
+                        </span>
+                      )}
+                      {mode.tier === "plus" && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500 text-white shadow-sm">
+                          Plus
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Description */}
+                    <p className="mt-2 px-1 text-[11px] text-gray-600 leading-snug max-w-[11rem] mx-auto">
+                      {mode.desc}
+                    </p>
                   </div>
 
+                  {/* Lock overlay */}
                   {locked && (
-                    <div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex flex-col items-center justify-center text-center px-4">
+                    <div className="absolute inset-0 bg-white/75 backdrop-blur-sm flex flex-col items-center justify-center text-center px-4">
                       <FaLock className="mb-1 text-gray-500" />
-                      <p className="text-[11px] text-gray-700 font-medium">
+                      <p className="text-[11px] text-gray-700 font-semibold">
                         {mode.tier === "elite"
                           ? "Unlock with RomBuzz Elite"
                           : "Unlock with RomBuzz+"}
                       </p>
                       <p className="text-[10px] text-gray-500">
-                        Tap to see upgrade options.
+                        Tap to view upgrade options.
                       </p>
                     </div>
                   )}
