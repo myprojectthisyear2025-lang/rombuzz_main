@@ -10,7 +10,7 @@ import {
 
 export default function Upgrade() {
   return (
-    <div className="min-h-screen pt-6 pb-20 px-3 md:px-8 bg-gradient-to-br from-pink-50 via-rose-50 to-orange-50 text-gray-900">
+<div className="min-h-screen pt-20 pb-20 px-3 md:px-8 bg-gradient-to-br from-pink-50 via-rose-50 to-orange-50 text-gray-900">
       {/* HERO */}
       <div className="text-center mt-6 mb-10">
         <h1 className="text-4xl md:text-5xl font-extrabold bg-gradient-to-r from-pink-600 to-red-500 bg-clip-text text-transparent drop-shadow-sm">
