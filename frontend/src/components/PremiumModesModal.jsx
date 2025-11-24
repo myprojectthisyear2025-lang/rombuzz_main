@@ -128,12 +128,12 @@ export default function PremiumModesModal({
   const [selectedKey, setSelectedKey] = useState(null);
   const [showConfetti, setShowConfetti] = useState(false);
 
-  useEffect(() => {
-    if (open) {
-      setActiveTab("plus");
-      setShowConfetti(false);
-    }
-  }, [open]);
+ useEffect(() => {
+  if (open) {
+    setShowConfetti(false);
+  }
+}, [open]);
+
 
   useEffect(() => {
     if (!showConfetti) return;
