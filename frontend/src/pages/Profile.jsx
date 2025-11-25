@@ -97,8 +97,10 @@ const extractBlurMode = (favorites = []) => {
       if (mode === "clear" || mode === "blurred") return mode;
     }
   }
-  return "blurred"; // default safer choice
+  // Default: show clearly in Discover
+  return "clear";
 };
+
 
 // Format "how long ago"
 const timeAgo = (ts) => {

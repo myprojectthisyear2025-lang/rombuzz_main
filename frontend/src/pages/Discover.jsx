@@ -573,9 +573,56 @@ function PremiumGate({ open, onClose, onSuccess }) {
   );
 }
 /* ============================================================
-   Visibility helpers
+   Visibility + blur helpers
 ============================================================ */
-const getVisibilityMode = (u) => (u?.visibilityMode || "auto"); // "auto" | "limited" | "full" | "hidden"
+// Normalize legacy / backend values to a clean visibility mode
+const getVisibilityMode = (u) => {
+  const raw = u?.visibilityMode || "full";
+  // Older records may have "public" → treat as fully visible
+  if (raw === "public") return "full";
+  return raw; // "full" | "limited" | "hidden" | whatever backend sends
+};
+
+// Read Discover blur preference from favorites: "blur:clear" / "blur:blurred"
+const getBlurMode = (u) => {
+  const favorites = u?.favorites;
+  if (Array.isArray(favorites)) {
+    const tag = favorites.find(
+      (fav) => typeof fav === "string" && fav.startsWith("blur:")
+    );
+    if (tag === "blur:blurred") return "blurred";
+    if (tag === "blur:clear") return "clear";
+  }
+  // Default: profiles appear clearly in Discover
+  return "clear";
+};
+
+// Card blur logic for *other people* in Discover:
+//  - hidden      → strong blur (incognito / should rarely show anyway)
+//  - blur:clear  → no blur
+//  - blur:blurred→ soft blur, tap/drag to reveal
+const computeBlurPx = (u, reveal) => {
+  if (!u) return "0px";
+
+  const mode = getVisibilityMode(u);
+  const blurMode = getBlurMode(u);
+
+  // Full incognito: keep very obscured if they somehow slip through
+  if (mode === "hidden") {
+    return "18px";
+  }
+
+  // Explicit blurred preview → respect tap-to-reveal using "reveal"
+  if (blurMode === "blurred") {
+    if (!UX.AUTO_BLUR) return "0px";
+    const maxBlur = 18;
+    const px = Math.round((1 - reveal) * maxBlur);
+    return `${px}px`;
+  }
+
+  // Default: fully visible
+  return "0px";
+};
 
 // Field-level guard: "public" (default) | "matches" | "hidden"
 const canShowField = (u, key, matched = false) => {
@@ -585,23 +632,6 @@ const canShowField = (u, key, matched = false) => {
   return true;
 };
 
-// Card blur logic for *non-matches* in Discover:
-//  - full     → no blur
-//  - limited  → no blur (info limited elsewhere)
-//  - auto     → blurred (we use reveal 0..1 you already had)
-//  - hidden   → filtered out of list (never shown)
-const computeBlurPx = (u, reveal) => {
-  const mode = getVisibilityMode(u);
-  if (mode === "full" || mode === "limited") return "0px";
-  if (mode === "auto") {
-    if (!UX.AUTO_BLUR) return "0px";
-    const maxBlur = 18;
-    const px = Math.round((1 - reveal) * maxBlur);
-    return `${px}px`;
-  }
-  // "hidden" should be filtered, but default to strong blur if it slips through
-  return "18px";
-};
 
 /* ============================================================
    Discover Page (swipe-first)
