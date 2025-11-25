@@ -76,20 +76,44 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
     if (post.userId !== myId) {
       const user = await User.findOne({ id: myId }).lean();
       const commenterName = user?.firstName || "Someone";
-      const notif = {
-        id: shortid.generate(),
-        toId: post.userId,
-        fromId: myId,
-        type: "comment",
-        message: `${commenterName} commented on your post: "${text.slice(0, 50)}${
-          text.length > 50 ? "..." : ""
-        }"`,
-        href: `/buzz/post/${postId}`,
-        postId,
-        postOwnerId: post.userId,
-      };
-      await Notification.create(notif);
-      if (io) io.to(String(post.userId)).emit("notification:new", notif);
+     // Detect correct link based on post.type
+let link = `/buzz/post/${postId}`;
+
+// Avatar post
+if (post.type === "avatar") {
+  link = `/viewProfile/${post.userId}?highlight=avatar&post=${postId}`;
+}
+
+// Reel post
+if (post.type === "reel") {
+  link = `/buzz/reel/${postId}`;
+}
+
+// Fallback → normal buzz post
+const notif = {
+  id: shortid.generate(),
+  toId: post.userId,
+  fromId: myId,
+  type: "comment",
+  message: `${commenterName} commented on your post: "${text.slice(0, 50)}${
+    text.length > 50 ? "..." : ""
+  }"`,
+  href: link,
+  postId,
+  postOwnerId: post.userId,
+};
+
+     await Notification.create(notif);
+
+// 🔥 FIXED: use correct event name so Navbar updates in real-time
+if (io) io.to(String(post.userId)).emit("notification", notif);
+
+try {
+  window?.dispatchEvent?.(
+    new CustomEvent("notification:new", { detail: notif })
+  );
+} catch {}
+
     }
 
     // 📡 Real-time broadcast
@@ -317,8 +341,28 @@ router.post("/buzz/posts/:postId/comments/:commentId/react", authMiddleware, asy
 
     // 5️⃣ Optional live socket event
     if (io && io.to) {
-      io.to(String(comment.userId)).emit("comment:react", { postId, commentId, emoji });
-    }
+  io.to(String(comment.userId)).emit("comment:react", {
+    postId,
+    commentId,
+    emoji,
+  });
+}
+
+// 🔥 NEW: send reaction notification to Navbar
+if (comment.userId !== myId) {
+  try {
+    io.to(String(comment.userId)).emit("notification", {
+      id: shortid.generate(),
+      type: "reaction",
+      fromId: myId,
+      postId,
+      commentId,
+      message: `reacted with ${emoji} to your comment`,
+      createdAt: new Date(),
+    });
+  } catch {}
+}
+
 
     return res.json({
       success: true,
@@ -355,9 +399,13 @@ router.delete("/buzz/posts/:postId/comments/:commentId/react", authMiddleware, a
       await post.save();
 
       // 🔔 Optionally emit socket event
-      if (io && io.to) {
-        io.to(String(comment.userId)).emit("comment:reactRemoved", { postId, commentId });
-      }
+    if (io && io.to) {
+  io.to(String(comment.userId)).emit("comment:reactRemoved", {
+    postId,
+    commentId,
+  });
+}
+
     }
 
     return res.json({ success: true });

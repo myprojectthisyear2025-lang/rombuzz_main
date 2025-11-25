@@ -175,30 +175,43 @@ router.post("/likes", authMiddleware, async (req, res) => {
   return res.json({ success: true, matched: true });
 }
 
-        else {
-      // 💌 Discover Like → Match Request
-          const io = getIO();
-      const onlineUsers = getOnlineUsers();
+    else {
+  // 💌 Discover Like → Match Request
+  const io = getIO();
+  const onlineUsers = getOnlineUsers();
 
-      const targetSocket = onlineUsers[to];
-      if (io && targetSocket) {
-        const fromUser = baseSanitizeUser(self);
-        io.to(String(targetSocket)).emit("buzz_request", {
-          fromId: from,
-          name: fromUser.firstName || "Someone nearby",
-          selfieUrl: fromUser.avatar || "",
-        });
-      }
+  const targetSocket = onlineUsers[to];
+  if (io && targetSocket) {
+    const fromUser = baseSanitizeUser(self);
 
+    // 🔔 Real-time Discover Like (navbar unread)
+    io.to(String(targetSocket)).emit("notification", {
+      id: shortid.generate(),
+      fromId: from,
+      type: "buzz",
+      via: "discover_like",
+      message: `${fromUser.firstName || "Someone nearby"} wants to match with you! 💖`,
+      createdAt: new Date().toISOString(),
+      read: false
+    });
 
-      const fromName = self?.firstName || "Someone nearby";
-      await sendNotification(to, {
-        fromId: from,
-        type: "buzz",
-        via: "discover_like", // 🔹 identify as Discover match request
-        message: `${fromName} wants to match with you! 💖`,
-      });
-    }
+    // 🔔 Also show Discover popup
+    io.to(String(targetSocket)).emit("buzz_request", {
+      fromId: from,
+      name: fromUser.firstName || "Someone nearby",
+      selfieUrl: fromUser.avatar || "",
+    });
+  }
+
+  const fromName = self?.firstName || "Someone nearby";
+  await sendNotification(to, {
+    fromId: from,
+    type: "buzz",
+    via: "discover_like", // 🔹 identify as Discover match request
+    message: `${fromName} wants to match with you! 💖`,
+  });
+}
+
 
 
     res.json({ success: true, matched: !!mutual });

@@ -428,7 +428,7 @@ if (reverseBuzz) {
 }
 
 
-    /* ============================================================
+      /* ============================================================
          ONE-WAY BUZZ
     ============================================================ */
     const exists = await MicroBuzzBuzz.findOne({ fromId, toId });
@@ -436,23 +436,38 @@ if (reverseBuzz) {
       await MicroBuzzBuzz.create({ fromId, toId, time: new Date() });
     }
 
+    // Fetch real user profile to get firstName
+    const fromProfile = await User.findOne({ id: fromId }).lean();
+    const firstName = fromProfile?.firstName || "Someone";
+
+    // 🔔 Create a stored notification + trigger navbar badge
+    try {
+      await sendNotification(toId, {
+        fromId,
+        type: "buzz",
+        via: "microbuzz",
+        message: `${firstName} wants to buzz you!`,
+        href: `/viewProfile/${fromId}`,
+      });
+    } catch (e) {
+      console.warn("MicroBuzz one-way notification failed:", e);
+    }
+
+    // 📡 Live popup if they are online (existing behavior)
     if (onlineUsers[toId]) {
-  // Fetch real user profile to get firstName
-  const fromProfile = await User.findOne({ id: fromId }).lean();
-  const firstName = fromProfile?.firstName || "Someone";
-
-  io.to(onlineUsers[toId]).emit("buzz_request", {
-    fromId,
-    selfieUrl: fromPresence?.selfieUrl,
-    name: firstName,
-    distanceMeters,
-    message: `${firstName} wants to buzz you!`,
-    type: "microbuzz",
-  });
-}
-
+      io.to(onlineUsers[toId]).emit("buzz_request", {
+        fromId,
+        selfieUrl: fromPresence?.selfieUrl,
+        name: firstName,
+        distanceMeters,
+        message: `${firstName} wants to buzz you!`,
+        type: "microbuzz",
+      });
+    }
 
     res.json({ success: true });
+
+
   } catch (err) {
     console.error("❌ /api/microbuzz/buzz error:", err);
     res.status(500).json({ error: "Buzz failed" });

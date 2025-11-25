@@ -25,7 +25,7 @@ const userSchema = new mongoose.Schema(
     lookingFor: { type: String, default: "" },
     interestedIn: { type: [String], default: [] },
     preferences: { type: Object, default: {} },
-    visibilityMode: { type: String, default: "public" },
+    visibilityMode: { type: String, default: "full" },
     interests: { type: [String], default: [] },
     avatar: { type: String, default: "" },
     photos: { type: [String], default: [] },

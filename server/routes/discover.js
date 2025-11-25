@@ -430,8 +430,9 @@ router.get("/", authMiddleware, async (req, res) => {
           interests: u.interests || [],
           hobbies: u.hobbies || [],
           favorites: u.favorites || [],
-          visibilityMode: u.visibilityMode || "auto",
+          visibilityMode: u.visibilityMode || "full",
           fieldVisibility: u.fieldVisibility || {},
+
 
           // debug / tuning (safe to ignore on frontend)
           _score: u._score,
