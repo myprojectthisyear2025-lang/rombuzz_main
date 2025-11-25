@@ -796,10 +796,67 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
     fetchDiscover({ vibe: key });
   };
 
-  /* ---------------------------
-   Swipe handling (like Tinder)
+   /* ---------------------------
+   Swipe handling (Smooth)
   --------------------------- */
   const dragRef = useRef({ active: false, x: 0, y: 0, startX: 0, startY: 0 });
+  const [cardStyle, setCardStyle] = useState({
+    x: 0,
+    y: 0,
+    rot: 0,
+    opacityLike: 0,
+    opacityNope: 0,
+  });
+
+  // Keep latest cardStyle in a ref for animations
+  const cardStyleRef = useRef(cardStyle);
+  useEffect(() => {
+    cardStyleRef.current = cardStyle;
+  }, [cardStyle]);
+
+  // Single animation frame ref so we can cancel / replace animations
+  const animFrameRef = useRef(null);
+
+  const stopAnimation = () => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+  };
+
+  const animateCardTo = (target, options = {}) => {
+    const { duration = 260, ease = (t) => 1 - Math.pow(1 - t, 3), onComplete } = options;
+    stopAnimation();
+    const start = performance.now();
+    const from = cardStyleRef.current;
+
+    const frame = (now) => {
+      const rawT = (now - start) / duration;
+      const t = clamp(rawT, 0, 1);
+      const k = ease(t);
+
+      const next = {
+        x: from.x + (target.x - from.x) * k,
+        y: from.y + (target.y - from.y) * k,
+        rot: from.rot + (target.rot - from.rot) * k,
+        opacityLike:
+          from.opacityLike + (target.opacityLike - from.opacityLike) * k,
+        opacityNope:
+          from.opacityNope + (target.opacityNope - from.opacityNope) * k,
+      };
+
+      setCardStyle(next);
+
+      if (t < 1) {
+        animFrameRef.current = requestAnimationFrame(frame);
+      } else {
+        animFrameRef.current = null;
+        if (onComplete) onComplete();
+      }
+    };
+
+    animFrameRef.current = requestAnimationFrame(frame);
+  };
 
   const onPointerDown = (e) => {
     const p = dragRef.current;
@@ -808,6 +865,7 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
     p.startY = e.clientY || (e.touches && e.touches[0]?.clientY) || 0;
     p.x = 0;
     p.y = 0;
+    stopAnimation(); // stop any ongoing spring
   };
 
   const onPointerMove = (e) => {
@@ -817,6 +875,19 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
     const cy = e.clientY || (e.touches && e.touches[0]?.clientY) || 0;
     p.x = cx - p.startX;
     p.y = cy - p.startY;
+
+    // Update visual position in real time
+    const rot = p.x / 15;
+    const like = clamp(p.x / 120, 0, 1);
+    const nope = clamp(-p.x / 120, 0, 1);
+    setCardStyle({
+      x: p.x,
+      y: p.y,
+      rot,
+      opacityLike: like,
+      opacityNope: nope,
+    });
+
     // Trigger small reveal when dragging
     setReveal((r) => clamp(r + 0.01, 0, 1));
   };
@@ -824,6 +895,14 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
   const removeTopCard = () => {
     setUsers((prev) => prev.slice(1));
     setReveal(0);
+    // Reset style for next card
+    setCardStyle({
+      x: 0,
+      y: 0,
+      rot: 0,
+      opacityLike: 0,
+      opacityNope: 0,
+    });
   };
 
   const onPointerUp = async () => {
@@ -833,50 +912,99 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
 
     const THRESH_X = 120;
 
+    // Swipe right → LIKE
     if (p.x > THRESH_X) {
-      await handleBuzz(true); // animate-like path
-    } else if (p.x < -THRESH_X) {
-      handleSkip(true);
-    } else {
-      // snap back
-      setCardStyle({ x: 0, y: 0, rot: 0, opacityLike: 0, opacityNope: 0 });
+      const targetX = window.innerWidth * 1.2;
+      animateCardTo(
+        {
+          x: targetX,
+          y: p.y,
+          rot: 25,
+          opacityLike: 1,
+          opacityNope: 0,
+        },
+        {
+          duration: 260,
+          onComplete: () => {
+            // Tell logic we already animated
+            handleBuzz(true);
+          },
+        }
+      );
+      return;
     }
+
+    // Swipe left → NOPE
+    if (p.x < -THRESH_X) {
+      const targetX = -window.innerWidth * 1.2;
+      animateCardTo(
+        {
+          x: targetX,
+          y: p.y,
+          rot: -25,
+          opacityLike: 0,
+          opacityNope: 1,
+        },
+        {
+          duration: 260,
+          onComplete: () => {
+            handleSkip(true);
+          },
+        }
+      );
+      return;
+    }
+
+    // Not enough swipe → spring back to center
+    animateCardTo(
+      {
+        x: 0,
+        y: 0,
+        rot: 0,
+        opacityLike: 0,
+        opacityNope: 0,
+      },
+      {
+        duration: 220,
+        ease: (t) => {
+          // easeOutBack style for a little overshoot
+          const c1 = 1.70158;
+          const c3 = c1 + 1;
+          return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+        },
+      }
+    );
   };
-
-  const [cardStyle, setCardStyle] = useState({
-    x: 0,
-    y: 0,
-    rot: 0,
-    opacityLike: 0,
-    opacityNope: 0,
-  });
-
-  useEffect(() => {
-    const p = dragRef.current;
-    if (!p.active) return;
-
-    const id = requestAnimationFrame(() => {
-      const rot = p.x / 15; // tilt
-      const like = clamp(p.x / 120, 0, 1);
-      const nope = clamp(-p.x / 120, 0, 1);
-      setCardStyle({ x: p.x, y: p.y, rot, opacityLike: like, opacityNope: nope });
-    });
-
-    return () => cancelAnimationFrame(id);
-  });
 
   /* ---------------------------
    Buttons replicate swipe
   --------------------------- */
   const handleSkip = (alreadySwiped = false) => {
     if (!current) return;
-    if (!alreadySwiped) {
-      // animate left
-      setCardStyle({ x: -window.innerWidth, y: 0, rot: -20, opacityLike: 0, opacityNope: 1 });
-      setTimeout(removeTopCard, 180);
-    } else {
+
+    // If this was triggered by a swipe release, logic already animated
+    if (alreadySwiped) {
       removeTopCard();
+      return;
     }
+
+    // Button press → smooth left fly-out
+    const targetX = -window.innerWidth * 1.2;
+    animateCardTo(
+      {
+        x: targetX,
+        y: 0,
+        rot: -20,
+        opacityLike: 0,
+        opacityNope: 1,
+      },
+      {
+        duration: 260,
+        onComplete: () => {
+          removeTopCard();
+        },
+      }
+    );
   };
 
   const buzzAPI = async (userId) => {
@@ -896,11 +1024,23 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
   const handleBuzz = async (alreadySwiped = false) => {
     if (!current) return;
     setBuzzing(true);
+
     try {
+      // If this came from a button click, animate out to the right
       if (!alreadySwiped) {
-        // animate right
-        setCardStyle({ x: window.innerWidth, y: 0, rot: 20, opacityLike: 1, opacityNope: 0 });
+        const targetX = window.innerWidth * 1.2;
+        animateCardTo(
+          {
+            x: targetX,
+            y: 0,
+            rot: 20,
+            opacityLike: 1,
+            opacityNope: 0,
+          },
+          { duration: 260 }
+        );
       }
+
       const data = await buzzAPI(current.id);
 
       if (data.matched) {
@@ -912,12 +1052,24 @@ const res = await fetch(`${API_BASE}/discover?${qs.toString()}`, {
       }
 
       if (UX.LIKE_AUTOSKIP) {
-        setTimeout(removeTopCard, alreadySwiped ? 0 : 180);
+        // For both swipe + button paths, card is already flying out,
+        // just remove from stack after a short delay.
+        setTimeout(() => {
+          removeTopCard();
+        }, alreadySwiped ? 0 : 220);
       }
     } catch (e) {
       alert(e.message || "Something went wrong");
-      // snap back on error
-      setCardStyle({ x: 0, y: 0, rot: 0, opacityLike: 0, opacityNope: 0 });
+      // Snap back if the API failed and we didn't already animate out
+      if (!alreadySwiped) {
+        animateCardTo({
+          x: 0,
+          y: 0,
+          rot: 0,
+          opacityLike: 0,
+          opacityNope: 0,
+        });
+      }
     } finally {
       setBuzzing(false);
     }

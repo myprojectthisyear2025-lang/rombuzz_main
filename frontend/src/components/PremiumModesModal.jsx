@@ -183,7 +183,7 @@ const modesToShow =
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm">
       {/* Sheet container */}
-      <div className="relative w-full max-w-2xl bg-white rounded-t-3xl md:rounded-3xl shadow-2xl overflow-hidden animate-[slideUp_0.25s_ease-out] max-h-[90vh] flex flex-col">
+<div className="relative w-full max-w-2xl bg-white rounded-t-3xl md:rounded-3xl shadow-2xl overflow-hidden animate-[slideUp_0.25s_ease-out] max-h-screen flex flex-col">
         {/* Confetti overlay (simple, lightweight) */}
         {showConfetti && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -260,7 +260,21 @@ const modesToShow =
         </div>
 
         {/* Scrollable body */}
-        <div className="px-5 pb-4 pt-1 overflow-y-auto">
+<div
+  className="
+    px-5 pb-4 pt-1
+    overflow-y-auto
+    scroll-smooth
+    overscroll-none
+    will-change-scroll-position
+    [scrollbar-width:auto]
+    max-h-[60vh] md:max-h-[70vh]
+  "
+  style={{
+    WebkitOverflowScrolling: "auto",   // ⛔ disables momentum on desktop
+  }}
+>
+
           {/* 2 square tiles per row */}
           <div className="grid grid-cols-2 gap-3 sm:gap-4 md:gap-5">
             {modesToShow.map((mode) => {

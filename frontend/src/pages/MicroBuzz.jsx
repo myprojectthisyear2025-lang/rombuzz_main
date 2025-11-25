@@ -642,7 +642,7 @@ async function respondToBuzz(accepted) {
               </div>
             </div>
             <span className="bg-gradient-to-r from-yellow-400 to-orange-500 text-black text-xs font-bold px-3 py-2 rounded-full shadow-lg animate-pulse">
-              🔥 PREMIUM SOON
+              PREMIUM SOON
             </span>
           </div>
 
