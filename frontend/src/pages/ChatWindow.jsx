@@ -1467,7 +1467,13 @@ onClose?.();
                     />
                   )}
 
-                  <div className={`${bubbleBase} ${skin}`}>
+                    <div
+                      className={
+                        m.type === "image"
+                          ? "p-0 bg-transparent shadow-none"
+                          : `${bubbleBase} ${skin}`
+                      }
+                    >
                     {/* Reply header */}
                     {showReplyHeader && (
                       <div
@@ -1510,15 +1516,22 @@ onClose?.();
                     )}
 
                     {m.type === "image" && m.url ? (
-                      <img
-                        src={m.url}
-                        alt=""
-                        className="rounded-lg max-h-72 object-contain cursor-pointer"
-                        onClick={() =>
-                          setViewer({ open: true, message: m })
-                        }
-                      />
-                    ) : m.type === "video" && m.url ? (
+                        <div
+                          className={`max-w-[70%] ${
+                            isMine ? "ml-auto" : ""
+                          }`}
+                        >
+                          <img
+                            src={m.url}
+                            alt=""
+                            className="rounded-xl max-w-full max-h-80 object-cover cursor-pointer shadow-sm"
+                            onClick={() =>
+                              setViewer({ open: true, message: m })
+                            }
+                          />
+                        </div>
+                      ) : m.type === "video" && m.url ? (
+
                       <video
                         controls
                         src={m.url}
