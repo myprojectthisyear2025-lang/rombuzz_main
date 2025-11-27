@@ -151,11 +151,21 @@ export default function Chat() {
     dnd: getLS(GK.dnd, false),
   }));
 
-      // Restore unread map from storage (set by Navbar while user is off the chat page)
+    // Restore unread map from storage (set by Navbar while user is off the chat page)
   const [unread, setUnread] = useState(() => getLS(UNREAD_MAP_KEY, {}));
 
-  // (no global wipe here – unread is cleared per-thread when you open that chat)
+  // When the user opens the Chat page, treat everything as read immediately.
+  // This clears the navbar Chat badge and wipes the per-peer unread map.
+  useEffect(() => {
+    const empty = {};
+    setUnread(empty);
+    setLS(UNREAD_MAP_KEY, empty);
+    localStorage.setItem(UNREAD_TOTAL_KEY, "0");
 
+    window.dispatchEvent(
+      new CustomEvent("rbz:unread", { detail: { total: 0 } })
+    );
+  }, []); // run once when /chat mounts
 
 
    // load matches (use correct backend route + flexible parsing)

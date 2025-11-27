@@ -1467,13 +1467,12 @@ onClose?.();
                     />
                   )}
 
-                    <div
-                      className={
-                        m.type === "image"
-                          ? "p-0 bg-transparent shadow-none"
-                          : `${bubbleBase} ${skin}`
-                      }
-                    >
+                  <div className={
+                          m.type === "image"
+                            ? "p-0 bg-transparent shadow-none"
+                            : `${bubbleBase} ${skin}`
+                        }>
+
                     {/* Reply header */}
                     {showReplyHeader && (
                       <div
@@ -1515,22 +1514,23 @@ onClose?.();
                       </div>
                     )}
 
-                    {m.type === "image" && m.url ? (
-                        <div
-                          className={`max-w-[70%] ${
-                            isMine ? "ml-auto" : ""
-                          }`}
-                        >
-                          <img
-                            src={m.url}
-                            alt=""
-                            className="rounded-xl max-w-full max-h-80 object-cover cursor-pointer shadow-sm"
-                            onClick={() =>
-                              setViewer({ open: true, message: m })
-                            }
-                          />
-                        </div>
-                      ) : m.type === "video" && m.url ? (
+                   {m.type === "image" && m.url ? (
+                    <div
+                      className={`max-w-[70%] ${
+                        isMine ? "ml-auto justify-end" : "justify-start"
+                      } flex`}
+                    >
+                      <img
+                        src={m.url}
+                        alt=""
+                        className="rounded-xl max-w-full max-h-80 object-cover cursor-pointer shadow-sm"
+                        onClick={() =>
+                          setViewer({ open: true, message: m })
+                        }
+                      />
+                    </div>
+                  ) : m.type === "video" && m.url ? (
+
 
                       <video
                         controls
