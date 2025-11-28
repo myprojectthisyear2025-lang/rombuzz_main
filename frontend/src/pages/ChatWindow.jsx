@@ -188,6 +188,15 @@ const [selectedIds, setSelectedIds] = useState({});
 // 👇 new
 const [reactFor, setReactFor] = useState(null);       // message to react to
 
+// 🖼 MEDIA MESSAGES LIST FOR FULLSCREEN VIEWER
+const mediaMessages = useMemo(
+  () =>
+    messages
+      .map(maybeDecode)
+      .filter((m) => (m.type === "image" || m.type === "video") && m.url),
+  [messages]
+);
+
    // attachments/camera (reuse your Cloudinary unsigned flow)
   const CLOUD_NAME = "drcxu0mks";
   const UPLOAD_PRESET = "rombuzz_unsigned";
