@@ -1467,7 +1467,13 @@ onClose?.();
                     />
                   )}
 
-                  <div className={`${bubbleBase} ${skin}`}>
+                        <div
+                          className={
+                            (m.type === "image" || m.type === "video")
+                              ? `relative max-w-[80%] md:max-w-[70%] ${isMine ? "ml-auto" : ""}`
+                              : `${bubbleBase} ${skin}`
+                          }
+                        >
                     {/* Reply header */}
                     {showReplyHeader && (
                       <div
@@ -1509,22 +1515,26 @@ onClose?.();
                       </div>
                     )}
 
-                    {m.type === "image" && m.url ? (
+                  {m.type === "image" && m.url ? (
                       <img
                         src={m.url}
                         alt=""
-                        className="rounded-lg max-h-72 object-contain cursor-pointer"
-                        onClick={() =>
-                          setViewer({ open: true, message: m })
-                        }
+                        className={`rounded-xl max-h-72 object-contain cursor-pointer shadow-sm ${
+                          isMine ? "ml-auto" : ""
+                        }`}
+                        onClick={() => setViewer({ open: true, message: m })}
                       />
                     ) : m.type === "video" && m.url ? (
                       <video
                         controls
                         src={m.url}
-                        className="rounded-lg max-h-72"
+                        className={`rounded-xl max-h-72 shadow-sm ${
+                          isMine ? "ml-auto" : ""
+                        }`}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     ) : (
+
                       <div className="break-words whitespace-pre-wrap [overflow-wrap:anywhere] inline-block max-w-full">
                         {(() => {
                           const hasText =
