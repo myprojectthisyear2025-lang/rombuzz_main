@@ -127,7 +127,7 @@ export default function ChatWindow({ socket, me, peer, onClose }) {
 
   const [typing, setTyping] = useState(false);
   const [peerOnline, setPeerOnline] = useState(false);
-  const [viewer, setViewer] = useState({ open: false, message: null });
+const [viewer, setViewer] = useState({ open: false, index: 0 });
 
   // composer/ui
   const [showEmoji, setShowEmoji] = useState(false);
@@ -1515,25 +1515,39 @@ onClose?.();
                       </div>
                     )}
 
-                  {m.type === "image" && m.url ? (
-                      <img
-                        src={m.url}
-                        alt=""
-                        className={`rounded-xl max-h-72 object-contain cursor-pointer shadow-sm ${
-                          isMine ? "ml-auto" : ""
-                        }`}
-                        onClick={() => setViewer({ open: true, message: m })}
-                      />
-                    ) : m.type === "video" && m.url ? (
-                      <video
-                        controls
-                        src={m.url}
-                        className={`rounded-xl max-h-72 shadow-sm ${
-                          isMine ? "ml-auto" : ""
-                        }`}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
+                {m.type === "image" && m.url ? (
+                        <img
+                          src={m.url}
+                          alt=""
+                          className={`rounded-xl max-h-72 object-contain cursor-pointer shadow-sm ${
+                            isMine ? "ml-auto" : ""
+                          }`}
+                          onClick={() => {
+                            const idx = mediaMessages.findIndex((mm) => mm.id === m.id);
+                            setViewer({
+                              open: true,
+                              index: idx >= 0 ? idx : 0,
+                            });
+                          }}
+                        />
+                      ) : m.type === "video" && m.url ? (
+                        <video
+                          src={m.url}
+                          className={`rounded-xl max-h-72 shadow-sm cursor-pointer ${
+                            isMine ? "ml-auto" : ""
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const idx = mediaMessages.findIndex((mm) => mm.id === m.id);
+                            setViewer({
+                              open: true,
+                              index: idx >= 0 ? idx : 0,
+                            });
+                          }}
+                        />
+                      ) : (
+ 
+
 
                       <div className="break-words whitespace-pre-wrap [overflow-wrap:anywhere] inline-block max-w-full">
                         {(() => {
@@ -2019,12 +2033,20 @@ onClose?.();
 )}
 <FullscreenViewer
   open={viewer.open}
-  message={viewer.message}
+  messages={mediaMessages}
+  index={viewer.index}
+  onIndexChange={(i) =>
+    setViewer((prev) => ({
+      ...prev,
+      index: i,
+    }))
+  }
   onViewed={(id) => {
     if (id) markSeen(id);
   }}
-  onClose={() => setViewer({ open: false, message: null })}
+  onClose={() => setViewer({ open: false, index: 0 })}
 />
+
 
 
       {showGallery && (
