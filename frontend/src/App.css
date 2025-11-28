@@ -69,3 +69,12 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+.pulse-highlight {
+  animation: pulseGlow 0.8s ease-out;
+}
+
+@keyframes pulseGlow {
+  0% { box-shadow: 0 0 0px 0px rgba(255,255,255,0.8); }
+  50% { box-shadow: 0 0 18px 6px rgba(255,255,255,0.8); }
+  100% { box-shadow: 0 0 0px 0px rgba(255,255,255,0); }
+}

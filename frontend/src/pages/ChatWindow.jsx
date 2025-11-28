@@ -1,3 +1,4 @@
+
 // src/pages/ChatWindow.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -289,10 +290,15 @@ const mediaMessages = useMemo(
     return j.secure_url;
   };
 
-  // reply + selection
+    // reply + selection
   const [replyTo, setReplyTo] = useState(null); // {id, preview, type}
   const [actionBar, setActionBar] = useState(null); // message currently selected for long-press action
   const actionBarTimer = useRef(null);
+
+  // 📌 When you tap a reply header, we jump to the original message
+  // and briefly highlight that bubble (Messenger-style).
+  const [jumpHighlightId, setJumpHighlightId] = useState(null);
+
 
   // reactions/read receipts
  
@@ -684,11 +690,16 @@ useEffect(() => {
     if (deltaX > 48) {
       // set reply target
       const dec = maybeDecode(m);
-      setReplyTo({
-        id: m.id,
-        type: dec.type || "text",
-        preview: dec.url || dec.text || "",
-      });
+     setReplyTo({
+  id: m.id,
+  type: dec.type || "text",
+  preview: dec.type === "image"
+    ? { kind: "image", url: dec.url }
+    : dec.type === "video"
+      ? { kind: "video", url: dec.url }
+      : { kind: "text", text: dec.text || "" }
+});
+
     }
   };
 
@@ -1121,9 +1132,32 @@ const matchesQuery = (msg, q) => {
   return s.includes(q.toLowerCase());
 };
 
+// 🔁 Tap on “Replying to …” → scroll to original and flash highlight
+const jumpToMessage = (id) => {
+  if (!id) return;
+  const el = document.getElementById(`msg-${id}`);
+  if (!el) return;
+
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  setJumpHighlightId(id);
+
+  // clear highlight after a short moment
+  setTimeout(() => {
+    setJumpHighlightId((current) => (current === id ? null : current));
+  }, 1600);
+};
+
+
   // ============= render =============
   return (
-    <main className={`flex flex-col h-full min-h-0 ${themeCls.wrap}`}>
+<main
+  className={`flex flex-col min-h-0 ${themeCls.wrap}`}
+  style={{
+    height: "100dvh",                // 🔥 Locks the chat to true device height (Messenger style)
+    overscrollBehavior: "none",      // Prevents bounce/shift
+    position: "relative",
+  }}
+>
       {/* Header */}
       <div className={`h-[56px] sticky top-0 z-30 flex items-center justify-between px-3 border-b shadow-sm ${themeCls.pane}`}>
 <div className="flex flex-wrap items-center gap-2 sm:gap-3 overflow-x-auto">
@@ -1429,17 +1463,18 @@ onClose?.();
               return acc;
             }, {});
 
+                      const isSelected = selectMode && selectedIds[m.id];
+            const isJumped = jumpHighlightId === m.id;
+
             return (
               <div
                 id={`msg-${m.id}`}
                 key={m.id}
                 className={`flex ${
                   isMine ? "justify-end" : "justify-start"
-                } ${
-                  selectMode && selectedIds[m.id]
-                    ? "ring-2 ring-rose-400 rounded-lg"
-                    : ""
-                }`}
+                }
+                ${isSelected ? "ring-2 ring-rose-400 rounded-lg" : ""}
+                ${isJumped ? "msg-jump-highlight rounded-lg" : ""}`}
                 onClick={(e) => {
                   // don’t bubble to outer div (which closes bar)
                   e.stopPropagation();
@@ -1450,6 +1485,7 @@ onClose?.();
                     }));
                   }
                 }}
+
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setActionBar(m);
@@ -1483,19 +1519,60 @@ onClose?.();
                               : `${bubbleBase} ${skin}`
                           }
                         >
-                    {/* Reply header */}
+                                   {/* Reply header (Messenger-style preview; click to jump) */}
                     {showReplyHeader && (
-                      <div
-                        className={`text-[11px] mb-1 px-2 py-1 rounded-lg ${
-                          isMine ? "bg-white/20" : "bg-gray-100"
-                        }`}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (m.replyTo?.id) {
+                            jumpToMessage(m.replyTo.id);
+                          }
+                        }}
+                        className={`
+                          group w-full text-left mb-1 px-2 py-1 rounded-lg border-l-4
+                          flex items-center gap-2
+                          ${isMine
+                            ? "bg-white/10 border-rose-300/80"
+                            : "bg-gray-100 border-rose-300"}
+                        `}
                       >
-                        Replying to:{" "}
-                        <span className="italic">
-                          {String(m.replyTo.preview || "").slice(0, 80)}
-                        </span>
-                      </div>
+                        <div className="text-[10px] uppercase tracking-wide text-gray-400 group-hover:text-gray-600">
+                          Replying to
+                        </div>
+                       <div className="flex-1 text-[11px] italic text-gray-700 flex items-center gap-2 truncate">
+  {/* IMAGE THUMBNAIL */}
+  {m.replyTo?.preview?.kind === "image" && (
+    <img
+      src={m.replyTo.preview.url}
+      className="h-8 w-8 rounded object-cover flex-shrink-0"
+    />
+  )}
+
+  {/* VIDEO THUMBNAIL */}
+  {m.replyTo?.preview?.kind === "video" && (
+    <div className="relative h-8 w-8 flex-shrink-0">
+      <video
+        src={m.replyTo.preview.url}
+        className="h-8 w-8 rounded object-cover opacity-80"
+      />
+      <div className="absolute inset-0 grid place-items-center text-white text-[10px]">
+        ▶
+      </div>
+    </div>
+  )}
+
+  {/* TEXT PREVIEW */}
+  {m.replyTo?.preview?.kind === "text" && (
+    <span className="truncate">
+      {String(m.replyTo.preview.text || "").slice(0, 80)}
+    </span>
+  )}
+</div>
+
+                      </button>
                     )}
+
 
                     {selectMode && (
                       <div className="mb-1 -mt-1 -mr-1 flex justify-end">
@@ -1628,7 +1705,35 @@ onClose?.();
       {replyTo && (
         <div className="px-3 py-2 border-t bg-white flex items-center gap-2 text-sm">
           <div className="text-gray-500">Replying to:</div>
-          <div className="flex-1 truncate italic">{String(replyTo.preview || "").slice(0, 100)}</div>
+<div className="flex-1 truncate italic flex items-center gap-2">
+  {/* IMAGE PREVIEW */}
+  {replyTo?.preview?.kind === "image" && (
+    <img
+      src={replyTo.preview.url}
+      className="h-8 w-8 rounded object-cover flex-shrink-0"
+    />
+  )}
+
+  {/* VIDEO PREVIEW */}
+  {replyTo?.preview?.kind === "video" && (
+    <div className="relative h-8 w-8 flex-shrink-0">
+      <video
+        src={replyTo.preview.url}
+        className="h-8 w-8 rounded object-cover opacity-80"
+      />
+      <div className="absolute inset-0 grid place-items-center text-white text-[10px]">
+        ▶
+      </div>
+    </div>
+  )}
+
+  {/* TEXT PREVIEW */}
+  {replyTo?.preview?.kind === "text" && (
+    <span className="truncate">
+      {String(replyTo.preview.text || "").slice(0, 100)}
+    </span>
+  )}
+</div>
           <button className="text-gray-500 hover:text-black" onClick={() => setReplyTo(null)} title="Cancel">
             <FaTimes />
           </button>
@@ -1790,11 +1895,16 @@ onClose?.();
                 className="px-3 py-1 rounded-lg hover:bg-gray-100"
                 onClick={() => {
                   const dec = maybeDecode(actionBar);
-                  setReplyTo({
-                    id: actionBar.id,
-                    type: dec.type || "text",
-                    preview: dec.url || dec.text || "",
-                  });
+                 setReplyTo({
+                      id: actionBar.id,
+                      type: dec.type || "text",
+                      preview: dec.type === "image"
+                        ? { kind: "image", url: dec.url }
+                        : dec.type === "video"
+                          ? { kind: "video", url: dec.url }
+                          : { kind: "text", text: dec.text || "" }
+                    });
+
                   setActionBar(null);
                 }}
               >
@@ -2104,12 +2214,25 @@ onClose?.();
         />
       )}
       {/* tiny CSS */}
-      <style>{`
+           <style>{`
       .pinned-shadow { box-shadow: 0 1px 6px rgba(244,63,94,.25); }
 
         .animate-chatfade { animation: chatfade 0.25s ease-in; }
         @keyframes chatfade { from {opacity: 0; transform: translateY(8px);} to {opacity: 1; transform: translateY(0);} }
+
+        /* When you tap a replied-to header, briefly flash the original bubble */
+        .msg-jump-highlight {
+          animation: rbzJump 1.1s ease-out;
+          box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.9);
+          background-color: rgba(254, 243, 199, 0.8);
+        }
+        @keyframes rbzJump {
+          0%   { transform: scale(0.99); }
+          35%  { transform: scale(1.01); }
+          100% { transform: scale(1.0); }
+        }
       `}</style>
+
     
 {/* 👇 Reaction emoji picker overlay */}
 {reactFor && (
