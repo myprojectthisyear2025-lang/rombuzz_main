@@ -1158,26 +1158,27 @@ const jumpToMessage = (id) => {
     position: "relative",
   }}
 >
-      {/* Header */}
-      <div className={`h-[56px] sticky top-0 z-30 flex items-center justify-between px-3 border-b shadow-sm ${themeCls.pane}`}>
-<div className="flex flex-wrap items-center gap-2 sm:gap-3 overflow-x-auto">
-          <button onClick={onClose} className="md:hidden text-xl">⬅️</button>
-          <img
-            src={peer.avatar || "https://i.pravatar.cc/80"}
-            className="h-9 w-9 rounded-full object-cover border cursor-pointer hover:scale-105 transition"
-            alt=""
-            onClick={() => ((peer.id || peer._id) === (me.id || me._id) ? navigate("/profile") : navigate(`/view/${peer.id || peer._id}`))}
-          />
-          <div className="leading-tight min-w-0">
-            <div className="font-semibold text-sm md:text-base truncate">
-              {nickname?.trim() || [peer.firstName, peer.lastName].filter(Boolean).join(" ") || "Unknown"}
-            </div>
-            <div className="text-[11px] text-gray-500 flex items-center gap-1">
-              <span className={peerOnline ? "text-green-500" : "text-gray-300"}>●</span>
-              {typing ? "typing…" : peerOnline ? "Active now" : "Offline"}
-            </div>
-          </div>
-        </div>
+     {/* Header */}
+<div className="h-16 border-b bg-white/90 px-4 flex items-center justify-between shadow-sm
+     sticky top-0 z-50 backdrop-blur">
+  <div className="flex items-center gap-3">
+    <button onClick={onClose} className="md:hidden text-xl">⬅️</button>
+    <img
+      src={peer.avatar || "https://i.pravatar.cc/80"}
+      className="h-10 w-10 rounded-full object-cover border"
+      alt=""
+    />
+    <div>
+      <div className="font-semibold text-gray-800">
+        {[peer.firstName, peer.lastName].filter(Boolean).join(" ") || "Unknown"}
+      </div>
+      <div className="text-xs text-gray-500 flex items-center gap-1">
+        <span className="text-green-500">●</span>
+        {typing ? "typing…" : "Active now"}
+      </div>
+    </div>
+  </div>
+
 
        <div className="flex items-center gap-1">
   {/* AI Wingman */}
