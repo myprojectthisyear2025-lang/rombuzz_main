@@ -1153,12 +1153,11 @@ const jumpToMessage = (id) => {
 <main
   className={`flex flex-col min-h-0 ${themeCls.wrap}`}
   style={{
-    height: "var(--rbz-height)",     // 🔥 dynamic height
-    overscrollBehavior: "none",
+    height: "100dvh",                // 🔥 Locks the chat to true device height (Messenger style)
+    overscrollBehavior: "none",      // Prevents bounce/shift
     position: "relative",
   }}
 >
-
      {/* Header */}
 <div className="h-16 border-b bg-white/90 px-4 flex items-center justify-between shadow-sm
      sticky top-0 z-50 backdrop-blur">
