@@ -356,6 +356,76 @@ function registerConnection(io) {  io.on("connection", (socket) => {
         console.error("meet:accept error", e);
       }
     });
+
+    // ===============================
+    // 🎮 REAL-TIME COUPLES GAMES HUB
+    // ===============================
+    //
+    // Frontend emits:
+    //   socket.emit("game:join",  { roomId, game });
+    //   socket.emit("game:leave", { roomId, game });
+    //   socket.emit("game:action",{ roomId, game, type:"SYNC", payload:{...} });
+    //
+    // We just broadcast to the *other* socket(s) in that chat room.
+
+    socket.on("game:join", ({ roomId, game }) => {
+      try {
+        if (!roomId) return;
+        const rid = String(roomId);
+        socket.join(rid);
+        const userId = currentUserId;
+
+        // let the partner know someone opened a game
+        socket.to(rid).emit("game:presence", {
+          roomId: rid,
+          game,
+          type: "join",
+          userId,
+        });
+      } catch (e) {
+        console.error("game:join error", e);
+      }
+    });
+
+    socket.on("game:leave", ({ roomId, game }) => {
+      try {
+        if (!roomId) return;
+        const rid = String(roomId);
+        socket.leave(rid);
+        const userId = currentUserId;
+
+        socket.to(rid).emit("game:presence", {
+          roomId: rid,
+          game,
+          type: "leave",
+          userId,
+        });
+      } catch (e) {
+        console.error("game:leave error", e);
+      }
+    });
+
+    socket.on("game:action", (packet = {}) => {
+      try {
+        const { roomId, game, type, payload } = packet;
+        if (!roomId || !game) return;
+        const rid = String(roomId);
+        const userId = currentUserId;
+
+        // Only send to the *other* side – sender already has the state.
+        socket.to(rid).emit("game:update", {
+          roomId: rid,
+          game,
+          type,
+          payload,
+          from: userId,
+        });
+      } catch (e) {
+        console.error("game:action error", e);
+      }
+    });
+
+
   });
 }
 

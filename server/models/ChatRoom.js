@@ -20,7 +20,7 @@ const messageSchema = new mongoose.Schema(
     from: { type: String, required: true },
     to: { type: String, required: true },
     text: { type: String, default: "" },
-    type: { type: String, enum: ["text", "media"], default: "text" },
+type: { type: String, enum: ["text", "media", "meetup"], default: "text" },
     time: { type: Date, default: Date.now },
     edited: { type: Boolean, default: false },
     deleted: { type: Boolean, default: false },
