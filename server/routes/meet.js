@@ -73,7 +73,6 @@ router.get("/geo/approx", authMiddleware, async (req, res) => {
 /* ============================================================
    🌍 SECTION 2: GOOGLE PLACES MIDPOINT SUGGESTIONS
 ============================================================ */
-
 router.get("/meet-suggest", authMiddleware, async (req, res) => {
   try {
     const me = req.user.id;
@@ -84,54 +83,85 @@ router.get("/meet-suggest", authMiddleware, async (req, res) => {
       User.findOne({ id: otherId }, { location: 1 }).lean(),
     ]);
 
-    if (!meUser?.location || !otherUser?.location)
+    if (!meUser?.location || !otherUser?.location) {
       return res.status(400).json({ error: "Missing user locations" });
+    }
 
-    const mid = {
+    // 📍 True midpoint between both users
+    const midpoint = {
       lat: (meUser.location.lat + otherUser.location.lat) / 2,
       lng: (meUser.location.lng + otherUser.location.lng) / 2,
     };
 
-    if (process.env.GOOGLE_MAPS_API_KEY) {
-      const qs = new URLSearchParams({
-        location: `${mid.lat},${mid.lng}`,
-        radius: "4000",
-        type: "cafe",
-        key: process.env.GOOGLE_MAPS_API_KEY,
-      });
-      const resp = await fetch(
-        `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${qs}`
+    // 👉 "Smart" midpoint: conceptually 1 mile in from each side,
+    // but we treat it as the same coordinates and use a 2-mile radius
+    // around this area to look for venues.
+    const smartMidpoint = { ...midpoint };
+
+    // 🎯 Base search radius: ~2 miles (in meters)
+    const RADIUS_MILES = 2;
+    const radiusMeters = RADIUS_MILES * 1609.34;
+
+    // Overpass query for social / dating-friendly venues
+    const overpassQuery = `
+      [out:json][timeout:25];
+      (
+        node["amenity"="cafe"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        node["amenity"="restaurant"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        node["leisure"="park"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        node["amenity"="cinema"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
       );
-      const data = await resp.json();
-      (data.results || []).forEach((p) => {
-        if (p.place_id)
-          p.google_url = `https://www.google.com/maps/place/?q=place_id:${p.place_id}`;
-      });
-      return res.json({ midpoint: mid, places: data.results || [] });
+      out center;
+    `;
+    const overpassURL = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(
+      overpassQuery
+    )}`;
+
+    let places = [];
+
+    try {
+      const response = await fetch(overpassURL, { timeout: 15000 });
+      const data = await response.json();
+
+      if (Array.isArray(data.elements)) {
+        places = data.elements.slice(0, 15).map((p) => ({
+          id: p.id,
+          name:
+            p.tags?.name ||
+            p.tags?.brand ||
+            `${p.tags?.amenity || p.tags?.leisure || "Place"} #${p.id}`,
+          category: p.tags?.amenity || p.tags?.leisure || "venue",
+          coords: { lat: p.lat, lng: p.lon },
+          address:
+            p.tags?.addr_full ||
+            [p.tags?.addr_street, p.tags?.addr_city].filter(Boolean).join(", ") ||
+            "Unknown",
+        }));
+      }
+    } catch (err) {
+      console.warn("⚠️ Overpass meet-suggest failed:", err.message);
     }
 
-    // fallback demo list
-    const demoPlaces = [
-      {
-        name: "Buzz Café",
-        vicinity: "Central Plaza",
-        rating: 4.6,
-        google_url: `https://www.openstreetmap.org/#map=18/${mid.lat}/${mid.lng}`,
-      },
-      {
-        name: "RomBuzz Park",
-        vicinity: "Downtown",
-        rating: 4.8,
-        google_url: `https://www.openstreetmap.org/#map=18/${mid.lat}/${mid.lng}`,
-      },
-    ];
+    // ❗IMPORTANT:
+    // No fake "Buzz Café" fallback anymore.
+    // If nothing is found, we send an empty list and let the frontend
+    // ask the users whether to:
+    //  - just use exact midpoint, or
+    //  - expand the radius (5, 10, 20 miles)
+    const canExpand = places.length === 0;
 
-    res.json({ midpoint: mid, places: demoPlaces });
+    return res.json({
+      midpoint,
+      smartMidpoint,
+      places,
+      canExpand,
+    });
   } catch (err) {
     console.error("❌ meet-suggest error:", err);
     res.status(500).json({ error: "places_failed" });
   }
 });
+
 
 /* ============================================================
    🧭 SECTION 3: OVERPASS API MIDPOINT SUGGESTIONS

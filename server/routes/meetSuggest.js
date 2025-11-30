@@ -65,43 +65,47 @@ const fetch = (...args) =>
 ============================================================ */
 router.post("/suggest", async (req, res) => {
   try {
-    const { a, b } = req.body || {};
+    const { a, b, radiusMiles } = req.body || {};
 
     // 🔒 Validate inputs
     if (!a || !b) {
       return res.status(400).json({ error: "Both coordinates (a & b) required" });
     }
 
-    // 🎯 Compute midpoint between the two coordinates
+    // 🎯 True midpoint between the two coordinates
     const midpoint = {
       lat: (Number(a.lat) + Number(b.lat)) / 2,
       lng: (Number(a.lng) + Number(b.lng)) / 2,
     };
 
-    // Search radius (in meters)
-    const radius = 1500;
+    // 👉 Smart midpoint (conceptually 1 mile in from each side around here)
+    const smartMidpoint = { ...midpoint };
 
-    // Overpass API query for common social venues
+    // 📏 Radius in miles (default 2; expansion will use 5, 10, 20)
+    const miles = Number(radiusMiles) || 2;
+    const radiusMeters = miles * 1609.34;
+
+    // Overpass API query for social venues
     const overpassQuery = `
       [out:json][timeout:25];
       (
-        node["amenity"="cafe"](around:${radius},${midpoint.lat},${midpoint.lng});
-        node["amenity"="restaurant"](around:${radius},${midpoint.lat},${midpoint.lng});
-        node["leisure"="park"](around:${radius},${midpoint.lat},${midpoint.lng});
-        node["amenity"="cinema"](around:${radius},${midpoint.lat},${midpoint.lng});
+        node["amenity"="cafe"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        node["amenity"="restaurant"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        node["leisure"="park"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        node["amenity"="cinema"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
       );
       out center;
     `;
-    const overpassURL = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`;
+    const overpassURL = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(
+      overpassQuery
+    )}`;
 
     let places = [];
 
     try {
-      // 🌍 Query Overpass API
       const response = await fetch(overpassURL, { timeout: 15000 });
       const data = await response.json();
 
-      // ✅ Parse and normalize results
       if (Array.isArray(data.elements)) {
         places = data.elements.slice(0, 15).map((p) => ({
           id: p.id,
@@ -118,28 +122,27 @@ router.post("/suggest", async (req, res) => {
         }));
       }
     } catch (err) {
-      console.warn("⚠️ Overpass slow/unreachable, fallback triggered:", err.message);
+      console.warn("⚠️ Overpass /api/meet/suggest failed:", err.message);
     }
 
-    // 🧩 Graceful fallback if Overpass failed or returned nothing
-    if (!places.length) {
-      places = [
-        {
-          id: "midpoint-fallback",
-          name: "Center Point Café",
-          category: "cafe",
-          coords: midpoint,
-          address: "Approx. midpoint",
-        },
-      ];
-    }
+    // ❗No fake fallback place here either.
+    // If there are still no places, we return an empty list and let the
+    // frontend decide whether to keep expanding even further or just
+    // show the exact midpoint.
+    const canExpand = places.length === 0 && miles < 20;
 
-    // ✅ Respond with midpoint and place suggestions
-    res.json({ midpoint, places });
+    return res.json({
+      midpoint,
+      smartMidpoint,
+      places,
+      radiusMiles: miles,
+      canExpand,
+    });
   } catch (err) {
     console.error("❌ /api/meet/suggest error:", err);
     res.status(500).json({ error: "Failed to fetch meet suggestions" });
   }
 });
+
 
 module.exports = router;
