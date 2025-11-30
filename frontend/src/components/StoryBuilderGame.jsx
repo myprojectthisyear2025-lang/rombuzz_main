@@ -1,84 +1,211 @@
-// src/components/StoryBuilderGame.jsx
-import React, { useState } from "react";
+//src/components/StoryBuilderGame.jsx
 
-const PROMPTS = [
-  "Two people who almost never talk end up on the same train seat every day.",
-  "Someone receives a message from their future self with one short piece of advice.",
-  "Two strangers keep crossing paths in the most unexpected places.",
-  "A quiet weekend plan suddenly turns into an unplanned adventure.",
-  "Someone moves to a new city and makes one surprising connection.",
-  "A simple shared hobby accidentally brings two people much closer.",
-  "Two people agree to try saying 'yes' to small opportunities for one week.",
-  "Someone finds an old photo that changes how they see a familiar person.",
-];
+import React, { useEffect, useState, useCallback } from "react";
 
-export default function StoryBuilderGame({ open, onClose, partnerName }) {
-  const [index, setIndex] = useState(0);
-  const [round, setRound] = useState(1);
+const GAME_KEY = "story";
+
+function useGameChannel({ socket, roomId, myId, open, onRemote }) {
+  const [partnerHere, setPartnerHere] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setPartnerHere(false);
+      return;
+    }
+    if (!socket || !roomId) return;
+
+    const joinPayload = { roomId, game: GAME_KEY };
+
+    try {
+      socket.emit("game:join", joinPayload);
+    } catch {}
+
+    const handlePresence = (packet) => {
+      if (!packet) return;
+      const { roomId: rid, game, type, userId } = packet;
+      if (rid !== roomId || game !== GAME_KEY || !userId) return;
+      if (String(userId) === String(myId)) return;
+      if (type === "join") setPartnerHere(true);
+      if (type === "leave") setPartnerHere(false);
+    };
+
+    const handleUpdate = (packet) => {
+      if (!packet) return;
+      const { roomId: rid, game, from } = packet;
+      if (rid !== roomId || game !== GAME_KEY) return;
+      if (from && String(from) === String(myId)) return;
+      onRemote?.(packet);
+    };
+
+    socket.on("game:presence", handlePresence);
+    socket.on("game:update", handleUpdate);
+
+    return () => {
+      try {
+        socket.emit("game:leave", joinPayload);
+      } catch {}
+      socket.off("game:presence", handlePresence);
+      socket.off("game:update", handleUpdate);
+      setPartnerHere(false);
+    };
+  }, [socket, roomId, myId, open, onRemote]);
+
+  return partnerHere;
+}
+
+const baseState = {
+  segments: [],
+};
+
+export default function StoryBuilderGame({
+  open,
+  onClose,
+  partnerName,
+  socket,
+  roomId,
+  myId,
+  peerId,
+}) {
+  const [state, setState] = useState(baseState);
+  const [input, setInput] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setState(baseState);
+    setInput("");
+  }, [open]);
+
+  const applyRemote = useCallback((packet) => {
+    if (packet.type === "SYNC" && packet.payload) {
+      setState(packet.payload);
+    }
+  }, []);
+
+  const partnerHere = useGameChannel({
+    socket,
+    roomId,
+    myId,
+    open,
+    onRemote: applyRemote,
+  });
+
+  const updateState = (updater) => {
+    setState((prev) => {
+      const next =
+        typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      if (socket && roomId) {
+        socket.emit("game:action", {
+          roomId,
+          game: GAME_KEY,
+          type: "SYNC",
+          payload: next,
+        });
+      }
+      return next;
+    });
+  };
+
+  const prettyName =
+    partnerName || (peerId ? "your partner" : "your match");
+
+  const addSegment = (fromMe) => {
+    const text = input.trim();
+    if (!text) return;
+
+    updateState((prev) => ({
+      segments: [
+        ...prev.segments,
+        {
+          id: Date.now(),
+          from: fromMe ? "me" : "them",
+          text,
+        },
+      ],
+    }));
+    setInput("");
+  };
 
   if (!open) return null;
 
-  const base = PROMPTS[index];
-  const displayName = partnerName || "your match";
-
-  const nextPrompt = () => {
-    setIndex((prev) => (prev + 1) % PROMPTS.length);
-    setRound(1);
-  };
-
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-slate-900 text-white w-full max-w-md rounded-2xl p-6 border border-slate-700 mx-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold">📖 Story Builder</h2>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-full hover:bg-slate-800"
-          >
-            ✕
-          </button>
-        </div>
-        <p className="text-xs text-slate-400 mb-4">
-          Take turns adding one line to the story in chat. You and{" "}
-          {displayName === "your match" ? "your match" : displayName} are
-          co-authors.
-        </p>
-
-        <div className="rounded-xl bg-slate-800 border border-slate-700 p-4 space-y-3">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-3">
+      <div className="w-full max-w-md bg-slate-950/95 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-purple-500/20 via-indigo-500/15 to-rose-500/20">
           <div>
-            <div className="text-[11px] uppercase text-slate-400 mb-1">
-              Story seed
+            <div className="text-xs uppercase tracking-[0.18em] text-slate-400">
+              RomBuzz Couples Game
             </div>
-            <p className="text-sm text-slate-100">{base}</p>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-slate-50">
+                Story Builder
+              </span>
+              <span className="text-xs text-slate-400">
+                with {prettyName}
+              </span>
+            </div>
           </div>
-          <div>
-            <div className="text-[11px] uppercase text-slate-400 mb-1">
-              How to play
-            </div>
-            <ul className="text-xs text-slate-300 list-disc list-inside space-y-1">
-              <li>One of you writes the first line in chat.</li>
-              <li>The other continues with the next line.</li>
-              <li>Keep going for 6–10 lines and see where it ends up.</li>
-            </ul>
+          <div className="flex items-center gap-2">
+            {partnerHere && (
+              <span className="text-[10px] px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/40">
+                ● Partner joined
+              </span>
+            )}
+            <button
+              onClick={onClose}
+              className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-200 text-sm"
+            >
+              ✕
+            </button>
           </div>
         </div>
 
-        <div className="mt-5 space-y-2">
-          <button
-            onClick={() => setRound((r) => r + 1)}
-            className="w-full py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium"
-          >
-            Mark next round ({round + 1})
-          </button>
-          <button
-            onClick={nextPrompt}
-            className="w-full py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-800 text-sm"
-          >
-            New story seed
-          </button>
+        <div className="px-4 py-4 flex-1 flex flex-col gap-3">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-3 flex-1 overflow-y-auto space-y-2">
+            {state.segments.length === 0 ? (
+              <p className="text-xs text-slate-400">
+                Start a story together. Each of you adds one line and watch it
+                get chaotic in real time.
+              </p>
+            ) : (
+              state.segments.map((seg) => (
+                <div
+                  key={seg.id}
+                  className={`text-sm px-3 py-1.5 rounded-2xl inline-block ${
+                    seg.from === "me"
+                      ? "bg-rose-500/90 text-white self-end"
+                      : "bg-slate-800 text-slate-50"
+                  }`}
+                >
+                  {seg.text}
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              className="flex-1 px-3 py-2 rounded-2xl bg-slate-900 border border-slate-700 text-sm text-slate-50 outline-none focus:ring-2 focus:ring-rose-500/60"
+              placeholder="Add the next line..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addSegment(true);
+              }}
+            />
+            <button
+              onClick={() => addSegment(true)}
+              className="px-3 py-2 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold"
+            >
+              ➜ Add
+            </button>
+          </div>
+        </div>
+
+        <div className="px-4 py-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <span>Every line you add appears instantly for both of you.</span>
           <button
             onClick={onClose}
-            className="w-full py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-800 text-sm"
+            className="px-3 py-1.5 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800 text-xs"
           >
             Close
           </button>

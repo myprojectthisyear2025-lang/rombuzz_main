@@ -1,115 +1,213 @@
-// src/components/WouldYouRatherGame.jsx
-import React, { useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+
+const GAME_KEY = "wyr";
 
 const QUESTIONS = [
-  {
-    a: "Spend a quiet evening talking with no phones.",
-    b: "Go on a spontaneous walk somewhere new together.",
-  },
-  {
-    a: "Plan every detail of a future trip together.",
-    b: "Just pick a random city and figure it out when we get there.",
-  },
-  {
-    a: "Hear me talk about my dreams and goals.",
-    b: "Share your own dreams in detail while I just listen.",
-  },
-  {
-    a: "Have a weekly ritual together (like movie night).",
-    b: "Do unplanned, random mini-adventures whenever we can.",
-  },
-  {
-    a: "Trade three of your favorite memories.",
-    b: "Trade three things you’re looking forward to.",
-  },
-  {
-    a: "Talk about your childhood for 15 minutes.",
-    b: "Talk about your ideal future for 15 minutes.",
-  },
-  {
-    a: "Receive a long thoughtful text from me.",
-    b: "Have a short but really honest voice note from me.",
-  },
-  {
-    a: "Look through old photos together and share the stories.",
-    b: "Take a bunch of new photos together and create new moments.",
-  },
+  [
+    "Would you rather have a cozy night in with movies and snacks",
+    "or a spontaneous night drive with loud music?",
+  ],
+  [
+    "Would you rather receive a heartfelt love letter",
+    "or a surprise date planned just for you?",
+  ],
+  [
+    "Would you rather travel the world together",
+    "or build your dream home together?",
+  ],
+  [
+    "Would you rather cuddle in silence",
+    "or talk for hours about everything?",
+  ],
+  [
+    "Would you rather have one perfect, unforgettable date",
+    "or many small, cute moments every day?",
+  ],
+  [
+    "Would you rather know all of their secrets",
+    "or keep a little mystery forever?",
+  ],
 ];
 
-function getRandomIndex(currentIndex) {
-  let idx = Math.floor(Math.random() * QUESTIONS.length);
-  if (idx === currentIndex && QUESTIONS.length > 1) {
-    idx = (idx + 1) % QUESTIONS.length;
-  }
-  return idx;
+function useGameChannel({ socket, roomId, myId, open, onRemote }) {
+  const [partnerHere, setPartnerHere] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setPartnerHere(false);
+      return;
+    }
+    if (!socket || !roomId) return;
+
+    const joinPayload = { roomId, game: GAME_KEY };
+
+    try {
+      socket.emit("game:join", joinPayload);
+    } catch {}
+
+    const handlePresence = (packet) => {
+      if (!packet) return;
+      const { roomId: rid, game, type, userId } = packet;
+      if (rid !== roomId || game !== GAME_KEY || !userId) return;
+      if (String(userId) === String(myId)) return;
+      if (type === "join") setPartnerHere(true);
+      if (type === "leave") setPartnerHere(false);
+    };
+
+    const handleUpdate = (packet) => {
+      if (!packet) return;
+      const { roomId: rid, game, from } = packet;
+      if (rid !== roomId || game !== GAME_KEY) return;
+      if (from && String(from) === String(myId)) return;
+      onRemote?.(packet);
+    };
+
+    socket.on("game:presence", handlePresence);
+    socket.on("game:update", handleUpdate);
+
+    return () => {
+      try {
+        socket.emit("game:leave", joinPayload);
+      } catch {}
+      socket.off("game:presence", handlePresence);
+      socket.off("game:update", handleUpdate);
+      setPartnerHere(false);
+    };
+  }, [socket, roomId, myId, open, onRemote]);
+
+  return partnerHere;
 }
 
-export default function WouldYouRatherGame({ open, onClose, partnerName }) {
-  const [index, setIndex] = useState(0);
+const baseState = {
+  index: 0,
+};
+
+export default function WouldYouRatherGame({
+  open,
+  onClose,
+  partnerName,
+  socket,
+  roomId,
+  myId,
+  peerId,
+}) {
+  const [state, setState] = useState(baseState);
+
+  useEffect(() => {
+    if (!open) return;
+    setState(baseState);
+  }, [open]);
+
+  const applyRemote = useCallback((packet) => {
+    if (packet.type === "SYNC" && packet.payload) {
+      setState(packet.payload);
+    }
+  }, []);
+
+  const partnerHere = useGameChannel({
+    socket,
+    roomId,
+    myId,
+    open,
+    onRemote: applyRemote,
+  });
+
+  const updateState = (updater) => {
+    setState((prev) => {
+      const next =
+        typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      if (socket && roomId) {
+        socket.emit("game:action", {
+          roomId,
+          game: GAME_KEY,
+          type: "SYNC",
+          payload: next,
+        });
+      }
+      return next;
+    });
+  };
+
+  const prettyName =
+    partnerName || (peerId ? "your partner" : "your match");
+
+  const nextQuestion = () => {
+    updateState((prev) => ({
+      index: (prev.index + 1) % QUESTIONS.length,
+    }));
+  };
 
   if (!open) return null;
 
-  const q = QUESTIONS[index];
-
-  const next = () => setIndex((prev) => getRandomIndex(prev));
-
-  const displayName = partnerName || "your match";
+  const [a, b] = QUESTIONS[state.index];
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-slate-900 text-white w-full max-w-md rounded-2xl p-6 border border-slate-700 mx-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold">🤔 Would You Rather</h2>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-full hover:bg-slate-800"
-          >
-            ✕
-          </button>
-        </div>
-        <p className="text-xs text-slate-400 mb-4">
-          Take turns answering and ask follow-up questions. It’s all about
-          understanding each other better.
-        </p>
-
-        <div className="space-y-3">
-          <button
-            className="w-full text-left rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 px-4 py-3"
-          >
-            <span className="block text-[11px] uppercase text-slate-400 mb-1">
-              Option A
-            </span>
-            <span className="text-sm">{q.a}</span>
-          </button>
-
-          <button
-            className="w-full text-left rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 px-4 py-3"
-          >
-            <span className="block text-[11px] uppercase text-slate-400 mb-1">
-              Option B
-            </span>
-            <span className="text-sm">{q.b}</span>
-          </button>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-3">
+      <div className="w-full max-w-md bg-slate-950/95 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-amber-500/20 via-rose-500/15 to-indigo-500/20">
+          <div>
+            <div className="text-xs uppercase tracking-[0.18em] text-slate-400">
+              RomBuzz Couples Game
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-slate-50">
+                Would You Rather
+              </span>
+              <span className="text-xs text-slate-400">
+                with {prettyName}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {partnerHere && (
+              <span className="text-[10px] px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/40">
+                ● Partner joined
+              </span>
+            )}
+            <button
+              onClick={onClose}
+              className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-200 text-sm"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
-        <div className="mt-5 space-y-2">
+        <div className="px-4 py-5 flex-1 flex flex-col gap-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 space-y-3">
+            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              Question {state.index + 1} / {QUESTIONS.length}
+            </div>
+            <button className="w-full text-left px-3 py-2.5 rounded-2xl bg-slate-950 border border-slate-700 hover:border-amber-400 text-sm text-slate-50">
+              {a}?
+            </button>
+            <button className="w-full text-left px-3 py-2.5 rounded-2xl bg-slate-950 border border-slate-700 hover:border-rose-400 text-sm text-slate-50">
+              {b}?
+            </button>
+          </div>
+
           <button
-            onClick={next}
-            className="w-full py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium"
+            onClick={nextQuestion}
+            className="w-full py-2.5 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-semibold text-sm shadow-lg shadow-rose-500/30"
           >
-            Next question
+            ➜ Next question
           </button>
+
+          <p className="text-xs text-slate-400">
+            You both see the same question. Count down 3-2-1 and answer at the
+            same time.
+          </p>
+        </div>
+
+        <div className="px-4 py-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <span>Perfect for late-night “what if” chats.</span>
           <button
             onClick={onClose}
-            className="w-full py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-800 text-sm"
+            className="px-3 py-1.5 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800 text-xs"
           >
             Close
           </button>
         </div>
-
-        <p className="text-[10px] text-slate-500 mt-3 text-center">
-          Tip: after each answer, ask {displayName} why they chose it.
-        </p>
       </div>
     </div>
   );

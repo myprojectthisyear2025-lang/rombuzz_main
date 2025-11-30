@@ -161,8 +161,9 @@ const [showHeaderMenu, setShowHeaderMenu] = useState(false); // 👈 new
 
   // Wingman
 const [showWing, setShowWing] = useState(false);
-// Map meet
-const [showMap, setShowMap] = useState(false);
+// Meet-in-the-middle overlay
+const [meetOpen, setMeetOpen] = useState(false);
+
 
 // 🔇 Mute per-chat
 const [mute, setMute] = useState(false);
@@ -657,6 +658,35 @@ useEffect(() => {
     setReplyTo(null);
     await sendSerialized(payload);
   };
+// 📍 Send a Meet-in-the-middle card message
+const sendMeetCard = async () => {
+  const id = crypto.randomUUID();
+  const base = {
+    id,
+    from: myId,
+    to: peerId,
+    time: new Date().toISOString(),
+    kind: "meet",
+    label: "Meet in the middle",
+  };
+
+  // Show instantly for sender
+  setMessages((prev) => [...prev, base]);
+
+  // Encode payload
+  const payloadForWire = {
+    ...base,
+    text: encodePayload({
+      kind: "meet",
+      label: "Meet in the middle",
+    }),
+  };
+
+  await sendSerialized(payloadForWire);
+
+  // Open map overlay
+  setMeetOpen(true);
+};
 
   const onPickFile = async (e) => {
     const file = e.target.files?.[0];
@@ -1207,9 +1237,14 @@ const jumpToMessage = (id) => {
   <button className="p-2 rounded-full hover:bg-gray-100" onClick={() => beginCall("audio")} title="Voice Call"><FaPhone /></button>
   <button className="p-2 rounded-full hover:bg-gray-100" onClick={() => beginCall("video")} title="Video Call"><FaVideo /></button>
   {/* Midpoint meet */}
-  <button className="p-2 rounded-full hover:bg-gray-100" onClick={() => setShowMap(true)} title="Safe Meet">
-    <FaMapMarkerAlt className="text-red-500" />
-  </button>
+ <button
+  className="p-2 rounded-full hover:bg-gray-100"
+  onClick={sendMeetCard}
+  title="Meet in the Middle"
+>
+  <span className="text-lg">📍</span>
+</button>
+
 
   {/* Header menu (nickname/theme/alerts/offline + MUTE) */}
   <div className="relative">
@@ -1621,8 +1656,24 @@ onClose?.();
                         ⚡
                       </div>
                     )}
-
-                {m.type === "image" && m.url ? (
+                      
+                     {
+                      // 📍 Meet card bubble
+                      m.kind === "meet" ? (
+                        <button
+                          type="button"
+                          onClick={() => setMeetOpen(true)}
+                          className="block text-left"
+                        >
+                          <div className="flex items-center gap-2 font-semibold">
+                            <span className="text-lg">📍</span>
+                            <span>Meet in the middle</span>
+                          </div>
+                          <div className="mt-1 text-xs opacity-80">
+                            Tap to see the halfway point and nearby spots.
+                          </div>
+                        </button>
+                      ) : m.type === "image" && m.url ? (
                         <img
                           src={m.url}
                           alt=""
@@ -1653,25 +1704,22 @@ onClose?.();
                           }}
                         />
                       ) : (
- 
+                        <div className="break-words whitespace-pre-wrap [overflow-wrap:anywhere] inline-block max-w-full">
+                          {(() => {
+                            const hasText =
+                              typeof m.text === "string" && m.text.length > 0;
+                            const isRBZ = hasText && m.text.startsWith(RBZ_TAG);
+                            const t = isRBZ
+                              ? m.textFallback || ""
+                              : hasText
+                              ? m.text
+                              : m.textFallback || "";
+                            return t ? highlight(t, searchQuery) : "[empty]";
+                          })()}
+                        </div>
+                      )
+                    }
 
-
-                      <div className="break-words whitespace-pre-wrap [overflow-wrap:anywhere] inline-block max-w-full">
-                        {(() => {
-                          const hasText =
-                            typeof m.text === "string" &&
-                            m.text.length > 0;
-                          const isRBZ =
-                            hasText && m.text.startsWith(RBZ_TAG);
-                          const t = isRBZ
-                            ? m.textFallback || ""
-                            : hasText
-                            ? m.text
-                            : m.textFallback || "";
-                          return t ? highlight(t, searchQuery) : "[empty]";
-                        })()}
-                      </div>
-                    )}
 
                     {/* footer */}
                     <div className="text-[10px] opacity-70 mt-0.5 flex items-center gap-1">
@@ -2225,14 +2273,16 @@ onClose?.();
           onUseTip={(t) => setInput((p) => (p ? `${p} ${t}` : t))}
         />
       )}
-   {/* Meet in the Middle popup */}
-      {showMap && (
-        <MeetMap
-          me={me}
-          peer={peer}
-          onClose={() => setShowMap(false)}
-        />
-      )}
+          {/* Meet-in-the-middle fullscreen overlay */}
+        {meetOpen && (
+          <MeetMap
+            me={me}
+            peer={peer}
+            autoStart
+            onClose={() => setMeetOpen(false)}
+          />
+        )}
+
       {/* tiny CSS */}
            <style>{`
       .pinned-shadow { box-shadow: 0 1px 6px rgba(244,63,94,.25); }
@@ -2293,47 +2343,69 @@ onClose?.();
   }}
 />
 
-
-{/* Truth or Dare */}
+{/* Common name helper */}
+{/*
+  We pass socket + roomId + myId + peerId into each game so
+  they can sync via the "game:*" socket events we just added.
+*/}
 <CouplesTruthDareGame
   open={gameOpen}
   onClose={() => setGameOpen(false)}
   partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+  socket={socket}
+  roomId={roomId}
+  myId={myId}
+  peerId={peerId}
 />
 
-{/* Flirty Dice */}
 <FlirtyDiceGame
   open={diceOpen}
   onClose={() => setDiceOpen(false)}
   partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+  socket={socket}
+  roomId={roomId}
+  myId={myId}
+  peerId={peerId}
 />
 
-{/* Would You Rather */}
 <WouldYouRatherGame
   open={wyrOpen}
   onClose={() => setWyrOpen(false)}
   partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+  socket={socket}
+  roomId={roomId}
+  myId={myId}
+  peerId={peerId}
 />
 
-{/* Spin The Bottle */}
 <SpinTheBottleGame
   open={bottleOpen}
   onClose={() => setBottleOpen(false)}
   partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+  socket={socket}
+  roomId={roomId}
+  myId={myId}
+  peerId={peerId}
 />
 
-{/* Story Builder */}
 <StoryBuilderGame
   open={storyOpen}
   onClose={() => setStoryOpen(false)}
   partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+  socket={socket}
+  roomId={roomId}
+  myId={myId}
+  peerId={peerId}
 />
 
-{/* Memory Match */}
 <MemoryCardGame
   open={memoryOpen}
   onClose={() => setMemoryOpen(false)}
   partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+  socket={socket}
+  roomId={roomId}
+  myId={myId}
+  peerId={peerId}
 />
 
 

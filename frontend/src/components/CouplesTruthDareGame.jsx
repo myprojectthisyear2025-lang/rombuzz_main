@@ -123,11 +123,39 @@ function getRandomItem(arr) {
   return arr[index];
 }
 
+// Default empty structure for user-added tasks
+const emptyCustom = () => ({
+  cute: { truth: [], dare: [] },
+  deep: { truth: [], dare: [] },
+  bold: { truth: [], dare: [] },
+});
+
 export default function CouplesTruthDareGame({ open, onClose, partnerName }) {
   const [level, setLevel] = useState("cute"); // "cute" | "deep" | "bold"
   const [lastType, setLastType] = useState("truth"); // "truth" | "dare"
   const [currentText, setCurrentText] = useState("");
   const [currentType, setCurrentType] = useState("truth");
+
+  // User-added tasks (per level + type), persisted in localStorage
+  const [customTasks, setCustomTasks] = useState(() => {
+    try {
+      const raw = localStorage.getItem("RBZ:truthdare:customTasks");
+      if (!raw) return emptyCustom();
+      const parsed = JSON.parse(raw);
+      // Shallow-merge with default structure so we never crash
+      return {
+        cute: { truth: [], dare: [], ...(parsed.cute || {}) },
+        deep: { truth: [], dare: [], ...(parsed.deep || {}) },
+        bold: { truth: [], dare: [], ...(parsed.bold || {}) },
+      };
+    } catch {
+      return emptyCustom();
+    }
+  });
+
+  // New card editor state
+  const [newType, setNewType] = useState("truth"); // "truth" | "dare"
+  const [newText, setNewText] = useState("");
 
   if (!open) return null;
 
@@ -147,9 +175,22 @@ export default function CouplesTruthDareGame({ open, onClose, partnerName }) {
     return t;
   };
 
+  const persistCustom = (next) => {
+    setCustomTasks(next);
+    try {
+      localStorage.setItem("RBZ:truthdare:customTasks", JSON.stringify(next));
+    } catch {
+      // ignore storage failures
+    }
+  };
+
   const drawCard = (type) => {
     const safeType = type === "dare" ? "dare" : "truth";
-    const pool = TASKS[level]?.[safeType];
+
+    const base = TASKS[level]?.[safeType] || [];
+    const extra = customTasks[level]?.[safeType] || [];
+    const pool = [...base, ...extra];
+
     const text = getRandomItem(pool);
 
     if (!text) {
@@ -175,6 +216,26 @@ export default function CouplesTruthDareGame({ open, onClose, partnerName }) {
 
   const levelLabel =
     level === "bold" ? "Bold" : level === "deep" ? "Deep" : "Cute";
+
+  const handleAddCustom = () => {
+    const trimmed = newText.trim();
+    if (!trimmed) return;
+
+    const next = { ...customTasks };
+    // Deep clone for safety
+    next[level] = {
+      truth: [...(next[level]?.truth || [])],
+      dare: [...(next[level]?.dare || [])],
+    };
+    next[level][newType].push(trimmed);
+
+    persistCustom(next);
+    setNewText("");
+  };
+
+  const currentCustomCount =
+    (customTasks[level]?.truth?.length || 0) +
+    (customTasks[level]?.dare?.length || 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -247,8 +308,9 @@ export default function CouplesTruthDareGame({ open, onClose, partnerName }) {
           </button>
         </div>
 
-        {/* Card */}
-        <div className="px-4 py-4 flex-1 overflow-y-auto">
+        {/* Card + custom editor */}
+        <div className="px-4 py-4 flex-1 overflow-y-auto space-y-3">
+          {/* Main card */}
           <div className="rounded-2xl bg-slate-800/80 border border-slate-700 p-4 min-h-[130px] flex flex-col justify-between">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs uppercase tracking-wide text-slate-400">
@@ -260,6 +322,69 @@ export default function CouplesTruthDareGame({ open, onClose, partnerName }) {
                 ? currentText
                 : "Tap Truth, Dare, or Random to draw your first card."}
             </p>
+          </div>
+
+          {/* Custom tasks editor */}
+          <div className="rounded-2xl bg-slate-900/70 border border-slate-800 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-slate-300">
+                Add your own {levelLabel.toLowerCase()} cards
+              </span>
+              <span className="text-[11px] text-slate-500">
+                {currentCustomCount} custom saved
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => setNewType("truth")}
+                className={`flex-1 px-2 py-1 rounded-full text-[11px] border ${
+                  newType === "truth"
+                    ? "bg-sky-500/20 border-sky-400 text-sky-100"
+                    : "bg-slate-800 border-slate-700 text-slate-300"
+                }`}
+              >
+                💬 Truth card
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewType("dare")}
+                className={`flex-1 px-2 py-1 rounded-full text-[11px] border ${
+                  newType === "dare"
+                    ? "bg-amber-500/20 border-amber-400 text-amber-100"
+                    : "bg-slate-800 border-slate-700 text-slate-300"
+                }`}
+              >
+                🎲 Dare card
+              </button>
+            </div>
+
+            <textarea
+              rows={3}
+              className="w-full text-xs rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-slate-100 placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-rose-500/70"
+              placeholder={
+                newType === "truth"
+                  ? "Write a custom Truth question for this level…"
+                  : "Write a custom Dare for this level…"
+              }
+              value={newText}
+              onChange={(e) => setNewText(e.target.value)}
+            />
+
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-slate-500">
+                Tip: You can mention “me” and it will auto-use{" "}
+                {displayName === "your match" ? "their name" : displayName}.
+              </span>
+              <button
+                type="button"
+                onClick={handleAddCustom}
+                className="px-3 py-1.5 rounded-full bg-rose-500 hover:bg-rose-600 text-white text-xs font-medium shadow-sm"
+              >
+                ➕ Save card
+              </button>
+            </div>
           </div>
         </div>
 

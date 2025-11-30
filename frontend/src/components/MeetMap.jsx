@@ -30,7 +30,7 @@ function FlyTo({ center }) {
   return null;
 }
 
-export default function MeetMap({ me, peer, onClose }) {
+export default function MeetMap({ me, peer, onClose, autoStart = false }) {
   const socket = getSocket();
   const [prompt, setPrompt] = useState(null);
   const [myLoc, setMyLoc] = useState(null);
@@ -78,6 +78,8 @@ const [pendingFrom, setPendingFrom] = useState(null);
   socket.on("meet:accept", ({ from, coords }) => {
   console.log("✅ meet:accept received from", from, coords);
 
+    
+
   // 🧩 Validate the incoming coords before using them
   if (!coords || typeof coords.lat !== "number" || typeof coords.lng !== "number") {
     console.warn("⚠️ Invalid peer coordinates received:", coords);
@@ -119,12 +121,16 @@ socket.on("meet:place:selected", ({ from, place }) => {
       setLoading(false);
     });
 
-    return () => {
-      socket.off("meet:request");
-      socket.off("meet:accept");
-      socket.off("meet:suggest");
-      socket.off("meet:decline");
-    };
+   return () => {
+  socket.off("meet:request");
+  socket.off("meet:accept");
+  socket.off("meet:suggest");
+  socket.off("meet:decline");
+  socket.off("meet:place:selected");
+  socket.off("meet:place:accepted");   // add
+  socket.off("meet:place:rejected");   // add
+};
+
   }, [socket, myLoc, fetchSuggestions]);
 
   const resetAll = () => {
@@ -187,6 +193,15 @@ if (window.navigator.userAgent.includes("Edg")) {
       setWaiting(true);
     });
   };
+// Auto-start when used as overlay
+useEffect(() => {
+  if (autoStart) {
+    const t = setTimeout(() => {
+      startMeet();
+    }, 50);
+    return () => clearTimeout(t);
+  }
+}, [autoStart]);
 
   // 🔹 Accept prompt (receiver shares location)
   const acceptMeet = () => {
@@ -239,18 +254,19 @@ if (window.navigator.userAgent.includes("Edg")) {
           Accept
         </button>
         <button
-          className="bg-red-500 text-white px-3 py-1 rounded-lg"
-          onClick={() => {
-            setPendingPlace(null);
-            socket.emit("meet:place:rejected", {
-              from: myId,
-              to: peerId,
-              place: pendingPlace,
-            });
-          }}
-        >
-          Reject
-        </button>
+            className="bg-red-500 text-white px-3 py-1 rounded-lg"
+            onClick={() => {
+              socket.emit("meet:place:rejected", {
+                from: myId,
+                to: peerId,
+                place: pendingPlace,
+              });
+              setPendingPlace(null);
+            }}
+          >
+            Reject
+          </button>
+
       </div>
     )}
 
@@ -334,15 +350,17 @@ if (window.navigator.userAgent.includes("Edg")) {
 
   return (
     <>
-      {/* 🔘 Meet button (initiator) */}
-      {!showMap && !prompt && (
-        <button
-          onClick={startMeet}
-          className="flex items-center gap-2 px-4 py-2 bg-rose-500 text-white rounded-full hover:bg-rose-600 transition"
-        >
-          <FaMapMarkerAlt /> Meet halfway
-        </button>
-      )}
+      {/* 🔘 Meet button (initiator) – only when used inline */}
+    {!autoStart && !showMap && !prompt && (
+      <button
+        onClick={startMeet}
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-full text-xs font-medium bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-100"
+      >
+        <span className="text-lg">📍</span>
+        <span>Meet halfway</span>
+      </button>
+    )}
+
 
       {/* 💞 Prompt popup */}
       <AnimatePresence>

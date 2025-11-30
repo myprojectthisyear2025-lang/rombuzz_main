@@ -1,130 +1,286 @@
 // src/components/MemoryCardGame.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 
-const PAIRS = ["🌙", "🌲", "🎧", "📚", "☕", "🎈"];
+const GAME_KEY = "memory";
 
-function shuffledDeck() {
-  const deck = [...PAIRS, ...PAIRS].map((value, index) => ({
-    id: index,
-    value,
-    matched: false,
-  }));
-  for (let i = deck.length - 1; i > 0; i--) {
+const ICONS = ["💋", "❤️", "🔥", "🎧", "🍷", "🌙"];
+
+function shuffle(array) {
+  const copy = [...array];
+  for (let i = copy.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
+    [copy[i], copy[j]] = [copy[j], copy[i]];
   }
-  return deck;
+  return copy;
 }
 
-export default function MemoryCardGame({ open, onClose, partnerName }) {
-  const [cards, setCards] = useState(shuffledDeck);
-  const [flipped, setFlipped] = useState([]); // [id, id]
-  const [lock, setLock] = useState(false);
-  const [moves, setMoves] = useState(0);
+function createDeck() {
+  const cards = ICONS.flatMap((icon, idx) => [
+    { id: `${idx}-a`, value: icon },
+    { id: `${idx}-b`, value: icon },
+  ]);
+  return shuffle(cards).map((c) => ({
+    ...c,
+    open: false,
+    matched: false,
+  }));
+}
+
+function useGameChannel({ socket, roomId, myId, open, onRemote }) {
+  const [partnerHere, setPartnerHere] = useState(false);
 
   useEffect(() => {
-    if (flipped.length === 2) {
-      setLock(true);
-      const [id1, id2] = flipped;
-      const c1 = cards.find((c) => c.id === id1);
-      const c2 = cards.find((c) => c.id === id2);
-      if (c1 && c2 && c1.value === c2.value) {
-        setTimeout(() => {
-          setCards((prev) =>
-            prev.map((c) =>
-              c.id === id1 || c.id === id2 ? { ...c, matched: true } : c
-            )
-          );
-          setFlipped([]);
-          setLock(false);
-        }, 400);
-      } else {
-        setTimeout(() => {
-          setFlipped([]);
-          setLock(false);
-        }, 700);
-      }
-      setMoves((m) => m + 1);
+    if (!open) {
+      setPartnerHere(false);
+      return;
     }
-  }, [flipped, cards]);
+    if (!socket || !roomId) return;
+
+    const joinPayload = { roomId, game: GAME_KEY };
+
+    try {
+      socket.emit("game:join", joinPayload);
+    } catch {}
+
+    const handlePresence = (packet) => {
+      if (!packet) return;
+      const { roomId: rid, game, type, userId } = packet;
+      if (rid !== roomId || game !== GAME_KEY || !userId) return;
+      if (String(userId) === String(myId)) return;
+      if (type === "join") setPartnerHere(true);
+      if (type === "leave") setPartnerHere(false);
+    };
+
+    const handleUpdate = (packet) => {
+      if (!packet) return;
+      const { roomId: rid, game, from } = packet;
+      if (rid !== roomId || game !== GAME_KEY) return;
+      if (from && String(from) === String(myId)) return;
+      onRemote?.(packet);
+    };
+
+    socket.on("game:presence", handlePresence);
+    socket.on("game:update", handleUpdate);
+
+    return () => {
+      try {
+        socket.emit("game:leave", joinPayload);
+      } catch {}
+      socket.off("game:presence", handlePresence);
+      socket.off("game:update", handleUpdate);
+      setPartnerHere(false);
+    };
+  }, [socket, roomId, myId, open, onRemote]);
+
+  return partnerHere;
+}
+
+const baseState = {
+  cards: createDeck(),
+  openIds: [],
+  moves: 0,
+};
+
+export default function MemoryCardGame({
+  open,
+  onClose,
+  partnerName,
+  socket,
+  roomId,
+  myId,
+  peerId,
+}) {
+  const [state, setState] = useState(baseState);
+
+  useEffect(() => {
+    if (!open) return;
+    setState({
+      cards: createDeck(),
+      openIds: [],
+      moves: 0,
+    });
+  }, [open]);
+
+  const applyRemote = useCallback((packet) => {
+    if (packet.type === "SYNC" && packet.payload) {
+      setState(packet.payload);
+    }
+  }, []);
+
+  const partnerHere = useGameChannel({
+    socket,
+    roomId,
+    myId,
+    open,
+    onRemote: applyRemote,
+  });
+
+  const updateState = (updater) => {
+    setState((prev) => {
+      const next =
+        typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      if (socket && roomId) {
+        socket.emit("game:action", {
+          roomId,
+          game: GAME_KEY,
+          type: "SYNC",
+          payload: next,
+        });
+      }
+      return next;
+    });
+  };
+
+  const prettyName =
+    partnerName || (peerId ? "your partner" : "your match");
+
+  const handleClickCard = (id) => {
+    updateState((prev) => {
+      const { cards, openIds, moves } = prev;
+
+      if (openIds.length === 2) return prev;
+
+      const idx = cards.findIndex((c) => c.id === id);
+      if (idx === -1) return prev;
+      if (cards[idx].open || cards[idx].matched) return prev;
+
+      const newCards = cards.map((c, i) =>
+        i === idx ? { ...c, open: true } : c
+      );
+      const newOpenIds = [...openIds, id];
+
+      let newMoves = moves;
+      let finalCards = newCards;
+      let finalOpen = newOpenIds;
+
+      if (newOpenIds.length === 2) {
+        newMoves = moves + 1;
+        const [idA, idB] = newOpenIds;
+        const cardA = newCards.find((c) => c.id === idA);
+        const cardB = newCards.find((c) => c.id === idB);
+
+        if (cardA && cardB && cardA.value === cardB.value) {
+          finalCards = newCards.map((c) =>
+            c.id === idA || c.id === idB ? { ...c, matched: true } : c
+          );
+          finalOpen = [];
+        } else {
+          // we leave them open in state for now; UI will handle "flip back" UX
+          finalOpen = newOpenIds;
+        }
+      }
+
+      return {
+        cards: finalCards,
+        openIds: finalOpen,
+        moves: newMoves,
+      };
+    });
+
+    // local-only small delay to auto-close mismatched pair visually;
+    // both ends stay in sync because we just synced full state above.
+    setTimeout(() => {
+      setState((prev) => {
+        if (prev.openIds.length !== 2) return prev;
+        const closedCards = prev.cards.map((c) =>
+          c.matched ? c : { ...c, open: false }
+        );
+        const next = { ...prev, cards: closedCards, openIds: [] };
+        if (socket && roomId) {
+          socket.emit("game:action", {
+            roomId,
+            game: GAME_KEY,
+            type: "SYNC",
+            payload: next,
+          });
+        }
+        return next;
+      });
+    }, 900);
+  };
+
+  const allMatched = state.cards.every((c) => c.matched);
 
   if (!open) return null;
 
-  const reset = () => {
-    setCards(shuffledDeck());
-    setFlipped([]);
-    setMoves(0);
-    setLock(false);
-  };
-
-  const handleFlip = (id) => {
-    if (lock) return;
-    if (flipped.includes(id)) return;
-    const card = cards.find((c) => c.id === id);
-    if (!card || card.matched) return;
-    if (flipped.length === 2) return;
-    setFlipped((prev) => [...prev, id]);
-  };
-
-  const allMatched = cards.every((c) => c.matched);
-  const displayName = partnerName || "your match";
-
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-slate-900 text-white w-full max-w-md rounded-2xl p-6 border border-slate-700 mx-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold">🧠 Memory Match</h2>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-full hover:bg-slate-800"
-          >
-            ✕
-          </button>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-3">
+      <div className="w-full max-w-md bg-slate-950/95 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-cyan-500/20 via-indigo-500/15 to-rose-500/20">
+          <div>
+            <div className="text-xs uppercase tracking-[0.18em] text-slate-400">
+              RomBuzz Couples Game
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-slate-50">
+                Memory Match
+              </span>
+              <span className="text-xs text-slate-400">
+                with {prettyName}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {partnerHere && (
+              <span className="text-[10px] px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/40">
+                ● Partner joined
+              </span>
+            )}
+            <button
+              onClick={onClose}
+              className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-200 text-sm"
+            >
+              ✕
+            </button>
+          </div>
         </div>
-        <p className="text-xs text-slate-400 mb-4">
-          Take turns choosing cards. See who finds more pairs: you or{" "}
-          {displayName === "your match" ? "your match" : displayName}.
-        </p>
 
-        {/* Grid */}
-        <div className="grid grid-cols-4 gap-2 mb-4">
-          {cards.map((card) => {
-            const isOpen =
-              card.matched || flipped.includes(card.id);
-            return (
-              <button
-                key={card.id}
-                onClick={() => handleFlip(card.id)}
-                className={`h-14 rounded-xl border text-2xl flex items-center justify-center transition 
-                  ${
+        <div className="px-4 py-4 flex-1 flex flex-col gap-3">
+          <div className="grid grid-cols-4 gap-2">
+            {state.cards.map((card) => {
+              const isOpen =
+                card.open || card.matched || state.openIds.includes(card.id);
+              return (
+                <button
+                  key={card.id}
+                  onClick={() => handleClickCard(card.id)}
+                  disabled={card.matched}
+                  className={`h-12 rounded-xl border text-lg flex items-center justify-center transition-transform duration-150 ${
                     card.matched
-                      ? "bg-emerald-500/20 border-emerald-400 text-emerald-200"
+                      ? "bg-emerald-600 border-emerald-400 text-white scale-95"
                       : isOpen
-                      ? "bg-slate-700 border-slate-500"
-                      : "bg-slate-800 border-slate-700"
+                      ? "bg-slate-800 border-slate-500 text-slate-50"
+                      : "bg-slate-900 border-slate-700 text-slate-500 hover:bg-slate-800"
                   }`}
-              >
-                {isOpen ? card.value : "?"}
-              </button>
-            );
-          })}
+                >
+                  {isOpen ? card.value : "?"}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span>Moves: {state.moves}</span>
+            {allMatched && <span>All pairs found 🎉</span>}
+          </div>
         </div>
 
-        <div className="flex items-center justify-between text-xs text-slate-400 mb-3">
-          <span>Moves: {moves}</span>
-          {allMatched && <span>All pairs found 🎉</span>}
-        </div>
-
-        <div className="space-y-2">
+        <div className="px-4 py-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 gap-2">
           <button
-            onClick={reset}
-            className="w-full py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium"
+            onClick={() =>
+              updateState({
+                cards: createDeck(),
+                openIds: [],
+                moves: 0,
+              })
+            }
+            className="px-3 py-1.5 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800 text-xs"
           >
             Restart game
           </button>
           <button
             onClick={onClose}
-            className="w-full py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-800 text-sm"
+            className="px-3 py-1.5 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800 text-xs"
           >
             Close
           </button>
