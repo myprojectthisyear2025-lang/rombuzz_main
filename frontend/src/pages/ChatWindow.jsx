@@ -523,6 +523,45 @@ useEffect(() => {
 
   // 🆕 Listen for final meet confirmation from MeetMap
   socket.on("meet:final-confirm", onMeetFinal);
+// 🆕 When partner selects a place → popup should open map overlay
+socket.on("meet:place:selected", ({ from, place }) => {
+  setMeetOpen(true); // open MeetMap
+});
+
+// 🆕 Partner accepted selected location
+socket.on("meet:place:accepted", ({ from, place }) => {
+  const sysMsg = {
+    id: crypto.randomUUID(),
+    roomId,
+    from: "system",
+    to: myId,
+    time: new Date().toISOString(),
+    system: true,
+    kind: "meet-confirm",
+    text: `You both agreed to meet at ${place.name} ❤️`,
+    place,
+  };
+  setMessages((prev) => [...prev, sysMsg]);
+});
+
+// 🆕 Partner rejected location
+socket.on("meet:place:rejected", ({ from, place }) => {
+  const sysMsg = {
+    id: crypto.randomUUID(),
+    roomId,
+    from: "system",
+    to: myId,
+    time: new Date().toISOString(),
+    system: true,
+    kind: "meet-reject",
+    text: `${from.firstName || "They"} rejected ${place.name}`,
+    place,
+  };
+  setMessages((prev) => [...prev, sysMsg]);
+
+  // keep map open
+  setMeetOpen(true);
+});
 
   return () => {
     socket.off("message", onMsg);
@@ -539,6 +578,10 @@ useEffect(() => {
 
     // 🆕 cleanup meet listener
     socket.off("meet:final-confirm", onMeetFinal);
+    socket.off("meet:place:selected");
+    socket.off("meet:place:accepted");
+    socket.off("meet:place:rejected");
+
 
     socket.emit("leaveRoom", roomId);
   };

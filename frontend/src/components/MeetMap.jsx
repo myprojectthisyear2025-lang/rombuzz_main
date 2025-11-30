@@ -130,6 +130,7 @@ export default function MeetMap({ me, peer, onClose, autoStart = false }) {
   const [focusCenter, setFocusCenter] = useState(null);
 
 
+
   const myId = me?.id || me?._id;
   const peerId = peer?.id || peer?._id;
 
@@ -159,82 +160,103 @@ export default function MeetMap({ me, peer, onClose, autoStart = false }) {
         setPrompt(`${from.firstName || "Someone"} ${from.lastName || ""}`.trim());
     });
 
-  socket.on("meet:accept", ({ from, coords }) => {
+ socket.on("meet:accept", ({ from, coords }) => {
   console.log("✅ meet:accept received from", from, coords);
 
-    
-
-  // 🧩 Validate the incoming coords before using them
   if (!coords || typeof coords.lat !== "number" || typeof coords.lng !== "number") {
     console.warn("⚠️ Invalid peer coordinates received:", coords);
     return;
   }
 
+  // STEP 1 — update peer location
   setPeerLoc(coords);
   setWaiting(false);
 
-  // 🧭 Compute midpoint only when both sides have valid coordinates
-  if (myLoc && typeof myLoc.lat === "number" && typeof myLoc.lng === "number") {
+  // STEP 2 — ensure I have MY location
+  if (!myLoc) {
+    getMyLocation(() => {});
+    return;
+  }
+
+  // STEP 3 — if BOTH locations exist → compute midpoint
+  if (myLoc && coords) {
     const mid = {
       lat: (myLoc.lat + coords.lat) / 2,
       lng: (myLoc.lng + coords.lng) / 2,
     };
 
-    console.log("📍 Midpoint calculated:", mid);
+    console.log("📍 midpoint via accept()", mid);
     setMidpoint(mid);
+
+    // fetch place suggestions
     fetchSuggestions(myLoc, coords);
-  } else {
-    console.log("⏳ Waiting for my location before computing midpoint");
+
+    // show map
+    setShowMap(true);
+    setWaiting(false);
   }
 });
 
+
+
 // 🆕 When partner chooses a place
-socket.on("meet:place:selected", ({ from, place }) => {
-  console.log("📍 meet:place:selected received:", place);
-  setPendingFrom(from);
-  setPendingPlace(place);
+// partner accepted my chosen place
+socket.on("meet:place:accepted", ({ from, place }) => {
+  console.log("❤️ meet:place ACCEPTED", place);
+  // close popup
+  setPendingPlace(null);
+
+  // keep map open
+  setShowMap(true);
 });
 
-          socket.on(
-        "meet:suggest",
-        ({ midpoint, smartMidpoint, places, canExpand }) => {
-          console.log(
-            "💞 meet:suggest midpoint",
-            midpoint,
-            "smartMidpoint",
-            smartMidpoint
-          );
-          setMidpoint(midpoint || null);
-          setSmartMidpoint(smartMidpoint || midpoint || null);
-          const safePlaces = Array.isArray(places) ? places : [];
-          setPlaces(safePlaces);
-          setShowMap(true);
-          setWaiting(false);
-          setLoading(false);
-          setCanExpand(!!canExpand);
-          setRadiusMiles(2);
+// partner rejected my chosen place
+socket.on("meet:place:rejected", ({ from, place }) => {
+  console.log("❌ meet:place REJECTED", place);
+  // close popup
+  setPendingPlace(null);
 
-          if (!safePlaces.length && canExpand) {
-            setShowNoPlacesCard(true);
-            setSheetOpen(false);
-          } else {
-            setShowNoPlacesCard(false);
-            setSheetOpen(safePlaces.length > 0);
-          }
+  // keep map open so they can pick again
+  setShowMap(true);
+});
 
-          // Reset any previous focus
-          setFocusCenter(null);
-        }
-      );
+// 🧭 Both users shared location → backend sends midpoint + places
+socket.on("meet:suggest", ({ midpoint, smartMidpoint, places, canExpand }) => {
+  console.log("💞 meet:suggest received");
 
+  setMidpoint(midpoint || null);
+  setSmartMidpoint(smartMidpoint || midpoint || null);
 
+  const safePlaces = Array.isArray(places) ? places : [];
+  setPlaces(safePlaces);
+
+  setWaiting(false);
+  setShowMap(true);
+  setLoading(false);
+
+  setCanExpand(!!canExpand);
+  setRadiusMiles(2);
+
+  // reset focus so map centers properly
+  setFocusCenter(null);
+
+  // no places? show no-places card
+  if (!safePlaces.length && canExpand) {
+    setShowNoPlacesCard(true);
+    setSheetOpen(false);
+  } else {
+    setShowNoPlacesCard(false);
+    setSheetOpen(safePlaces.length > 0);
+  }
+});
 
    return () => {
   socket.off("meet:request");
   socket.off("meet:accept");
-  socket.off("meet:suggest");
   socket.off("meet:decline");
   socket.off("meet:place:selected");
+  socket.off("meet:suggest");
+
   socket.off("meet:place:accepted");   // add
   socket.off("meet:place:rejected");   // add
 };

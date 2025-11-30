@@ -3,26 +3,26 @@ import React, { useEffect, useState } from "react";
 
 /**
  * ============================================================
- * 🎮 CouplesTruthDareGame (RomBuzz mini-game)
+ * 🎮 CouplesTruthDareGame (RomBuzz mini-game, REAL-TIME)
  *
  * - Truth / Dare style tasks
  * - Three intensity levels: "Cute", "Deep", "Bold"
  * - PG-13, no explicit content
- * - Users can add custom Truths / Dares (stored in localStorage)
- * - Real-time synced between both users via socket + roomId
+ * - Real-time synced via socket.io
+ * - Supports user-added extra tasks (also synced)
  *
  * Props:
  *  - open: boolean
  *  - onClose: () => void
  *  - partnerName?: string
- *  - socket?: SocketIOClient.Socket
- *  - roomId?: string
- *  - myId?: string
- *  - peerId?: string
+ *  - socket
+ *  - roomId: string
+ *  - myId: string
+ *  - peerId: string
  * ============================================================
  */
 
-const BUILTIN_TASKS = {
+const BASE_TASKS = {
   cute: {
     truth: [
       "What was your very first impression of me?",
@@ -112,44 +112,6 @@ const LEVELS = [
   { key: "bold", label: "Bold", icon: "🔥" },
 ];
 
-const CUSTOM_KEY = "RBZ:truthdare:custom";
-
-function safeLoadCustom() {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(CUSTOM_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function safeSaveCustom(obj) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(CUSTOM_KEY, JSON.stringify(obj));
-  } catch {}
-}
-
-function ensureShape(base) {
-  // Ensure cute/deep/bold + truth/dare arrays exist
-  const tmpl = { cute: { truth: [], dare: [] }, deep: { truth: [], dare: [] }, bold: { truth: [], dare: [] } };
-  const out = { ...tmpl, ...(base || {}) };
-  for (const lvl of Object.keys(tmpl)) {
-    out[lvl] = { ...tmpl[lvl], ...(out[lvl] || {}) };
-    out[lvl].truth = Array.isArray(out[lvl].truth) ? out[lvl].truth : [];
-    out[lvl].dare = Array.isArray(out[lvl].dare) ? out[lvl].dare : [];
-  }
-  return out;
-}
-
-function getRandomItem(arr) {
-  if (!arr || arr.length === 0) return null;
-  const index = Math.floor(Math.random() * arr.length);
-  return arr[index];
-}
-
 export default function CouplesTruthDareGame({
   open,
   onClose,
@@ -159,17 +121,19 @@ export default function CouplesTruthDareGame({
   myId,
   peerId,
 }) {
-  const [level, setLevel] = useState("cute");
+  const [level, setLevel] = useState("cute"); // cute | deep | bold
+  const [currentType, setCurrentType] = useState("truth"); // truth | dare
   const [lastType, setLastType] = useState("truth");
   const [currentText, setCurrentText] = useState("");
-  const [currentType, setCurrentType] = useState("truth");
 
-  // Custom tasks per user (not synced; only selected card is synced)
-  const [customTasks, setCustomTasks] = useState(() =>
-    ensureShape(safeLoadCustom())
-  );
-  const [newKind, setNewKind] = useState("truth"); // truth | dare
-  const [newText, setNewText] = useState("");
+  // user-added tasks → synced
+  const [customTasks, setCustomTasks] = useState({
+    cute: { truth: [], dare: [] },
+    deep: { truth: [], dare: [] },
+    bold: { truth: [], dare: [] },
+  });
+  const [newTaskText, setNewTaskText] = useState("");
+  const [newTaskType, setNewTaskType] = useState("truth"); // truth | dare
 
   if (!open) return null;
 
@@ -186,91 +150,128 @@ export default function CouplesTruthDareGame({
     return t;
   };
 
-  const allTasksFor = (lvl, kind) => {
-    const builtIn = BUILTIN_TASKS[lvl]?.[kind] || [];
-    const custom = customTasks?.[lvl]?.[kind] || [];
-    return [...builtIn, ...custom];
-  };
-
-  const applyState = (state) => {
-    if (!state) return;
-    setLevel(state.level || "cute");
-    setCurrentType(state.kind || "truth");
-    setCurrentText(state.text || "");
-    setLastType(state.kind || "truth");
-  };
-
-  const broadcastState = (partial) => {
-    // Build new state based on current + overrides
-    const next = {
-      level: partial.level ?? level,
-      kind: partial.kind ?? currentType,
-      text: partial.text ?? currentText,
-      from: myId,
-      at: Date.now(),
-    };
-    applyState(next);
-    if (socket && roomId) {
-      socket.emit("rbz:game:truthdare:state", { roomId, state: next });
-    }
-  };
-
-  const drawCard = (type) => {
+  const getPool = (lvl, type) => {
+    const safeLvl = lvl || level;
     const safeType = type === "dare" ? "dare" : "truth";
-    const pool = allTasksFor(level, safeType);
-    const text = getRandomItem(pool);
+    const base = BASE_TASKS[safeLvl]?.[safeType] || [];
+    const extras = customTasks[safeLvl]?.[safeType] || [];
+    return [...base, ...extras];
+  };
 
-    if (!text) {
-      const msg = "No cards left for this mode. Try switching level or type.";
-      broadcastState({ level, kind: safeType, text: msg });
+  // 🔁 Apply draw update coming from socket
+  const applyDraw = ({ level: lvl, type, index, baseText }) => {
+    const safeLvl = lvl || "cute";
+    const safeType = type === "dare" ? "dare" : "truth";
+    const pool = getPool(safeLvl, safeType);
+    const chosen = pool[index] ?? baseText ?? pool[0] ?? "";
+
+    setLevel(safeLvl);
+    setLastType(safeType);
+    setCurrentType(safeType);
+    setCurrentText(personalize(chosen));
+  };
+
+  // 🔁 Apply add-task update from socket
+  const applyAddTask = ({ level: lvl, type, text }) => {
+    const safeLvl = lvl || "cute";
+    const safeType = type === "dare" ? "dare" : "truth";
+    const cleanText = String(text || "").trim();
+    if (!cleanText) return;
+
+    setCustomTasks((prev) => ({
+      ...prev,
+      [safeLvl]: {
+        ...prev[safeLvl],
+        [safeType]: [...(prev[safeLvl]?.[safeType] || []), cleanText],
+      },
+    }));
+  };
+
+  // 🔌 Socket listeners
+  useEffect(() => {
+    if (!socket || !roomId) return;
+
+    const handler = (payload) => {
+      if (!payload || payload.roomId !== roomId) return;
+
+      if (payload.kind === "draw") {
+        applyDraw(payload);
+      } else if (payload.kind === "add") {
+        applyAddTask(payload);
+      }
+    };
+
+    socket.on("game:truthdare:sync", handler);
+    return () => {
+      socket.off("game:truthdare:sync", handler);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, roomId, displayName]);
+
+  // 🚀 Emit draw (local click → synced)
+  const emitDraw = (type) => {
+    const safeType = type === "dare" ? "dare" : "truth";
+    const pool = getPool(level, safeType);
+
+    if (!pool.length) {
+      setCurrentText("No cards left for this mode. Try switching level or type.");
+      setCurrentType(safeType);
+      setLastType(safeType);
       return;
     }
 
-    const personalized = personalize(text);
-    broadcastState({ level, kind: safeType, text: personalized });
+    const index = Math.floor(Math.random() * pool.length);
+    const baseText = pool[index];
+
+    const payload = {
+      roomId,
+      from: myId,
+      to: peerId,
+      kind: "draw",
+      level,
+      type: safeType,
+      index,
+      baseText,
+    };
+
+    if (socket && roomId) {
+      socket.emit("game:truthdare:sync", payload);
+    } else {
+      // fallback: local-only
+      applyDraw(payload);
+    }
   };
 
   const drawRandom = () => {
     const type = Math.random() < 0.5 ? "truth" : "dare";
-    drawCard(type);
+    emitDraw(type);
+  };
+
+  // ➕ Add new task (synced)
+  const addTask = () => {
+    const text = newTaskText.trim();
+    if (!text) return;
+
+    const payload = {
+      roomId,
+      from: myId,
+      to: peerId,
+      kind: "add",
+      level,
+      type: newTaskType === "dare" ? "dare" : "truth",
+      text,
+    };
+
+    if (socket && roomId) {
+      socket.emit("game:truthdare:sync", payload);
+    } else {
+      applyAddTask(payload);
+    }
+    setNewTaskText("");
   };
 
   const levelLabel =
     level === "bold" ? "Bold" : level === "deep" ? "Deep" : "Cute";
-
-  // Listen for partner's state updates
-  useEffect(() => {
-    if (!socket || !roomId) return;
-
-    const handler = ({ roomId: rid, state }) => {
-      if (!state) return;
-      if (rid && rid !== roomId) return;
-      applyState(state);
-    };
-
-    socket.on("rbz:game:truthdare:state", handler);
-    return () => {
-      socket.off("rbz:game:truthdare:state", handler);
-    };
-  }, [socket, roomId]);
-
-  // Add custom task handler
-  const addCustomTask = () => {
-    const text = newText.trim();
-    if (!text) return;
-    setCustomTasks((prev) => {
-      const base = ensureShape(prev);
-      const next = { ...base };
-      next[level] = { ...next[level] };
-      const arr = newKind === "dare" ? [...next[level].dare] : [...next[level].truth];
-      arr.push(text);
-      if (newKind === "dare") next[level].dare = arr;
-      else next[level].truth = arr;
-      safeSaveCustom(next);
-      return next;
-    });
-    setNewText("");
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -316,7 +317,7 @@ export default function CouplesTruthDareGame({
         {/* Type selector */}
         <div className="px-4 pt-3 flex gap-2">
           <button
-            onClick={() => drawCard("truth")}
+            onClick={() => emitDraw("truth")}
             className={`flex-1 px-3 py-2 text-sm rounded-full border transition ${
               lastType === "truth"
                 ? "bg-sky-500/20 border-sky-400 text-sky-200"
@@ -326,7 +327,7 @@ export default function CouplesTruthDareGame({
             💬 Truth
           </button>
           <button
-            onClick={() => drawCard("dare")}
+            onClick={() => emitDraw("dare")}
             className={`flex-1 px-3 py-2 text-sm rounded-full border transition ${
               lastType === "dare"
                 ? "bg-amber-500/20 border-amber-400 text-amber-200"
@@ -350,11 +351,6 @@ export default function CouplesTruthDareGame({
               <span className="text-xs uppercase tracking-wide text-slate-400">
                 {currentType === "dare" ? "Dare" : "Truth"} • {levelLabel}
               </span>
-              {socket && roomId && (
-                <span className="text-[10px] text-slate-500">
-                  Synced for both of you
-                </span>
-              )}
             </div>
             <p className="text-sm leading-relaxed text-slate-100">
               {currentText
@@ -363,39 +359,50 @@ export default function CouplesTruthDareGame({
             </p>
           </div>
 
-          {/* Custom task editor */}
+          {/* Add-your-own section */}
           <div className="mt-4 rounded-2xl bg-slate-800/70 border border-slate-700 p-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-slate-300">
-                Add your own {levelLabel} card
+                Add your own card (synced for both of you)
               </span>
-              <select
-                value={newKind}
-                onChange={(e) => setNewKind(e.target.value)}
-                className="text-xs bg-slate-900 border border-slate-700 rounded-full px-2 py-1 text-slate-200"
-              >
-                <option value="truth">Truth</option>
-                <option value="dare">Dare</option>
-              </select>
+              <div className="flex gap-1 text-[11px] bg-slate-900/60 rounded-full p-1">
+                <button
+                  className={`px-2 py-0.5 rounded-full ${
+                    newTaskType === "truth"
+                      ? "bg-sky-500/40 text-white"
+                      : "text-slate-300"
+                  }`}
+                  onClick={() => setNewTaskType("truth")}
+                >
+                  Truth
+                </button>
+                <button
+                  className={`px-2 py-0.5 rounded-full ${
+                    newTaskType === "dare"
+                      ? "bg-amber-500/40 text-white"
+                      : "text-slate-300"
+                  }`}
+                  onClick={() => setNewTaskType("dare")}
+                >
+                  Dare
+                </button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 text-xs bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-rose-500"
-                placeholder="Write your own Truth or Dare…"
-                value={newText}
-                onChange={(e) => setNewText(e.target.value)}
-              />
+            <textarea
+              rows={2}
+              className="w-full text-xs rounded-xl bg-slate-900/70 border border-slate-600 px-2 py-1 outline-none focus:ring-2 focus:ring-rose-400 resize-none"
+              placeholder={`Type a ${newTaskType} for the “${levelLabel}” level…`}
+              value={newTaskText}
+              onChange={(e) => setNewTaskText(e.target.value)}
+            />
+            <div className="mt-2 flex justify-end">
               <button
-                onClick={addCustomTask}
-                className="px-3 py-2 text-xs rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-medium"
+                onClick={addTask}
+                className="px-3 py-1 text-xs rounded-full bg-rose-500 hover:bg-rose-600 text-white"
               >
-                Add
+                ➕ Add card
               </button>
             </div>
-            <p className="mt-1 text-[10px] text-slate-500">
-              Your custom cards are saved on this device and can still
-              be drawn and shared live in this chat.
-            </p>
           </div>
         </div>
 
@@ -408,7 +415,7 @@ export default function CouplesTruthDareGame({
             Close
           </button>
           <button
-            onClick={() => drawCard(lastType)}
+            onClick={() => emitDraw(lastType)}
             className="flex-1 px-3 py-2 text-xs rounded-full bg-pink-500 hover:bg-pink-600 text-white font-medium shadow-sm transition"
           >
             Next {lastType === "dare" ? "Dare" : "Truth"}
