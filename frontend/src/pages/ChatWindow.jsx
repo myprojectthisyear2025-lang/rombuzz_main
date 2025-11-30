@@ -24,6 +24,14 @@ import { FaMapMarkerAlt } from "react-icons/fa";
 import SnapCameraSheet from "../components/SnapCameraSheet";
 import { FullscreenViewer } from "../components/FullscreenViewer";
 import { API_BASE } from "../config";
+import CouplesTruthDareGame from "../components/CouplesTruthDareGame";
+import GameHub from "../components/GameHub";
+import FlirtyDiceGame from "../components/FlirtyDiceGame";
+import WouldYouRatherGame from "../components/WouldYouRatherGame";
+import SpinTheBottleGame from "../components/SpinTheBottleGame";
+import StoryBuilderGame from "../components/StoryBuilderGame";
+import MemoryCardGame from "../components/MemoryCardGame";
+
 
 //const API_BASE = "http://localhost:4000";
 //const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com";
@@ -129,6 +137,18 @@ export default function ChatWindow({ socket, me, peer, onClose }) {
   const [typing, setTyping] = useState(false);
   const [peerOnline, setPeerOnline] = useState(false);
 const [viewer, setViewer] = useState({ open: false, index: 0 });
+
+// 🎮 Couples game modal
+const [gameOpen, setGameOpen] = useState(false);
+const [hubOpen, setHubOpen] = useState(false);
+const [diceOpen, setDiceOpen] = useState(false);
+
+// NEW games
+const [wyrOpen, setWyrOpen] = useState(false);
+const [bottleOpen, setBottleOpen] = useState(false);
+const [storyOpen, setStoryOpen] = useState(false);
+const [memoryOpen, setMemoryOpen] = useState(false);
+
 
   // composer/ui
   const [showEmoji, setShowEmoji] = useState(false);
@@ -1770,14 +1790,13 @@ onClose?.();
 
 
       
-        {/* Emoji */}
-        <button className="p-2 rounded-lg hover:bg-gray-100 relative" onClick={() => setShowEmoji((v) => !v)} title="Emoji">
-          <FaSmile />
-          {showEmoji && (
-            <div className="absolute bottom-16 right-0 z-50 bg-white rounded-xl shadow-lg animate-fadein">
-              <EmojiPicker onEmojiClick={(e) => setInput((p) => p + (e.emoji || ""))} theme="light" />
-            </div>
-          )}
+       {/* 🎮 Games */}
+        <button
+          className="p-2 rounded-lg hover:bg-gray-100"
+          onClick={() => setHubOpen(true)}
+          title="Play a couples game"
+        >
+          🎮
         </button>
 
         {/* Attach */}
@@ -2256,6 +2275,66 @@ onClose?.();
 {/* ring tones */}
 <audio ref={callerToneRef}   src="/sounds/caller-soft-ring.mp3"   loop preload="auto" />
 <audio ref={incomingToneRef} src="/sounds/incoming-chime.mp3"     loop preload="auto" />
+
+{/* Game Hub */}
+<GameHub
+  open={hubOpen}
+  onClose={() => setHubOpen(false)}
+  onSelect={(key) => {
+    setHubOpen(false);
+
+    if (key === "truthdare") setGameOpen(true);
+    if (key === "flirtydice") setDiceOpen(true);
+
+    if (key === "wyr") setWyrOpen(true);
+    if (key === "bottle") setBottleOpen(true);
+    if (key === "story") setStoryOpen(true);
+    if (key === "memory") setMemoryOpen(true);
+  }}
+/>
+
+
+{/* Truth or Dare */}
+<CouplesTruthDareGame
+  open={gameOpen}
+  onClose={() => setGameOpen(false)}
+  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+/>
+
+{/* Flirty Dice */}
+<FlirtyDiceGame
+  open={diceOpen}
+  onClose={() => setDiceOpen(false)}
+  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+/>
+
+{/* Would You Rather */}
+<WouldYouRatherGame
+  open={wyrOpen}
+  onClose={() => setWyrOpen(false)}
+  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+/>
+
+{/* Spin The Bottle */}
+<SpinTheBottleGame
+  open={bottleOpen}
+  onClose={() => setBottleOpen(false)}
+  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+/>
+
+{/* Story Builder */}
+<StoryBuilderGame
+  open={storyOpen}
+  onClose={() => setStoryOpen(false)}
+  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+/>
+
+{/* Memory Match */}
+<MemoryCardGame
+  open={memoryOpen}
+  onClose={() => setMemoryOpen(false)}
+  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
+/>
 
 
     </main>
