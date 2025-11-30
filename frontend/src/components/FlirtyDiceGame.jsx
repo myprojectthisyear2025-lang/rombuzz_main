@@ -1,23 +1,7 @@
 // src/components/FlirtyDiceGame.jsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
-/**
- * ============================================================
- * 🎲 FlirtyDiceGame (RomBuzz mini-game)
- *
- * - Dice-based prompt game for couples / matches
- * - Roll 2 dice → get a combined index → receive a prompt
- * - PG-13 and safe for App Store / Play Store
- * - Users can add custom prompts (stored in localStorage)
- *
- * Props:
- *  - open: boolean
- *  - onClose: () => void
- *  - partnerName?: string
- * ============================================================
- */
-
-const DEFAULT_PROMPTS = [
+const BUILTIN_PROMPTS = [
   "Share one thing about today that you wish we had experienced together.",
   "Tell me about a time you felt genuinely proud of yourself.",
   "Describe a small tradition you’d like us to start.",
@@ -42,70 +26,128 @@ const DEFAULT_PROMPTS = [
   "Send a short message that would instantly make them blush.",
 ];
 
-// Load custom prompts safely
-function loadCustomPrompts() {
+const CUSTOM_KEY = "RBZ:flirtydice:prompts";
+
+function rollDie() {
+  return 1 + Math.floor(Math.random() * 6);
+}
+
+function safeLoadCustom() {
+  if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem("RBZ:dicegame:customPrompts");
+    const raw = localStorage.getItem(CUSTOM_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
   } catch {
     return [];
   }
 }
 
-export default function FlirtyDiceGame({ open, onClose, partnerName }) {
+function safeSaveCustom(arr) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(CUSTOM_KEY, JSON.stringify(arr));
+  } catch {}
+}
+
+export default function FlirtyDiceGame({
+  open,
+  onClose,
+  partnerName,
+  socket,
+  roomId,
+  myId,
+  peerId,
+}) {
   const [dice, setDice] = useState({ a: null, b: null });
   const [prompt, setPrompt] = useState("");
-  const [customPrompts, setCustomPrompts] = useState(loadCustomPrompts());
+  const [customPrompts, setCustomPrompts] = useState(() => safeLoadCustom());
   const [newPrompt, setNewPrompt] = useState("");
 
   if (!open) return null;
 
   const displayName = partnerName || "your match";
 
-  const saveCustom = (list) => {
-    setCustomPrompts(list);
-    try {
-      localStorage.setItem("RBZ:dicegame:customPrompts", JSON.stringify(list));
-    } catch {}
+  const personalize = (raw) => {
+    if (!raw) return "";
+    if (displayName === "your match") return raw;
+    // Only lightly personalize 'me' references
+    return raw.replace(/me\b/gi, displayName);
   };
 
-  const allPrompts = [...DEFAULT_PROMPTS, ...customPrompts];
+  const allPrompts = [...BUILTIN_PROMPTS, ...customPrompts];
+
+  const applyState = (state) => {
+    if (!state) return;
+    setDice({ a: state.a ?? null, b: state.b ?? null });
+    setPrompt(state.prompt || "");
+  };
+
+  const broadcastState = (state) => {
+    applyState(state);
+    if (socket && roomId) {
+      socket.emit("rbz:game:dice:state", { roomId, state: { ...state, from: myId, at: Date.now() } });
+    }
+  };
 
   const doRoll = () => {
-    const a = 1 + Math.floor(Math.random() * 6);
-    const b = 1 + Math.floor(Math.random() * 6);
-
-    const index = (a + b - 2) % allPrompts.length;
-
-    let text = allPrompts[index];
-
-    // Personalize
-    if (displayName !== "your match") {
-      text = text.replace(/\bme\b/gi, displayName);
+    if (!allPrompts.length) {
+      broadcastState({
+        a: null,
+        b: null,
+        prompt: "No prompts available. Add one below to get started.",
+      });
+      return;
     }
 
-    setDice({ a, b });
-    setPrompt(text);
+    const a = rollDie();
+    const b = rollDie();
+    // map dice sum to prompt index
+    const index = (a + b - 2) % allPrompts.length;
+    const raw = allPrompts[index];
+    const text = personalize(raw);
+
+    broadcastState({ a, b, prompt: text });
   };
 
-  const handleAddPrompt = () => {
-    const trimmed = newPrompt.trim();
-    if (!trimmed) return;
+  // Listen for partner's dice results
+  useEffect(() => {
+    if (!socket || !roomId) return;
 
-    const next = [...customPrompts, trimmed];
-    saveCustom(next);
+    const handler = ({ roomId: rid, state }) => {
+      if (!state) return;
+      if (rid && rid !== roomId) return;
+      applyState(state);
+    };
+
+    socket.on("rbz:game:dice:state", handler);
+    return () => {
+      socket.off("rbz:game:dice:state", handler);
+    };
+  }, [socket, roomId]);
+
+  const addPrompt = () => {
+    const text = newPrompt.trim();
+    if (!text) return;
+    setCustomPrompts((prev) => {
+      const next = [...prev, text];
+      safeSaveCustom(next);
+      return next;
+    });
     setNewPrompt("");
   };
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-slate-900 text-white w-full max-w-md rounded-2xl p-6 border border-slate-700 mx-4 max-h-[92vh] flex flex-col">
-
-        {/* Header */}
+      <div className="bg-slate-900 text-white w-full max-w-md rounded-2xl p-6 border border-slate-700 mx-4 max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">🎲 Connection Dice</h2>
+          <div>
+            <h2 className="text-lg font-semibold">🎲 Connection Dice</h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Roll for a shared prompt for you and {displayName}.
+            </p>
+          </div>
           <button
             onClick={onClose}
             className="p-2 rounded-full hover:bg-slate-800"
@@ -114,18 +156,21 @@ export default function FlirtyDiceGame({ open, onClose, partnerName }) {
           </button>
         </div>
 
-        <p className="text-sm text-slate-400 mt-2">
-          Roll the dice for a meaningful or flirty moment with {displayName}.
-        </p>
-
-        {/* Dice Display */}
-        <div className="mt-6 flex items-center justify-center gap-4 text-3xl">
-          <div className="h-12 w-12 rounded-xl bg-slate-800 border border-slate-700 grid place-items-center">
-            {dice.a ?? "–"}
+        {/* Dice display */}
+        <div className="mt-6 flex flex-col items-center gap-4">
+          <div className="flex items-center justify-center gap-4 text-3xl">
+            <div className="h-12 w-12 rounded-xl bg-slate-800 border border-slate-700 grid place-items-center">
+              {dice.a ?? "–"}
+            </div>
+            <div className="h-12 w-12 rounded-xl bg-slate-800 border border-slate-700 grid place-items-center">
+              {dice.b ?? "–"}
+            </div>
           </div>
-          <div className="h-12 w-12 rounded-xl bg-slate-800 border border-slate-700 grid place-items-center">
-            {dice.b ?? "–"}
-          </div>
+          {socket && roomId && (
+            <div className="text-[10px] text-slate-500">
+              Dice + prompt are synced for both of you.
+            </div>
+          )}
         </div>
 
         {/* Prompt */}
@@ -135,35 +180,34 @@ export default function FlirtyDiceGame({ open, onClose, partnerName }) {
               {prompt}
             </p>
           ) : (
-            <p className="text-slate-400 text-sm">Tap “Roll Dice” to begin.</p>
+            <p className="text-slate-400 text-sm">
+              Tap “Roll Dice” to start.
+            </p>
           )}
         </div>
 
-        {/* Custom Prompt Editor */}
-        <div className="mt-4 p-3 rounded-xl bg-slate-900/60 border border-slate-700">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-slate-400">
-              ✨ Add your own prompts
+        {/* Add custom prompt */}
+        <div className="mt-4 rounded-2xl bg-slate-800/70 border border-slate-700 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-300">
+              Add your own prompt
             </span>
-            <span className="text-[11px] text-slate-500">
-              {customPrompts.length} saved
+            <span className="text-[10px] text-slate-500">
+              Saved on this device
             </span>
           </div>
-
-          <textarea
-            rows={2}
-            className="w-full text-xs rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-slate-100 placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-rose-500/70"
-            placeholder="Write a custom prompt…"
-            value={newPrompt}
-            onChange={(e) => setNewPrompt(e.target.value)}
-          />
-
-          <div className="mt-2 flex justify-end">
+          <div className="flex gap-2">
+            <input
+              className="flex-1 text-xs bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-rose-500"
+              placeholder="Write a new flirty / deep prompt…"
+              value={newPrompt}
+              onChange={(e) => setNewPrompt(e.target.value)}
+            />
             <button
-              onClick={handleAddPrompt}
-              className="px-3 py-1.5 rounded-full bg-rose-500 hover:bg-rose-600 text-white text-xs font-medium shadow"
+              onClick={addPrompt}
+              className="px-3 py-2 text-xs rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-medium"
             >
-              ➕ Add Prompt
+              Add
             </button>
           </div>
         </div>

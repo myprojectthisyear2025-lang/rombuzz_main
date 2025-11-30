@@ -24,14 +24,8 @@ import { FaMapMarkerAlt } from "react-icons/fa";
 import SnapCameraSheet from "../components/SnapCameraSheet";
 import { FullscreenViewer } from "../components/FullscreenViewer";
 import { API_BASE } from "../config";
-import CouplesTruthDareGame from "../components/CouplesTruthDareGame";
 import GameHub from "../components/GameHub";
-import FlirtyDiceGame from "../components/FlirtyDiceGame";
-import WouldYouRatherGame from "../components/WouldYouRatherGame";
-import SpinTheBottleGame from "../components/SpinTheBottleGame";
-import StoryBuilderGame from "../components/StoryBuilderGame";
-import MemoryCardGame from "../components/MemoryCardGame";
-
+import GamesManager from "../components/GamesManager";
 
 //const API_BASE = "http://localhost:4000";
 //const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com";
@@ -2348,66 +2342,29 @@ onClose?.();
   We pass socket + roomId + myId + peerId into each game so
   they can sync via the "game:*" socket events we just added.
 */}
-<CouplesTruthDareGame
-  open={gameOpen}
-  onClose={() => setGameOpen(false)}
+<GamesManager
+  states={{
+    gameOpen,
+    diceOpen,
+    wyrOpen,
+    bottleOpen,
+    storyOpen,
+    memoryOpen,
+  }}
+  setters={{
+    setGameOpen,
+    setDiceOpen,
+    setWyrOpen,
+    setBottleOpen,
+    setStoryOpen,
+    setMemoryOpen,
+  }}
   partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
   socket={socket}
   roomId={roomId}
   myId={myId}
   peerId={peerId}
 />
-
-<FlirtyDiceGame
-  open={diceOpen}
-  onClose={() => setDiceOpen(false)}
-  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
-  socket={socket}
-  roomId={roomId}
-  myId={myId}
-  peerId={peerId}
-/>
-
-<WouldYouRatherGame
-  open={wyrOpen}
-  onClose={() => setWyrOpen(false)}
-  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
-  socket={socket}
-  roomId={roomId}
-  myId={myId}
-  peerId={peerId}
-/>
-
-<SpinTheBottleGame
-  open={bottleOpen}
-  onClose={() => setBottleOpen(false)}
-  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
-  socket={socket}
-  roomId={roomId}
-  myId={myId}
-  peerId={peerId}
-/>
-
-<StoryBuilderGame
-  open={storyOpen}
-  onClose={() => setStoryOpen(false)}
-  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
-  socket={socket}
-  roomId={roomId}
-  myId={myId}
-  peerId={peerId}
-/>
-
-<MemoryCardGame
-  open={memoryOpen}
-  onClose={() => setMemoryOpen(false)}
-  partnerName={[peer.firstName, peer.lastName].filter(Boolean).join(" ")}
-  socket={socket}
-  roomId={roomId}
-  myId={myId}
-  peerId={peerId}
-/>
-
 
     </main>
   );
