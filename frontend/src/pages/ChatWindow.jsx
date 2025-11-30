@@ -386,14 +386,14 @@ const incomingToneRef = useRef(null); // ringtone for the receiver
     return () => (mounted = false);
   }, [roomId, token]);
 
-  // ============= socket listeners =============
- useEffect(() => {
+// ============= socket listeners =============
+useEffect(() => {
   if (!socket || !roomId || !peerId) return;
 
   // ✅ join room for messages
   socket.emit("joinRoom", roomId);
 
-    // ✅ fetch initial online/offline snapshot once
+  // ✅ fetch initial online/offline snapshot once
   fetch(`${API_BASE}/presence/${peerId}`)
     .then((r) => r.json())
     .then((d) => setPeerOnline(!!d.online))
@@ -403,13 +403,9 @@ const incomingToneRef = useRef(null); // ringtone for the receiver
   const onMsg = (raw) => {
     const msg = maybeDecode(raw);
 
-    // If this message is from the person we are currently chatting with,
-    // clear unread for this peer and update navbar badge.
     if (msg.fromId === peerId || msg.from === peerId) {
       try {
-        let map = JSON.parse(
-          localStorage.getItem("RBZ:unread:map") || "{}"
-        );
+        let map = JSON.parse(localStorage.getItem("RBZ:unread:map") || "{}");
         map[peerId] = 0;
         localStorage.setItem("RBZ:unread:map", JSON.stringify(map));
 
@@ -434,7 +430,6 @@ const incomingToneRef = useRef(null); // ringtone for the receiver
       typingTimeoutRef.current = setTimeout(() => setTyping(false), 2000);
     }
   };
-
 
   const onEdit = ({ msgId, text }) => {
     setMessages((prev) =>
@@ -481,6 +476,23 @@ const incomingToneRef = useRef(null); // ringtone for the receiver
     if (userId === peerId) setPeerOnline(false);
   };
 
+  // 🆕 Final meet confirmation → drop system message into chat
+  const onMeetFinal = ({ from, place }) => {
+    if (!place?.name) return;
+    const sysMsg = {
+      id: crypto.randomUUID(),
+      roomId,
+      from: "system",
+      to: myId,
+      time: new Date().toISOString(),
+      system: true,
+      kind: "meet-confirm",
+      text: `You both agreed to meet at ${place.name} ❤️`,
+      place,
+    };
+    setMessages((prev) => [...prev, sysMsg]);
+  };
+
   socket.on("message", onMsg);
   socket.on("chat:message", onMsg);
   socket.on("typing", onTyping);
@@ -490,6 +502,7 @@ const incomingToneRef = useRef(null); // ringtone for the receiver
   socket.on("message:seen", onSeen);
   socket.on("presence:online", onOnline);
   socket.on("presence:offline", onOffline);
+
   // ✅ Delivery confirmation listener
   const onDelivered = (ack) => {
     setMessages((prev) =>
@@ -501,11 +514,15 @@ const incomingToneRef = useRef(null); // ringtone for the receiver
     );
   };
   socket.on("message:delivered", onDelivered);
+
   // ✅ Remove messages in real time when deleted (ephemeral "view once")
   const onRemoved = ({ id }) => {
     setMessages((prev) => prev.filter((m) => m.id !== id));
   };
   socket.on("message:removed", onRemoved);
+
+  // 🆕 Listen for final meet confirmation from MeetMap
+  socket.on("meet:final-confirm", onMeetFinal);
 
   return () => {
     socket.off("message", onMsg);
@@ -519,9 +536,14 @@ const incomingToneRef = useRef(null); // ringtone for the receiver
     socket.off("presence:offline", onOffline);
     socket.off("message:delivered", onDelivered);
     socket.off("message:removed", onRemoved);
+
+    // 🆕 cleanup meet listener
+    socket.off("meet:final-confirm", onMeetFinal);
+
     socket.emit("leaveRoom", roomId);
   };
-}, [socket, roomId, peerId, onlineAlert, peer, mute]);
+}, [socket, roomId, peerId, onlineAlert, peer, mute, myId]);
+
 
   // autoscroll
   useEffect(() => {

@@ -1,7 +1,7 @@
 // src/components/MeetMap.jsx
 import React, { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from "react-leaflet";
 import { FaHeart, FaTimes, FaMapMarkerAlt } from "react-icons/fa";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -18,7 +18,76 @@ L.Icon.Default.mergeOptions({
   shadowUrl:
     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
- 
+
+
+//distance helper function
+function distanceMiles(lat1, lon1, lat2, lon2) {
+  if (
+    typeof lat1 !== "number" ||
+    typeof lon1 !== "number" ||
+    typeof lat2 !== "number" ||
+    typeof lon2 !== "number"
+  )
+    return null;
+
+  const R = 3958.8; // radius of Earth in miles
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+ // ======================================================
+// ⭐ CUSTOM ROMBUZZ MIDPOINT ICONS (animated emoji badges)
+// ======================================================
+
+const emojiMarker = (emoji, bgColor) =>
+  L.divIcon({
+    html: `
+      <div style="
+        background:${bgColor};
+        width:40px;
+        height:40px;
+        border-radius:50%;
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        color:white;
+        font-size:22px;
+        box-shadow:0 2px 6px rgba(0,0,0,0.25);
+        animation: rbzBounce 0.3s ease-out;
+      ">
+        ${emoji}
+      </div>
+    `,
+    className: "",
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+  });
+
+// 🧭 Exact midpoint
+const exactMidIcon = emojiMarker("🧭", "#3B82F6");
+
+// ⭐ Smart midpoint (RomBuzz pink)
+const smartMidIcon = emojiMarker("⭐", "#ff2d55");
+
+// Add bounce animation
+const styleEl = document.createElement("style");
+styleEl.innerHTML = `
+@keyframes rbzBounce {
+  0% { transform: scale(0.3) translateY(-10px); opacity: 0; }
+  70% { transform: scale(1.1) translateY(0); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}`;
+document.head.appendChild(styleEl);
+
 //const API_BASE = "http://localhost:4000";
 //const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com/api";
 
@@ -35,16 +104,31 @@ export default function MeetMap({ me, peer, onClose, autoStart = false }) {
   const [prompt, setPrompt] = useState(null);
   const [myLoc, setMyLoc] = useState(null);
   const [peerLoc, setPeerLoc] = useState(null);
-  const [midpoint, setMidpoint] = useState(null);
-  const [places, setPlaces] = useState([]);
-const [selected, setSelected] = useState(null);
 
-// 🆕 pending place prompt (when peer picks one)
-const [pendingPlace, setPendingPlace] = useState(null);
-const [pendingFrom, setPendingFrom] = useState(null);
+  const [midpoint, setMidpoint] = useState(null);
+  const [smartMidpoint, setSmartMidpoint] = useState(null);
+  const [places, setPlaces] = useState([]);
+  const [selected, setSelected] = useState(null);
+
+  // 🆕 pending place prompt (when peer picks one)
+  const [pendingPlace, setPendingPlace] = useState(null);
+  const [pendingFrom, setPendingFrom] = useState(null);
+
   const [loading, setLoading] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [showMap, setShowMap] = useState(false);
+
+  // 🆕 No-places & radius control
+  const [canExpand, setCanExpand] = useState(false);
+    const [radiusMiles, setRadiusMiles] = useState(2);
+  const [showNoPlacesCard, setShowNoPlacesCard] = useState(false);
+
+  // 📍 Bottom sheet open/closed
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  // 🧭 Focus point for centering (used when user picks a place)
+  const [focusCenter, setFocusCenter] = useState(null);
+
 
   const myId = me?.id || me?._id;
   const peerId = peer?.id || peer?._id;
@@ -111,15 +195,39 @@ socket.on("meet:place:selected", ({ from, place }) => {
   setPendingPlace(place);
 });
 
+          socket.on(
+        "meet:suggest",
+        ({ midpoint, smartMidpoint, places, canExpand }) => {
+          console.log(
+            "💞 meet:suggest midpoint",
+            midpoint,
+            "smartMidpoint",
+            smartMidpoint
+          );
+          setMidpoint(midpoint || null);
+          setSmartMidpoint(smartMidpoint || midpoint || null);
+          const safePlaces = Array.isArray(places) ? places : [];
+          setPlaces(safePlaces);
+          setShowMap(true);
+          setWaiting(false);
+          setLoading(false);
+          setCanExpand(!!canExpand);
+          setRadiusMiles(2);
 
-    socket.on("meet:suggest", ({ midpoint, places }) => {
-      console.log("💞 meet:suggest midpoint", midpoint);
-      setMidpoint(midpoint);
-      setPlaces(places);
-      setShowMap(true);
-      setWaiting(false);
-      setLoading(false);
-    });
+          if (!safePlaces.length && canExpand) {
+            setShowNoPlacesCard(true);
+            setSheetOpen(false);
+          } else {
+            setShowNoPlacesCard(false);
+            setSheetOpen(safePlaces.length > 0);
+          }
+
+          // Reset any previous focus
+          setFocusCenter(null);
+        }
+      );
+
+
 
    return () => {
   socket.off("meet:request");
@@ -218,14 +326,79 @@ useEffect(() => {
     resetAll();
   };
 
-  // 🔹 Choose a place
+   // 🔹 Choose a place
   const choosePlace = (p) => {
     socket.emit("meet:chosen", { from: myId, to: peerId, place: p });
     alert(`📍 You picked ${p.name}`);
     setSelected(p);
+
+    const lat = p.coords?.lat ?? p.lat;
+    const lng = p.coords?.lng ?? p.lng;
+    if (typeof lat === "number" && typeof lng === "number") {
+      setFocusCenter({ lat, lng });
+    }
   };
 
-  const center = midpoint || myLoc || { lat: 0, lng: 0 };
+
+  // User chooses to just see the exact midpoint, no more prompts
+  const handleShowMiddleOnly = () => {
+    setShowNoPlacesCard(false);
+  };
+
+  // User wants to expand search radius: 2 → 5 → 10 → 20 miles
+  const handleExpandRadius = async () => {
+    if (!myLoc || !peerLoc) {
+      console.warn("Cannot expand radius without both locations");
+      return;
+    }
+
+    let nextMiles = radiusMiles;
+    if (radiusMiles < 5) nextMiles = 5;
+    else if (radiusMiles < 10) nextMiles = 10;
+    else if (radiusMiles < 20) nextMiles = 20;
+    else {
+      // already at max radius, nothing more to do
+      setShowNoPlacesCard(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const r = await fetch(`${API_BASE}/api/meet/suggest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          a: myLoc,
+          b: peerLoc,
+          radiusMiles: nextMiles,
+        }),
+      });
+      const j = await r.json();
+           const nextPlaces = Array.isArray(j.places) ? j.places : [];
+      setPlaces(nextPlaces);
+      setRadiusMiles(nextMiles);
+      setCanExpand(!!j.canExpand);
+
+      if (!nextPlaces.length && j.canExpand) {
+        setShowNoPlacesCard(true);
+        setSheetOpen(false);
+      } else {
+        setShowNoPlacesCard(false);
+        setSheetOpen(nextPlaces.length > 0);
+      }
+
+      // We keep focusing on smart midpoint; user can choose place after
+      setFocusCenter(null);
+
+    } catch (err) {
+      console.error("❌ expand radius failed", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const center = focusCenter || smartMidpoint || midpoint || myLoc || { lat: 0, lng: 0 };
+
 
   // 🗺️ Map display
   const MapView = () => (
@@ -233,42 +406,60 @@ useEffect(() => {
     {myLoc ? (
   <>
     {/* 🆕 Banner when partner picks a place */}
-    {pendingPlace && (
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[9999] bg-white/90 text-gray-800 px-4 py-2 rounded-xl shadow-lg flex items-center gap-3">
-        <span>
-          {pendingFrom?.firstName || "Your partner"} marked{" "}
-          <b>{pendingPlace.name}</b>
+  {pendingPlace && (
+  <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[9999] w-[90%] max-w-md">
+    <div className="bg-white rounded-2xl shadow-2xl px-4 py-3 text-gray-800 border border-gray-200">
+      <div className="font-semibold text-center text-sm mb-2">
+        {pendingFrom?.firstName || "Partner"} suggested:
+        <br />
+        <span className="text-rose-500 font-bold text-base">
+          {pendingPlace.name}
         </span>
+      </div>
+
+      <div className="flex items-center justify-center gap-4 mt-2">
+        {/* Accept */}
         <button
-          className="bg-green-500 text-white px-3 py-1 rounded-lg"
+          className="px-4 py-1.5 rounded-full bg-green-500 text-white text-sm font-medium shadow hover:bg-green-600"
           onClick={() => {
             socket.emit("meet:place:accepted", {
               from: myId,
               to: peerId,
               place: pendingPlace,
             });
+
+            // Notify chat window
+            socket.emit("meet:final-confirm", {
+              from: myId,
+              to: peerId,
+              place: pendingPlace,
+            });
+
             setPendingPlace(null);
-            alert(`✅ You accepted ${pendingPlace.name}!`);
           }}
         >
           Accept
         </button>
-        <button
-            className="bg-red-500 text-white px-3 py-1 rounded-lg"
-            onClick={() => {
-              socket.emit("meet:place:rejected", {
-                from: myId,
-                to: peerId,
-                place: pendingPlace,
-              });
-              setPendingPlace(null);
-            }}
-          >
-            Reject
-          </button>
 
+        {/* Reject */}
+        <button
+          className="px-4 py-1.5 rounded-full bg-red-500 text-white text-sm font-medium shadow hover:bg-red-600"
+          onClick={() => {
+            socket.emit("meet:place:rejected", {
+              from: myId,
+              to: peerId,
+              place: pendingPlace,
+            });
+            setPendingPlace(null);
+          }}
+        >
+          Reject
+        </button>
       </div>
-    )}
+    </div>
+  </div>
+)}
+
 
     <MapContainer
       center={center || [12.9, 77.6]}
@@ -281,66 +472,219 @@ useEffect(() => {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           {/* ✅ Safely render markers only if coordinates exist */}
-{myLoc && typeof myLoc.lat === "number" && typeof myLoc.lng === "number" && (
-  <Marker position={[myLoc.lat, myLoc.lng]}>
-    <Popup>You</Popup>
-  </Marker>
-)}
+            {myLoc && typeof myLoc.lat === "number" && typeof myLoc.lng === "number" && (
+              <Marker position={[myLoc.lat, myLoc.lng]}>
+                <Popup>You</Popup>
+              </Marker>
+            )}
 
-{peerLoc && typeof peerLoc.lat === "number" && typeof peerLoc.lng === "number" && (
-  <Marker position={[peerLoc.lat, peerLoc.lng]}>
-    <Popup>{peer.firstName || "Partner"}</Popup>
-  </Marker>
-)}
+            {peerLoc && typeof peerLoc.lat === "number" && typeof peerLoc.lng === "number" && (
+              <Marker position={[peerLoc.lat, peerLoc.lng]}>
+                <Popup>{peer.firstName || "Partner"}</Popup>
+              </Marker>
+            )}
 
-{midpoint && typeof midpoint.lat === "number" && typeof midpoint.lng === "number" && (
-  <Marker position={[midpoint.lat, midpoint.lng]}>
-    <Popup>💞 Midpoint</Popup>
-  </Marker>
-)}
+            {/* ⭐ Smart Midpoint (Best meetup zone) */}
+            {smartMidpoint && typeof smartMidpoint.lat === "number" && typeof smartMidpoint.lng === "number" && (
+              <Marker
+                position={[smartMidpoint.lat, smartMidpoint.lng]}
+                icon={smartMidIcon}
+              >
+                <Popup>
+                  ⭐ <b>Best meetup zone</b>
+                </Popup>
+              </Marker>
+            )}
 
-{Array.isArray(places) &&
-  places.map((p, i) => (
-    <Marker
-      key={p.id || i}
-      position={[
-        p.coords?.lat || p.lat,
-        p.coords?.lng || p.lng,
-      ]}
-      eventHandlers={{
-        click: () => {
-          setSelected(p);
-          console.log("📍 You selected place:", p.name);
-          socket.emit("meet:chosen", {
-            from: myId,
-            to: peerId,
-            place: p,
-          });
-        },
-      }}
-    >
-      <Popup>
-        <b>{p.name}</b>
-        <br />
-        {p.category}
-        <br />
-        {p.address}
-        <br />
-        <button
-          className="mt-1 bg-rose-500 text-white px-3 py-1 rounded-lg"
-          onClick={() => choosePlace(p)}
-        >
-          Meet here ❤️
-        </button>
-      </Popup>
-    </Marker>
-  ))}
+            {/* 🧭 Exact Midpoint */}
+            {midpoint && typeof midpoint.lat === "number" && typeof midpoint.lng === "number" && (
+              <Marker
+                position={[midpoint.lat, midpoint.lng]}
+                icon={exactMidIcon}
+              >
+                <Popup>
+                  🧭 <b>Exact midpoint</b>
+                </Popup>
+              </Marker>
+            )}
+
+            {/* 🎯 Soft pink radius circle around smart midpoint */}
+            {smartMidpoint && radiusMiles && (
+              <Circle
+                center={[smartMidpoint.lat, smartMidpoint.lng]}
+                radius={radiusMiles * 1609.34}
+                pathOptions={{
+                  color: "#ff2d55",
+                  fillColor: "#ff2d55",
+                  fillOpacity: 0.18,
+                  weight: 1.5,
+                }}
+              />
+            )}
 
 
+            {Array.isArray(places) &&
+              places.map((p, i) => (
+                <Marker
+                  key={p.id || i}
+                  position={[
+                    p.coords?.lat || p.lat,
+                    p.coords?.lng || p.lng,
+                  ]}
+                  eventHandlers={{
+                    click: () => {
+                      setSelected(p);
+                      console.log("📍 You selected place:", p.name);
+                      socket.emit("meet:chosen", {
+                        from: myId,
+                        to: peerId,
+                        place: p,
+                      });
+                    },
+                  }}
+                >
+                  <Popup>
+                    <b>{p.name}</b>
+                    <br />
+                    {p.category}
+                    <br />
+                    {p.address}
+                    <br />
+                    <button
+                      className="mt-1 bg-rose-500 text-white px-3 py-1 rounded-lg"
+                      onClick={() => choosePlace(p)}
+                    >
+                    📍 Meet here
+                    </button>
+                  </Popup>
+                </Marker>
+              ))}
+                  </MapContainer>
 
-        </MapContainer>
+{/* 📍 Bottom sheet with suggested places */}
+    {Array.isArray(places) && places.length > 0 && (
+      <motion.div
+        initial={false}
+        animate={{ y: sheetOpen ? 0 : 220 }}
+        transition={{ type: "spring", stiffness: 260, damping: 32 }}
+className="absolute left-0 right-0 bottom-0 z-[60]"
+      >
+        <div className="mx-3 mb-3 rounded-3xl bg-white/95 shadow-2xl border border-gray-100 overflow-hidden">
+          {/* Drag handle + title bar */}
+          <button
+            type="button"
+            onClick={() => setSheetOpen((v) => !v)}
+            className="w-full px-4 pt-3 pb-2 flex flex-col items-center justify-center gap-1"
+          >
+            <div className="w-10 h-1.5 rounded-full bg-gray-300" />
+            <div className="text-xs font-medium text-gray-600">
+              {places.length} meetup spot{places.length > 1 ? "s" : ""} near the halfway point
+            </div>
+          </button>
+
+          {/* List of places */}
+          <div className="max-h-64 overflow-y-auto px-3 pb-3 space-y-3">
+            {places.map((p, idx) => {
+              const lat = p.coords?.lat ?? p.lat;
+              const lng = p.coords?.lng ?? p.lng;
+              const baseRef = smartMidpoint || midpoint || myLoc;
+              const dist =
+                baseRef && typeof lat === "number" && typeof lng === "number"
+                  ? distanceMiles(baseRef.lat, baseRef.lng, lat, lng)
+                  : null;
+              const prettyDist =
+                typeof dist === "number" ? `${dist.toFixed(1)} miles away` : "";
+
+              const category =
+                p.category ||
+                p.tags?.amenity ||
+                p.tags?.leisure ||
+                "Place";
+
+              return (
+                <div
+                  key={p.id || idx}
+                  className="flex gap-3 p-2 rounded-2xl border border-gray-100 bg-white hover:bg-rose-50/40 transition-colors"
+                >
+                  {/* Left: avatar / placeholder */}
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-400 to-amber-400 flex items-center justify-center text-white text-lg font-semibold shrink-0">
+                    {(p.name && p.name[0]) || "🏠"}
+                  </div>
+
+                  {/* Middle: text info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm text-gray-900 truncate">
+                      {p.name || "Unknown place"}
+                    </div>
+                    <div className="text-xs text-gray-600 truncate">
+                      {category}
+                      {prettyDist && ` · ${prettyDist}`}
+                    </div>
+                    {p.address && (
+                      <div className="text-[11px] text-gray-500 truncate mt-0.5">
+                        {p.address}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right: Meet button */}
+                  <div className="flex items-center">
+                    <button
+                      type="button"
+                      onClick={() => choosePlace(p)}
+                      className="px-3 py-1.5 rounded-full bg-rose-500 text-white text-xs font-semibold hover:bg-rose-600"
+                    >
+                      📍 Meet here
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </motion.div>
+    )}
+
+          {/* 😕 No places found near midpoint → ask what to do */}
+          {showNoPlacesCard && (
+            <div className="absolute inset-0 z-40 flex items-center justify-center">
+              <div className="bg-white rounded-2xl shadow-2xl p-5 w-[90%] max-w-sm text-center space-y-4">
+                <div className="text-lg font-semibold">
+                  No meetup spots found nearby
+                </div>
+                <p className="text-sm text-gray-600">
+                  We couldn&apos;t find cafés, restaurants or parks close to your halfway
+                  point. What would you like to do?
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    type="button"
+                    onClick={handleShowMiddleOnly}
+                    className="w-full px-4 py-2 rounded-full border border-gray-200 text-gray-800 text-sm font-medium hover:bg-gray-50"
+                  >
+                    Show exact middle point
+                  </button>
+                  {canExpand && (
+                    <button
+                      type="button"
+                      onClick={handleExpandRadius}
+                      className="w-full px-4 py-2 rounded-full bg-rose-500 text-white text-sm font-semibold hover:bg-rose-600 disabled:opacity-70"
+                      disabled={loading}
+                    >
+                      {loading
+                        ? "Expanding search…"
+                        : `Expand radius (${
+                            radiusMiles < 5 ? "5" : radiusMiles < 10 ? "10" : "20"
+                          } miles)`}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </>
       ) : (
+
         <div className="grid place-items-center text-gray-500 h-full">
           Getting your location…
         </div>
