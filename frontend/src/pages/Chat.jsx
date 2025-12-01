@@ -67,7 +67,7 @@ const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 };
 
-// 🔁 MOVE CHAT TO TOP (Messenger-style)
+// 🔁 MOVE CHAT TO TOP (Messenger-style) + persist ordering per user
 const reorderMatches = (list, peerId) => {
   if (!Array.isArray(list) || !list.length) return list;
 
@@ -81,7 +81,59 @@ const reorderMatches = (list, peerId) => {
   const [item] = copy.splice(idx, 1);
   item._lastActive = Date.now();
   copy.unshift(item);
+
+  // 🧠 Persist the new order in localStorage per user
+  try {
+    const rawUser =
+      localStorage.getItem("user") || sessionStorage.getItem("user");
+    const u = rawUser ? JSON.parse(rawUser) : null;
+    const uid = u?.id || u?._id;
+    if (uid) {
+      const key = `RBZ:chat:order:${uid}`;
+      const orderIds = copy.map((m) => String(m.id || m._id));
+      localStorage.setItem(key, JSON.stringify(orderIds));
+    }
+  } catch {
+    // fail silently – never break chat
+  }
+
   return copy;
+};
+
+// 🧩 Apply stored ordering (Messenger-style) if available
+const applyStoredOrder = (list, currentUserId) => {
+  if (!Array.isArray(list) || !list.length || !currentUserId) return list;
+
+  let saved = [];
+  try {
+    const raw = localStorage.getItem(`RBZ:chat:order:${currentUserId}`);
+    saved = raw ? JSON.parse(raw) : [];
+  } catch {
+    saved = [];
+  }
+  if (!Array.isArray(saved) || !saved.length) return list;
+
+  const indexMap = new Map(
+    saved.map((id, idx) => [String(id), idx])
+  );
+
+  const withIdx = list.map((m) => {
+    const id = String(m.id || m._id);
+    const idx = indexMap.has(id)
+      ? indexMap.get(id)
+      : Number.POSITIVE_INFINITY;
+    return { ...m, _orderIdx: idx };
+  });
+
+  // Sort by saved order first; fall back to most recent message time
+  withIdx.sort((a, b) => {
+    if (a._orderIdx !== b._orderIdx) {
+      return a._orderIdx - b._orderIdx;
+    }
+    return (b._sortTime || 0) - (a._sortTime || 0);
+  });
+
+  return withIdx.map(({ _orderIdx, ...rest }) => rest);
 };
 
 
@@ -173,41 +225,45 @@ export default function Chat() {
     if (!user) return;
     const token =
       localStorage.getItem("token") || sessionStorage.getItem("token");
-   fetch(`${API_BASE}/matches`, {
-  headers: { Authorization: `Bearer ${token}` },
-})
 
-      .then((r) => r.json())
-     .then((data) => {
-  let list = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.matches)
-    ? data.matches
-    : [];
-
-  // 🆕 Sort by most recent message (Facebook Messenger style)
-  list = list
-    .map((m) => {
-      const ts =
-        m.lastMessageTime ||
-        m.lastMessage?.time ||
-        m.lastMessage?.createdAt ||
-        m.updatedAt ||
-        m.createdAt ||
-        0;
-      return { ...m, _sortTime: new Date(ts).getTime() || 0 };
+    fetch(`${API_BASE}/matches`, {
+      headers: { Authorization: `Bearer ${token}` },
     })
-    .sort((a, b) => b._sortTime - a._sortTime);
+      .then((r) => r.json())
+      .then((data) => {
+        let list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.matches)
+          ? data.matches
+          : [];
 
-  setMatches(list);
-  setFiltered(list);
-})
+        // 🆕 Sort by most recent message (Facebook Messenger style)
+        list = list
+          .map((m) => {
+            const ts =
+              m.lastMessageTime ||
+              m.lastMessage?.time ||
+              m.lastMessage?.createdAt ||
+              m.updatedAt ||
+              m.createdAt ||
+              0;
+            return { ...m, _sortTime: new Date(ts).getTime() || 0 };
+          })
+          .sort((a, b) => b._sortTime - a._sortTime);
 
+        // 🧠 Apply any stored per-user ordering (Messenger-style)
+        const currentUserId = String(user?.id || user?._id || "");
+        list = applyStoredOrder(list, currentUserId);
+
+        setMatches(list);
+        setFiltered(list);
+      })
       .catch(() => {
         setMatches([]);
         setFiltered([]);
       });
   }, [user]);
+
 
 
  // ✅ if a target is specified in the URL, auto-select that match (string-safe)
