@@ -129,6 +129,34 @@ export default function MeetMap({ me, peer, onClose, autoStart = false }) {
   // 🧭 Focus point for centering (used when user picks a place)
   const [focusCenter, setFocusCenter] = useState(null);
 
+    // 🔁 When BOTH myLoc and peerLoc exist → compute midpoint, fetch places, show map
+  useEffect(() => {
+    if (
+      myLoc &&
+      peerLoc &&
+      typeof myLoc.lat === "number" &&
+      typeof myLoc.lng === "number" &&
+      typeof peerLoc.lat === "number" &&
+      typeof peerLoc.lng === "number"
+    ) {
+      const mid = {
+        lat: (myLoc.lat + peerLoc.lat) / 2,
+        lng: (myLoc.lng + peerLoc.lng) / 2,
+      };
+
+      console.log("📍 FINAL midpoint (from both coords):", mid);
+      setMidpoint(mid);
+
+      // Use your existing suggestion endpoint
+      fetchSuggestions(myLoc, peerLoc);
+
+      // Make sure both sides actually see the map and stop "waiting"
+      setShowMap(true);
+      setWaiting(false);
+      setShowNoPlacesCard(false);
+    }
+  }, [myLoc, peerLoc, fetchSuggestions]);
+
 
 
   const myId = me?.id || me?._id;
@@ -316,13 +344,20 @@ if (window.navigator.userAgent.includes("Edg")) {
   );
 };
 
-  // 🔹 Initiate meet request
+    // 🔹 Initiate meet request
   const startMeet = () => {
     getMyLocation((loc) => {
-      socket.emit("meet:request", { from: myId, to: peerId });
-      setWaiting(true);
+      // We already have myLoc at this point
+      setShowMap(true);        // show map immediately on initiator side
+      setWaiting(true);        // still waiting for partner to share
+
+      socket.emit("meet:request", {
+        from: myId,
+        to: peerId,
+      });
     });
   };
+
 // Auto-start when used as overlay
 useEffect(() => {
   if (autoStart) {
@@ -334,13 +369,16 @@ useEffect(() => {
 }, [autoStart]);
 
   // 🔹 Accept prompt (receiver shares location)
-  const acceptMeet = () => {
+   const acceptMeet = () => {
     getMyLocation((loc) => {
       socket.emit("meet:accept", { from: myId, to: peerId, coords: loc });
+
       setPrompt(null);
-      setWaiting(true);
+      setShowMap(true);   // open map for receiver too
+      setWaiting(true);   // short "waiting" until other coord arrives / effect runs
     });
   };
+
 
   // 🔹 Decline meet
   const declineMeet = () => {
