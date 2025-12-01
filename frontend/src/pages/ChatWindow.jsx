@@ -1721,7 +1721,24 @@ onClose?.();
                       m.kind === "meet" ? (
                         <button
                           type="button"
-                          onClick={() => setMeetOpen(true)}
+                            onClick={() => {
+                              if (!navigator.geolocation) return alert("Location access required");
+
+                              navigator.geolocation.getCurrentPosition((pos) => {
+                                  const coords = {
+                                    lat: pos.coords.latitude,
+                                    lng: pos.coords.longitude
+                                  };
+
+                                  socket.emit("meet:accept", {
+                                    from: myId,
+                                    to: peerId,
+                                    coords
+                                  });
+
+                                  setMeetOpen(true);
+                              });
+                            }}
                           className="block text-left"
                         >
                           <div className="flex items-center gap-2 font-semibold">

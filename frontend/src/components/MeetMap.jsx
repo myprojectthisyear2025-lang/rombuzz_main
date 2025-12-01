@@ -217,11 +217,7 @@ if (window.navigator.userAgent.includes("Edg")) {
   setPeerLoc(coords);
   setWaiting(false);
 
-  // STEP 2 — ensure I have MY location
-  if (!myLoc) {
-    getMyLocation(() => {});
-    return;
-  }
+  
 
   // STEP 3 — if BOTH locations exist → compute midpoint
   if (myLoc && coords) {
