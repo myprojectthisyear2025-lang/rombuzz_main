@@ -257,6 +257,25 @@ export default function Chat() {
 
         setMatches(list);
         setFiltered(list);
+        // 🔥 Fetch online/offline snapshot for ALL matches on load
+          Promise.all(
+            list.map((m) => {
+              const id = m.id || m._id;
+              return fetch(`${API_BASE}/presence/${id}`)
+                .then((r) => r.json())
+                .then((d) => ({ id, online: !!d.online }))
+                .catch(() => ({ id, online: false }));
+            })
+          ).then((states) => {
+            setOnlineMap((prev) => {
+              const out = { ...prev };
+              states.forEach((s) => {
+                out[s.id] = s.online;
+              });
+              return out;
+            });
+          });
+
       })
       .catch(() => {
         setMatches([]);
