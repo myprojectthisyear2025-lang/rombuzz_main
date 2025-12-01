@@ -12,6 +12,11 @@ import { API_BASE } from "../config";
 const UNREAD_MAP_KEY = "RBZ:unread:map";
 const UNREAD_TOTAL_KEY = "RBZ:unread:total";
 
+const CHAT_MUTE_KEY = "RBZ:chat:mute";
+const CHAT_ALERT_KEY = "RBZ:chat:alert";
+const CHAT_TONE_KEY = "RBZ:chat:ringtone";
+
+
 /* ---------------------------
    Local helpers / global keys
 ----------------------------*/
@@ -206,6 +211,21 @@ export default function Chat() {
     // Restore unread map from storage (set by Navbar while user is off the chat page)
   const [unread, setUnread] = useState(() => getLS(UNREAD_MAP_KEY, {}));
 
+  // per-chat settings
+  const [mutedPeers, setMutedPeers] = useState(() => getLS(CHAT_MUTE_KEY, {}));
+  const [alertPeers, setAlertPeers] = useState(() => getLS(CHAT_ALERT_KEY, {}));
+  const [tonePeers, setTonePeers] = useState(() => getLS(CHAT_TONE_KEY, {}));
+
+  // context menu / long-press
+  const [menuPeer, setMenuPeer] = useState(null);
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const [showSheet, setShowSheet] = useState(false);
+  const menuRef = useRef(null);
+  const longPressTimerRef = useRef(null);
+  const longPressFiredRef = useRef(false);
+
+  // When the user opens the Chat page, treat everything as read immediately.
+
   // When the user opens the Chat page, treat everything as read immediately.
   // This clears the navbar Chat badge and wipes the per-peer unread map.
   useEffect(() => {
@@ -312,8 +332,30 @@ useEffect(() => {
     };
     s.on("connect", onConnect);
 
-    const onOnline = ({ userId }) =>
+        const onOnline = ({ userId }) => {
       setOnlineMap((m) => ({ ...m, [userId]: true }));
+
+      const idStr = String(userId);
+      const hasAlert = !!alertPeers[idStr];
+      const isMuted = !!mutedPeers[idStr];
+
+      if (hasAlert && !isMuted && !gset.dnd) {
+        try {
+          const toneId = tonePeers[idStr];
+          let src = DING; // default RomBuzz ding
+
+          // If you later store a custom URL for this peer, we’ll use it:
+          if (toneId && typeof toneId === "string") {
+            src = toneId;
+          }
+
+          const a = new Audio(src);
+          a.volume = Number(gset.ringVolume ?? 0.8);
+          a.play().catch(() => {});
+        } catch {}
+      }
+    };
+
     const onOffline = ({ userId }) =>
       setOnlineMap((m) => {
         const n = { ...m };
@@ -437,7 +479,17 @@ useEffect(() => {
       s.off("direct:message", handleIncoming);
       // NOTE: do NOT s.disconnect() — shared singleton
     };
-}, [user, activeMatch, gset.msgSound, gset.vibrate, gset.dnd, gset.showNavBadge]);
+}, [
+  user,
+  activeMatch,
+  gset.msgSound,
+  gset.vibrate,
+  gset.dnd,
+  gset.showNavBadge,
+  mutedPeers,
+  alertPeers,
+  tonePeers,
+]);
 
 // 🔁 When we send a message from ChatWindow, bump that peer to the top
 useEffect(() => {
@@ -452,6 +504,23 @@ useEffect(() => {
   window.addEventListener("chat:activity", onActivity);
   return () => window.removeEventListener("chat:activity", onActivity);
 }, []);
+  // close context menu / sheet when clicking outside
+  useEffect(() => {
+    const handleDown = (e) => {
+      if (!menuPeer) return;
+      if (menuRef.current && menuRef.current.contains(e.target)) return;
+      setMenuPeer(null);
+      setShowSheet(false);
+    };
+
+    document.addEventListener("mousedown", handleDown);
+    document.addEventListener("touchstart", handleDown);
+    return () => {
+      document.removeEventListener("mousedown", handleDown);
+      document.removeEventListener("touchstart", handleDown);
+    };
+  }, [menuPeer]);
+
 
   // Join all match rooms so room broadcasts reach the sidebar
   useEffect(() => {
@@ -501,10 +570,173 @@ useEffect(() => {
       navigate(`/view/${id}`);
     }
   };
+  const closeMenu = () => {
+    setMenuPeer(null);
+    setShowSheet(false);
+  };
 
+  const toggleMutePeer = (id) => {
+    if (!id) return;
+    const key = String(id);
+    setMutedPeers((prev) => {
+      const next = { ...prev };
+      if (next[key]) delete next[key];
+      else next[key] = true;
+      setLS(CHAT_MUTE_KEY, next);
+      return next;
+    });
+  };
+
+  const toggleReadPeer = (id) => {
+    if (!id) return;
+    const key = String(id);
+    setUnread((prev) => {
+      const next = { ...prev };
+      if (next[key]) {
+        // mark as READ
+        delete next[key];
+      } else {
+        // mark as UNREAD (one badge)
+        next[key] = 1;
+      }
+      setLS(UNREAD_MAP_KEY, next);
+      const total = Object.values(next).reduce((a, b) => a + b, 0);
+      localStorage.setItem(UNREAD_TOTAL_KEY, String(total));
+      window.dispatchEvent(new CustomEvent("rbz:unread", { detail: { total } }));
+      return next;
+    });
+  };
+
+  const deleteChatForPeer = (peer) => {
+    if (!peer) return;
+    const id = peer.id || peer._id;
+    const name =
+      [peer.firstName, peer.lastName].filter(Boolean).join(" ") || "this user";
+
+    if (
+      !window.confirm(
+        `Delete chat with ${name}? This will remove it from your chat list.`
+      )
+    )
+      return;
+
+    // Remove from sidebar lists
+    setMatches((prev) => prev.filter((m) => (m.id || m._id) !== id));
+    setFiltered((prev) => prev.filter((m) => (m.id || m._id) !== id));
+
+    // Clear unread for that peer
+    setUnread((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      setLS(UNREAD_MAP_KEY, next);
+      const total = Object.values(next).reduce((a, b) => a + b, 0);
+      localStorage.setItem(UNREAD_TOTAL_KEY, String(total));
+      window.dispatchEvent(new CustomEvent("rbz:unread", { detail: { total } }));
+      return next;
+    });
+
+    // Remove from stored ordering
+    try {
+      const rawUser =
+        localStorage.getItem("user") || sessionStorage.getItem("user");
+      const u = rawUser ? JSON.parse(rawUser) : null;
+      const uid = u?.id || u?._id;
+      if (uid) {
+        const keyOrder = `RBZ:chat:order:${uid}`;
+        const raw = localStorage.getItem(keyOrder);
+        if (raw) {
+          const arr = JSON.parse(raw).filter(
+            (x) => String(x) !== String(id)
+          );
+          localStorage.setItem(keyOrder, JSON.stringify(arr));
+        }
+      }
+    } catch {}
+  };
+
+  const blockPeer = (peer) => {
+    if (!peer) return;
+    const name =
+      [peer.firstName, peer.lastName].filter(Boolean).join(" ") || "this user";
+    if (
+      !window.confirm(
+        `Block ${name}? You will stop receiving messages from them. You can manage blocks from their profile.`
+      )
+    )
+      return;
+
+    // For now, just jump to their profile where your existing block UI lives.
+    openProfile(peer);
+  };
+
+  const toggleAlertToneForPeer = async (peer) => {
+    if (!peer) return;
+    const id = peer.id || peer._id;
+    const key = String(id);
+    const hasAlert = !!alertPeers[key];
+
+    if (hasAlert) {
+      // remove alert + custom tone
+      setAlertPeers((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        setLS(CHAT_ALERT_KEY, next);
+        return next;
+      });
+      setTonePeers((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        setLS(CHAT_TONE_KEY, next);
+        return next;
+      });
+      return;
+    }
+
+    // enable: ask for optional custom URL
+    const url = window.prompt(
+      "Optional: enter a custom ringtone URL (mp3) for this person.\nLeave blank to use the default RomBuzz tone."
+    );
+
+    setAlertPeers((prev) => {
+      const next = { ...prev, [key]: true };
+      setLS(CHAT_ALERT_KEY, next);
+      return next;
+    });
+
+    if (url && url.trim()) {
+      setTonePeers((prev) => {
+        const next = { ...prev, [key]: url.trim() };
+        setLS(CHAT_TONE_KEY, next);
+        return next;
+      });
+    }
+  };
+
+  const handleTouchStart = (match) => {
+    longPressFiredRef.current = false;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      setMenuPeer(match);
+      setShowSheet(true);
+    }, 600); // ~Messenger feel
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const currentPeerId = menuPeer ? String(menuPeer.id || menuPeer._id) : null;
+  const currentMuted = currentPeerId ? !!mutedPeers[currentPeerId] : false;
+  const currentAlert = currentPeerId ? !!alertPeers[currentPeerId] : false;
+  const currentUnread = currentPeerId && unread[currentPeerId] > 0;
 
   const densityPad =
     gset.density === "compact" ? "p-2" : gset.density === "comfy" ? "p-4" : "p-3";
+
   const rootBg = gset.highContrast
     ? "bg-white"
     : "bg-gradient-to-br from-rose-50 to-rose-100";
@@ -581,27 +813,37 @@ useEffect(() => {
           const count = unread[id] || 0;
 
           return (
-           <div
-              key={id}
-              onClick={() => {
-                // 🔥 Clear unread for this peer immediately
-                try {
-                  let map = JSON.parse(localStorage.getItem("RBZ:unread:map") || "{}");
-                  map[id] = 0;
-                  localStorage.setItem("RBZ:unread:map", JSON.stringify(map));
+         <div
+  key={id}
+  onClick={() => {
+    // if long-press fired, do NOT open chat
+    if (longPressFiredRef.current) {
+      longPressFiredRef.current = false;
+      return;
+    }
 
-                  const total = Object.values(map).reduce((a, b) => a + b, 0);
-                  localStorage.setItem("RBZ:unread:total", String(total));
+    // 🔥 Clear unread for this peer immediately
+    try {
+      let map = JSON.parse(localStorage.getItem("RBZ:unread:map") || "{}");
+      map[id] = 0;
+      localStorage.setItem("RBZ:unread:map", JSON.stringify(map));
 
-                  window.dispatchEvent(
-                    new CustomEvent("rbz:unread", { detail: { total } })
-                  );
-                } catch {}
+      const total = Object.values(map).reduce((a, b) => a + b, 0);
+      localStorage.setItem("RBZ:unread:total", String(total));
 
-                setActiveMatch(m);
-              }}
-              className="flex items-center gap-3 p-3 border-b hover:bg-rose-50 cursor-pointer"
-            >
+      window.dispatchEvent(
+        new CustomEvent("rbz:unread", { detail: { total } })
+      );
+    } catch {}
+
+    setActiveMatch(m);
+  }}
+  onTouchStart={() => handleTouchStart(m)}
+  onTouchEnd={handleTouchEnd}
+  onTouchMove={handleTouchEnd}
+  className="flex items-center gap-3 p-3 border-b hover:bg-rose-50 cursor-pointer"
+>
+
               <img
                 src={m.avatar || "https://i.pravatar.cc/80"}
                 alt=""
@@ -609,7 +851,15 @@ useEffect(() => {
               />
 
               <div className="flex-1 min-w-0">
-                <div className="font-semibold truncate">{name}</div>
+                <div
+                  className="font-semibold truncate text-blue-600 hover:underline"
+                  onClick={(e) => {
+                    e.stopPropagation(); // 🔥 prevents opening chat
+                    openProfile(m);      // 🔥 open profile instead
+                  }}
+                >
+                  {name}
+                </div>
                 <div className="text-xs text-gray-500 flex items-center gap-1">
                   <span
                     className={`text-lg ${
@@ -700,24 +950,46 @@ useEffect(() => {
                       alt=""
                       className="h-10 w-10 rounded-full object-cover border"
                     />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold truncate">{name}</div>
-                      <div className="text-xs text-gray-500 flex items-center gap-1">
-                        <span
-                          className={`text-lg ${
-                            online ? "text-green-500" : "text-gray-300"
-                          }`}
-                        >
-                          ●
-                        </span>
-                        {online ? "Active now" : "Offline"}
-                      </div>
-                    </div>
-                    {count > 0 && (
+                   <div className="flex-1 min-w-0">
+                  <div
+                    className="font-semibold truncate text-blue-600 hover:underline"
+                    onClick={(e) => {
+                      e.stopPropagation(); // do NOT open chat
+                      openProfile(m);      // open profile instead
+                    }}
+                  >
+                    {name}
+                  </div>
+                  <div className="text-xs text-gray-500 flex items-center gap-1">
+                    <span
+                      className={`text-lg ${
+                        online ? "text-green-500" : "text-gray-300"
+                      }`}
+                    >
+                      ●
+                    </span>
+                    {online ? "Active now" : "Offline"}
+                  </div>
+                </div>
+
+                                       {count > 0 && (
                       <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-500 text-white shrink-0">
                         {count > 99 ? "99+" : count}
                       </span>
                     )}
+
+                    <button
+                      className="ml-1 p-1 rounded-full hover:bg-rose-100 text-gray-500 shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation(); // do NOT open chat
+                        setMenuPeer(m);
+                        setShowSheet(false);
+                        setMenuPos({ x: e.clientX, y: e.clientY });
+                      }}
+                    >
+                      ⋮
+                    </button>
+
                   </div>
                 );
               })}
@@ -1025,6 +1297,136 @@ useEffect(() => {
           </div>
         </div>
       )}
+            {/* == MOBILE BOTTOM SHEET (long-press) == */}
+      {isMobile && menuPeer && (
+        <div
+          className="fixed inset-0 z-50 flex items-end bg-black/40"
+          onClick={closeMenu}
+        >
+          <div
+            ref={menuRef}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full bg-white rounded-t-2xl p-4 space-y-2 shadow-lg"
+          >
+            <div className="text-sm font-semibold text-gray-700 pb-1 border-b">
+              Chat options
+            </div>
+
+            <button
+              className="w-full text-left text-sm py-2"
+              onClick={() => {
+                toggleMutePeer(currentPeerId);
+                closeMenu();
+              }}
+            >
+              {currentMuted ? "Unmute" : "Mute"} conversation
+            </button>
+
+            <button
+              className="w-full text-left text-sm py-2"
+              onClick={() => {
+                toggleReadPeer(currentPeerId);
+                closeMenu();
+              }}
+            >
+              {currentUnread ? "Mark as read" : "Mark as unread"}
+            </button>
+
+            <button
+              className="w-full text-left text-sm py-2"
+              onClick={() => {
+                toggleAlertToneForPeer(menuPeer);
+                closeMenu();
+              }}
+            >
+              {currentAlert ? "Remove alert tone" : "Add alert tone"}
+            </button>
+
+            <button
+              className="w-full text-left text-sm py-2 text-amber-600"
+              onClick={() => {
+                blockPeer(menuPeer);
+                closeMenu();
+              }}
+            >
+              Block
+            </button>
+
+            <button
+              className="w-full text-left text-sm py-2 text-red-600"
+              onClick={() => {
+                deleteChatForPeer(menuPeer);
+                closeMenu();
+              }}
+            >
+              Delete chat
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* == DESKTOP POPOVER (⋮) == */}
+      {!isMobile && menuPeer && (
+        <div className="fixed inset-0 z-40" onClick={closeMenu}>
+          <div
+            ref={menuRef}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute bg-white shadow-lg rounded-lg py-2 text-sm"
+            style={{
+              top: Math.max(8, menuPos.y - 10),
+              left: Math.max(8, menuPos.x - 160),
+              minWidth: "180px",
+            }}
+          >
+            <button
+              className="w-full text-left px-3 py-1.5 hover:bg-rose-50"
+              onClick={() => {
+                toggleMutePeer(currentPeerId);
+                closeMenu();
+              }}
+            >
+              {currentMuted ? "Unmute" : "Mute"} conversation
+            </button>
+            <button
+              className="w-full text-left px-3 py-1.5 hover:bg-rose-50"
+              onClick={() => {
+                toggleReadPeer(currentPeerId);
+                closeMenu();
+              }}
+            >
+              {currentUnread ? "Mark as read" : "Mark as unread"}
+            </button>
+            <button
+              className="w-full text-left px-3 py-1.5 hover:bg-rose-50"
+              onClick={() => {
+                toggleAlertToneForPeer(menuPeer);
+                closeMenu();
+              }}
+            >
+              {currentAlert ? "Remove alert tone" : "Add alert tone"}
+            </button>
+            <button
+              className="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-amber-600"
+              onClick={() => {
+                blockPeer(menuPeer);
+                closeMenu();
+              }}
+            >
+              Block
+            </button>
+            <button
+              className="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-red-600"
+              onClick={() => {
+                deleteChatForPeer(menuPeer);
+                closeMenu();
+              }}
+            >
+              Delete chat
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
