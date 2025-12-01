@@ -129,33 +129,7 @@ export default function MeetMap({ me, peer, onClose, autoStart = false }) {
   // 🧭 Focus point for centering (used when user picks a place)
   const [focusCenter, setFocusCenter] = useState(null);
 
-    // 🔁 When BOTH myLoc and peerLoc exist → compute midpoint, fetch places, show map
-  useEffect(() => {
-    if (
-      myLoc &&
-      peerLoc &&
-      typeof myLoc.lat === "number" &&
-      typeof myLoc.lng === "number" &&
-      typeof peerLoc.lat === "number" &&
-      typeof peerLoc.lng === "number"
-    ) {
-      const mid = {
-        lat: (myLoc.lat + peerLoc.lat) / 2,
-        lng: (myLoc.lng + peerLoc.lng) / 2,
-      };
-
-      console.log("📍 FINAL midpoint (from both coords):", mid);
-      setMidpoint(mid);
-
-      // Use your existing suggestion endpoint
-      fetchSuggestions(myLoc, peerLoc);
-
-      // Make sure both sides actually see the map and stop "waiting"
-      setShowMap(true);
-      setWaiting(false);
-      setShowNoPlacesCard(false);
-    }
-  }, [myLoc, peerLoc, fetchSuggestions]);
+ 
 
 
 
@@ -177,6 +151,49 @@ export default function MeetMap({ me, peer, onClose, autoStart = false }) {
       setPlaces([]);
     }
   }, []);
+
+  // 🔹 Get my location
+  const getMyLocation = (cb) => {
+  setLoading(true);
+  if (!navigator.geolocation) {
+    alert("Geolocation not supported");
+    setLoading(false);
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+let loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+
+// ⚠️ TEMP: simulate distance between two users for local testing
+if (window.navigator.userAgent.includes("Edg")) {
+  // If running in Microsoft Edge, offset 0.02° (~2 km)
+  loc = { lat: loc.lat + 0.02, lng: loc.lng + 0.02 };
+}
+
+      // 🪶 Debug + Safety log
+      console.log("📍 Got my location", loc);
+
+      if (!loc.lat || !loc.lng || isNaN(loc.lat) || isNaN(loc.lng)) {
+        console.warn("⚠️ Invalid coordinates detected:", loc);
+        setLoading(false);
+        return;
+      }
+
+      setMyLoc(loc);
+      setLoading(false);
+
+      // ✅ Ensure callback is executed only when valid coords exist
+      if (typeof cb === "function") cb(loc);
+    },
+    (err) => {
+      console.error("❌ Geolocation error:", err);
+      alert("Please allow location access to continue.");
+      setLoading(false);
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+};
 
   // 🔹 Socket listeners
   useEffect(() => {
@@ -291,6 +308,34 @@ socket.on("meet:suggest", ({ midpoint, smartMidpoint, places, canExpand }) => {
 
   }, [socket, myLoc, fetchSuggestions]);
 
+     // 🔁 When BOTH myLoc and peerLoc exist → compute midpoint, fetch places, show map
+  useEffect(() => {
+    if (
+      myLoc &&
+      peerLoc &&
+      typeof myLoc.lat === "number" &&
+      typeof myLoc.lng === "number" &&
+      typeof peerLoc.lat === "number" &&
+      typeof peerLoc.lng === "number"
+    ) {
+      const mid = {
+        lat: (myLoc.lat + peerLoc.lat) / 2,
+        lng: (myLoc.lng + peerLoc.lng) / 2,
+      };
+
+      console.log("📍 FINAL midpoint (from both coords):", mid);
+      setMidpoint(mid);
+
+      // Use your existing suggestion endpoint
+      fetchSuggestions(myLoc, peerLoc);
+
+      // Make sure both sides actually see the map and stop "waiting"
+      setShowMap(true);
+      setWaiting(false);
+      setShowNoPlacesCard(false);
+    }
+  }, [myLoc, peerLoc, fetchSuggestions]);
+
   const resetAll = () => {
     setPrompt(null);
     setLoading(false);
@@ -301,48 +346,7 @@ socket.on("meet:suggest", ({ midpoint, smartMidpoint, places, canExpand }) => {
     setSelected(null);
   };
 
-  // 🔹 Get my location
-  const getMyLocation = (cb) => {
-  setLoading(true);
-  if (!navigator.geolocation) {
-    alert("Geolocation not supported");
-    setLoading(false);
-    return;
-  }
-
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-let loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-
-// ⚠️ TEMP: simulate distance between two users for local testing
-if (window.navigator.userAgent.includes("Edg")) {
-  // If running in Microsoft Edge, offset 0.02° (~2 km)
-  loc = { lat: loc.lat + 0.02, lng: loc.lng + 0.02 };
-}
-
-      // 🪶 Debug + Safety log
-      console.log("📍 Got my location", loc);
-
-      if (!loc.lat || !loc.lng || isNaN(loc.lat) || isNaN(loc.lng)) {
-        console.warn("⚠️ Invalid coordinates detected:", loc);
-        setLoading(false);
-        return;
-      }
-
-      setMyLoc(loc);
-      setLoading(false);
-
-      // ✅ Ensure callback is executed only when valid coords exist
-      if (typeof cb === "function") cb(loc);
-    },
-    (err) => {
-      console.error("❌ Geolocation error:", err);
-      alert("Please allow location access to continue.");
-      setLoading(false);
-    },
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
-};
+  
 
     // 🔹 Initiate meet request
   const startMeet = () => {
