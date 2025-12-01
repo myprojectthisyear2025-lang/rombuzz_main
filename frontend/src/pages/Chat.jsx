@@ -53,8 +53,25 @@ const GK = {
   blockUnknown: "RBZ:GLOBAL:calls:blockUnknown",
   dnd: "RBZ:GLOBAL:calls:dnd",
 };
+
 const DING = "data:audio/mp3;base64,//uQZAAAAAAAAAAAAAAAAAAAA";
+
+const ALERT_TONES = [
+  { key: "rbz-1", name: "Tone 1", url: "/alert-tones/1.wav" },
+  { key: "rbz-2", name: "Tone 2", url: "/alert-tones/2.wav" },
+  { key: "rbz-3", name: "Tone 3", url: "/alert-tones/3.wav" },
+  { key: "rbz-4", name: "Tone 4", url: "/alert-tones/4.wav" },
+  { key: "rbz-5", name: "Tone 5", url: "/alert-tones/5.wav" },
+  { key: "rbz-6", name: "Tone 6", url: "/alert-tones/6.wav" },
+  { key: "rbz-7", name: "Tone 7", url: "/alert-tones/7.wav" },
+  { key: "rbz-8", name: "Tone 8", url: "/alert-tones/8.wav" },
+  { key: "rbz-9", name: "Tone 9", url: "/alert-tones/9.wav" },
+  { key: "rbz-10", name: "Tone 10", url: "/alert-tones/10.wav" },
+];
+
 const fileToDataUrl = (file) =>
+
+
   new Promise((res, rej) => {
     const fr = new FileReader();
     fr.onload = () => res(fr.result);
@@ -216,13 +233,18 @@ export default function Chat() {
   const [alertPeers, setAlertPeers] = useState(() => getLS(CHAT_ALERT_KEY, {}));
   const [tonePeers, setTonePeers] = useState(() => getLS(CHAT_TONE_KEY, {}));
 
-  // context menu / long-press
+    // context menu / long-press
   const [menuPeer, setMenuPeer] = useState(null);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
   const [showSheet, setShowSheet] = useState(false);
   const menuRef = useRef(null);
   const longPressTimerRef = useRef(null);
   const longPressFiredRef = useRef(false);
+
+  // per-peer alert tone picker
+  const [tonePeer, setTonePeer] = useState(null);
+  const [previewAudio, setPreviewAudio] = useState(null);
+
 
   // When the user opens the Chat page, treat everything as read immediately.
 
@@ -339,21 +361,19 @@ useEffect(() => {
       const hasAlert = !!alertPeers[idStr];
       const isMuted = !!mutedPeers[idStr];
 
-      if (hasAlert && !isMuted && !gset.dnd) {
+          if (hasAlert && !isMuted && !gset.dnd) {
         try {
           const toneId = tonePeers[idStr];
-          let src = DING; // default RomBuzz ding
 
-          // If you later store a custom URL for this peer, we’ll use it:
-          if (toneId && typeof toneId === "string") {
-            src = toneId;
-          }
+          // ❗ If no tone selected for this peer, do nothing
+          if (!toneId) return;
 
-          const a = new Audio(src);
+          const a = new Audio(toneId);
           a.volume = Number(gset.ringVolume ?? 0.8);
           a.play().catch(() => {});
         } catch {}
       }
+
     };
 
     const onOffline = ({ userId }) =>
@@ -669,33 +689,29 @@ useEffect(() => {
     openProfile(peer);
   };
 
-  const toggleAlertToneForPeer = async (peer) => {
+   const disableAlertToneForPeer = (peer) => {
     if (!peer) return;
     const id = peer.id || peer._id;
     const key = String(id);
-    const hasAlert = !!alertPeers[key];
 
-    if (hasAlert) {
-      // remove alert + custom tone
-      setAlertPeers((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        setLS(CHAT_ALERT_KEY, next);
-        return next;
-      });
-      setTonePeers((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        setLS(CHAT_TONE_KEY, next);
-        return next;
-      });
-      return;
-    }
+    setAlertPeers((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      setLS(CHAT_ALERT_KEY, next);
+      return next;
+    });
+    setTonePeers((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      setLS(CHAT_TONE_KEY, next);
+      return next;
+    });
+  };
 
-    // enable: ask for optional custom URL
-    const url = window.prompt(
-      "Optional: enter a custom ringtone URL (mp3) for this person.\nLeave blank to use the default RomBuzz tone."
-    );
+  const applyAlertToneForPeer = (peer, toneValue) => {
+    if (!peer || !toneValue) return;
+    const id = peer.id || peer._id;
+    const key = String(id);
 
     setAlertPeers((prev) => {
       const next = { ...prev, [key]: true };
@@ -703,14 +719,47 @@ useEffect(() => {
       return next;
     });
 
-    if (url && url.trim()) {
-      setTonePeers((prev) => {
-        const next = { ...prev, [key]: url.trim() };
-        setLS(CHAT_TONE_KEY, next);
-        return next;
-      });
+    setTonePeers((prev) => {
+      const next = { ...prev, [key]: toneValue };
+      setLS(CHAT_TONE_KEY, next);
+      return next;
+    });
+
+    // stop preview and close picker
+    if (previewAudio) {
+      previewAudio.pause();
+      setPreviewAudio(null);
+    }
+    setTonePeer(null);
+  };
+
+  const handleToneFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !tonePeer) return;
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Pick an audio file ≤ 2MB");
+      return;
+    }
+    try {
+      const data = await fileToDataUrl(file);
+      applyAlertToneForPeer(tonePeer, data);
+    } catch {
+      alert("Could not read audio file.");
     }
   };
+
+  const playPreviewTone = (url) => {
+    try {
+      if (previewAudio) {
+        previewAudio.pause();
+      }
+      const a = new Audio(url);
+      a.volume = Number(gset.ringVolume ?? 0.8);
+      setPreviewAudio(a);
+      a.play().catch(() => {});
+    } catch {}
+  };
+
 
   const handleTouchStart = (match) => {
     longPressFiredRef.current = false;
@@ -1332,16 +1381,114 @@ useEffect(() => {
               {currentUnread ? "Mark as read" : "Mark as unread"}
             </button>
 
-            <button
-              className="w-full text-left text-sm py-2"
+                     <button
+              className="w-full text-left px-3 py-1.5 hover:bg-rose-50"
               onClick={() => {
-                toggleAlertToneForPeer(menuPeer);
-                closeMenu();
+                if (currentAlert) {
+                  disableAlertToneForPeer(menuPeer);
+                  closeMenu();
+                } else {
+                  setTonePeer(menuPeer);
+                  closeMenu();
+                }
               }}
             >
               {currentAlert ? "Remove alert tone" : "Add alert tone"}
             </button>
+            {/* other buttons... */}
+          </div>
+        </div>
+      )}
 
+      {/* == ALERT TONE PICKER (for both mobile & desktop) == */}
+      {tonePeer && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
+          onClick={() => {
+            if (previewAudio) {
+              previewAudio.pause();
+              setPreviewAudio(null);
+            }
+            setTonePeer(null);
+          }}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl shadow-xl p-4 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="font-semibold text-base">
+                Choose alert tone
+              </div>
+              <button
+                className="text-sm px-2 py-1 rounded hover:bg-gray-100"
+                onClick={() => {
+                  if (previewAudio) {
+                    previewAudio.pause();
+                    setPreviewAudio(null);
+                  }
+                  setTonePeer(null);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-xs text-gray-500">
+              This tone will play when this person comes online while you’re active on RomBuzz.
+            </div>
+
+            <div className="max-h-64 overflow-y-auto space-y-1 border rounded-lg p-2">
+              {ALERT_TONES.map((t) => (
+                <div
+                  key={t.key}
+                  className="flex items-center justify-between px-2 py-1 rounded hover:bg-rose-50 cursor-pointer"
+                  onClick={() => applyAlertToneForPeer(tonePeer, t.url)}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">🎵</span>
+                    <span className="text-sm">{t.name}</span>
+                  </div>
+                  <button
+                    className="text-xs px-2 py-1 rounded border hover:bg-rose-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playPreviewTone(t.url);
+                    }}
+                  >
+                    Preview
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-2 border-t space-y-2">
+              <div className="text-xs font-medium text-gray-600">
+                Or upload your own tone
+              </div>
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={handleToneFileUpload}
+                className="text-xs"
+              />
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                className="text-xs px-3 py-1 rounded border hover:bg-gray-50"
+                onClick={() => {
+                  if (previewAudio) {
+                    previewAudio.pause();
+                    setPreviewAudio(null);
+                  }
+                  setTonePeer(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          
             <button
               className="w-full text-left text-sm py-2 text-amber-600"
               onClick={() => {
@@ -1396,15 +1543,22 @@ useEffect(() => {
             >
               {currentUnread ? "Mark as read" : "Mark as unread"}
             </button>
-            <button
+                       <button
               className="w-full text-left px-3 py-1.5 hover:bg-rose-50"
               onClick={() => {
-                toggleAlertToneForPeer(menuPeer);
-                closeMenu();
+                if (currentAlert) {
+                  disableAlertToneForPeer(menuPeer);
+                  closeMenu();
+                } else {
+                  setTonePeer(menuPeer);
+                  closeMenu();
+                }
               }}
             >
               {currentAlert ? "Remove alert tone" : "Add alert tone"}
             </button>
+
+
             <button
               className="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-amber-600"
               onClick={() => {
