@@ -2349,15 +2349,14 @@ onClose?.();
           onUseTip={(t) => setInput((p) => (p ? `${p} ${t}` : t))}
         />
       )}
-          {/* Meet-in-the-middle fullscreen overlay */}
-        {meetOpen && (
-          <MeetMap
-            me={me}
-            peer={peer}
-            autoStart
-            onClose={() => setMeetOpen(false)}
-          />
-        )}
+            {/* Meet-in-the-middle fullscreen overlay */}
+      <MeetMap
+        me={me}
+        peer={peer}
+        autoStart={meetOpen}
+        onClose={() => setMeetOpen(false)}
+      />
+
 
       {/* tiny CSS */}
            <style>{`
