@@ -717,35 +717,23 @@ useEffect(() => {
     setReplyTo(null);
     await sendSerialized(payload);
   };
-// 📍 Send a Meet-in-the-middle card message
-const sendMeetCard = async () => {
-  const id = crypto.randomUUID();
-  const base = {
-    id,
+// 📍 Send Meet Request (triggers immediate popup to receiver)
+const sendMeetRequest = async () => {
+  console.log("📍 Sending meet request to:", peerId);
+  
+  // Send socket event for immediate popup
+  socket.emit("meet:request", {
     from: myId,
     to: peerId,
-    time: new Date().toISOString(),
-    kind: "meet",
-    label: "Meet in the middle",
-  };
-
-  // Show instantly for sender
-  setMessages((prev) => [...prev, base]);
-
-  // Encode payload
-  const payloadForWire = {
-    ...base,
-    text: encodePayload({
-      kind: "meet",
-      label: "Meet in the middle",
-    }),
-  };
-
-  await sendSerialized(payloadForWire);
-
-  // Open map overlay
+  });
+  
+  // Open map for initiator immediately
   setMeetOpen(true);
 };
+
+// Replace the meet button handler in render (around line 600):
+// Change from: onClick={sendMeetCard}
+// To: onClick={sendMeetRequest}
 
   const onPickFile = async (e) => {
     const file = e.target.files?.[0];
@@ -2349,14 +2337,15 @@ onClose?.();
           onUseTip={(t) => setInput((p) => (p ? `${p} ${t}` : t))}
         />
       )}
-            {/* Meet-in-the-middle fullscreen overlay */}
-      <MeetMap
-        me={me}
-        peer={peer}
-        autoStart={meetOpen}
-        onClose={() => setMeetOpen(false)}
-      />
-
+          {/* Meet-in-the-middle fullscreen overlay */}
+        {meetOpen && (
+          <MeetMap
+            me={me}
+            peer={peer}
+            autoStart
+            onClose={() => setMeetOpen(false)}
+          />
+        )}
 
       {/* tiny CSS */}
            <style>{`
