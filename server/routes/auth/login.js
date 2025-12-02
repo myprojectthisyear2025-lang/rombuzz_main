@@ -72,6 +72,8 @@ router.post("/google", async (req, res) => {
     });
     const payload = ticket.getPayload();
     const emailLower = String(payload.email || "").toLowerCase();
+console.log("GOOGLE EMAIL →", emailLower);
+console.log("FOUND USER? →", user ? "YES" : "NO");
 
     // 🔍 Try Mongo first
     let user = await User.findOne({ email: emailLower }).lean();
