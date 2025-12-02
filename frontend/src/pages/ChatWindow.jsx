@@ -1286,11 +1286,12 @@ const jumpToMessage = (id) => {
   {/* Midpoint meet */}
  <button
   className="p-2 rounded-full hover:bg-gray-100"
-  onClick={sendMeetCard}
+  onClick={sendMeetRequest}
   title="Meet in the Middle"
 >
   <span className="text-lg">📍</span>
 </button>
+
 
 
   {/* Header menu (nickname/theme/alerts/offline + MUTE) */}
