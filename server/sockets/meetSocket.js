@@ -59,12 +59,20 @@ function registerMeetSockets(io) {
           place?.lng ||
           null;
 
-        let text = `🎉 Meetup Confirmed:\nYou both agreed to meet at ${place?.name || "this place"}`;
+        let text = `🎉 Meetup Confirmed\nYou have decided to meet at ${
+            place?.name || "this place"
+          }`;
 
-        if (typeof lat === "number" && typeof lng === "number") {
-          const osmUrl = `https://www.openstreetmap.org/#map=18/${lat}/${lng}`;
-          text += `\n🌍 ${osmUrl}`;
-        }
+          if (place?.address) {
+            text += ` (${place.address})`;
+          }
+
+          // Use FREE Google Maps link (no API key, no cost)
+          if (typeof lat === "number" && typeof lng === "number") {
+            const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+            text += `\n📍 ${mapsUrl}`;
+          }
+
 
         const msg = {
           id: shortid.generate(),
@@ -102,6 +110,68 @@ function registerMeetSockets(io) {
         }
       } catch (err) {
         console.error("createMeetSystemMessage error:", err);
+      }
+    }
+     // Helper: when someone declines the meet request, drop a system message
+    async function createMeetDeclineMessage(fromId, toId) {
+      try {
+        const roomId = makeRoomId(fromId, toId);
+        let room = await ChatRoom.findOne({ roomId });
+
+        if (!room) {
+          room = await ChatRoom.create({
+            roomId,
+            participants: [String(fromId), String(toId)],
+            messages: [],
+          });
+        }
+
+        const user = await User.findOne(
+          { id: fromId },
+          { firstName: 1, lastName: 1 }
+        ).lean();
+
+        const name = [
+          user?.firstName || "",
+          user?.lastName || "",
+        ].join(" ").trim() || "Your match";
+
+        const text = `❌ ${name} doesn’t want to meet in the middle right now.`;
+
+        const msg = {
+          id: shortid.generate(),
+          from: String(fromId),
+          to: String(toId),
+          text,
+          type: "system",
+          time: new Date(),
+          edited: false,
+          deleted: false,
+          reactions: {},
+          hiddenFor: [],
+          ephemeral: { mode: "none" },
+        };
+
+        room.messages.push(msg);
+        await room.save();
+
+        io.to(roomId).emit("chat:message", msg);
+
+        const sid = global.onlineUsers?.[toId];
+        if (sid) {
+          io.to(sid).emit("chat:message", msg);
+          io.to(sid).emit("direct:message", {
+            id: msg.id,
+            roomId,
+            from: fromId,
+            to: toId,
+            time: msg.time,
+            preview: (msg.text || "").slice(0, 80),
+            type: msg.type || "system",
+          });
+        }
+      } catch (err) {
+        console.error("createMeetDeclineMessage error:", err);
       }
     }
 
@@ -182,8 +252,8 @@ function registerMeetSockets(io) {
       }
     });
 
-    // 📍 Step 2: Accept Meet & Share Location
-   socket.on("meet:accept", async ({ from, to, coords }) => {
+        // 📍 Step 2: Accept Meet & Share Location
+    socket.on("meet:accept", async ({ from, to, coords }) => {
       try {
         if (!from || !to || !coords) return;
 
@@ -217,37 +287,15 @@ function registerMeetSockets(io) {
           return;
         }
 
-        // 3️⃣ Both shared → Fetch midpoint & venues from backend
-        let data = {};
-        try {
-          const resp = await fetch(
-            `${process.env.API_BASE}/api/meet-suggest?otherId=${to}`
-          );
-          data = await resp.json();
-        } catch (err) {
-          console.warn("⚠️ meet-suggest fetch failed:", err);
-        }
+        // 3️⃣ Both shared → frontend will fetch suggested venues itself
+        const midpoint = {
+          lat: (me.location.lat + you.location.lat) / 2,
+          lng: (me.location.lng + you.location.lng) / 2,
+        };
 
-        const places = Array.isArray(data.places) ? data.places : [];
-
-        // Midpoint from API if available, otherwise fallback to pure average
-        const midpoint =
-          data.midpoint && typeof data.midpoint.lat === "number" && typeof data.midpoint.lng === "number"
-            ? data.midpoint
-            : {
-                lat: (me.location.lat + you.location.lat) / 2,
-                lng: (me.location.lng + you.location.lng) / 2,
-              };
-
-        // Smart midpoint (for UI - exact vs "smart" center)
-        const smartMidpoint =
-          data.smartMidpoint &&
-          typeof data.smartMidpoint.lat === "number" &&
-          typeof data.smartMidpoint.lng === "number"
-            ? data.smartMidpoint
-            : midpoint;
-
-        const canExpand = Boolean(data.canExpand);
+        const smartMidpoint = { ...midpoint };
+        const places = [];
+        const canExpand = false;
 
         // Final payload for both users
         const payload = {
@@ -269,7 +317,7 @@ function registerMeetSockets(io) {
         });
 
         console.log(
-          `📍 meet:suggest → ${me.id}, ${you.id} (places: ${places.length}, canExpand=${canExpand})`
+          `📍 meet:suggest → ${me.id}, ${you.id} (frontend will fetch venues)`
         );
       } catch (e) {
         console.error("meet:accept error", e);
@@ -277,12 +325,24 @@ function registerMeetSockets(io) {
     });
 
 
-    // 🚫 Step 3: Decline Meet Request
-    socket.on("meet:decline", ({ from, to }) => {
-      const sid = onlineUsers[to];
-      if (sid) io.to(sid).emit("meet:decline", { from: { id: from } });
-      console.log(`❌ meet:decline ${from} → ${to}`);
+
+        // 🚫 Step 3: Decline Meet Request
+    socket.on("meet:decline", async ({ from, to }) => {
+      try {
+        const sid = onlineUsers[to];
+        if (sid) {
+          io.to(sid).emit("meet:decline", { from: { id: from } });
+        }
+
+        // Drop a system message in their chat: "Katy doesn't want to meet..."
+        await createMeetDeclineMessage(from, to);
+
+        console.log(`❌ meet:decline ${from} → ${to}`);
+      } catch (err) {
+        console.error("meet:decline error", err);
+      }
     });
+
 
        // 🏠 Step 4: Confirm Chosen Place
     socket.on("meet:chosen", ({ from, to, place }) => {
