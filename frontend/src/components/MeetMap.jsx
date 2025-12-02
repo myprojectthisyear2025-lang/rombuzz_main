@@ -794,7 +794,7 @@ className="absolute left-0 right-0 bottom-0 z-[60]"
               <div className="p-6 text-center space-y-4">
                 <div className="text-2xl font-bold">💞 {prompt} wants to meet halfway!</div>
                 <p className="text-white/90 text-sm">
-                  Share your location to find a fair midpoint with suggested cafés or parks.
+                  Share your location to find a fair midpoint with suggested cafés, parks or any places where you can meet. Meet in the middle uses your live location to find the places while on app.
                 </p>
                 <motion.div
                   initial={{ scale: 0 }}

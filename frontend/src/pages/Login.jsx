@@ -54,11 +54,14 @@ const [resetMsg, setResetMsg] = useState("");
       payload = { error: text || "Server returned non-JSON response" };
     }
 
-   if (!res.ok) {
+  if (!res.ok) {
+  if (payload?.status === "no_account") {
+    return setError("No account found. Please sign up first.");
+  }
   const errorMsg = payload.error || "Invalid credentials";
-  console.log("🔴 Login failed:", { status: res.status, error: errorMsg });
   return setError(errorMsg);
 }
+
     const { token, user } = payload;
     if (!token || !user) {
       return setError("Malformed server response");
@@ -98,17 +101,23 @@ localStorage.setItem("token", token);
 localStorage.setItem("user", JSON.stringify(user));
 if (setUser) setUser(user);
 
-// ✅ Redirect based on backend status
-if (status === "incomplete_profile") {
-  console.log("🧩 New Google user → redirecting to CompleteProfile");
-  navigate("/completeprofile", { replace: true });
-} else if (status === "ok") {
-  console.log("🟢 Returning Google user → redirecting to Discover");
-  navigate("/discover", { replace: true });
-} else {
-  console.warn("⚠️ Unexpected Google auth status:", status);
-  alert("Google login returned an unknown status. Please try again.");
+if (status === "no_account") {
+  setError("No account found. Please sign up first.");
+  return;
 }
+
+if (status === "incomplete_profile") {
+  navigate("/register", { replace: true });
+  return;
+}
+
+if (status === "ok") {
+  navigate("/", { replace: true }); // Go to homepage
+  return;
+}
+
+setError("Unexpected login response. Please try again.");
+
 
   } catch (err) {
     console.error("Google login error:", err);
