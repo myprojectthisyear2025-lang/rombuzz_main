@@ -70,29 +70,33 @@ router.post("/google", async (req, res) => {
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
+
     const payload = ticket.getPayload();
     const emailLower = String(payload.email || "").toLowerCase();
-console.log("GOOGLE EMAIL →", emailLower);
-console.log("FOUND USER? →", user ? "YES" : "NO");
 
     // 🔍 Try Mongo first
     let user = await User.findOne({ email: emailLower }).lean();
-    const isNew = !user;
-// ❗ If user does NOT exist → do NOT auto-create account
-if (isNew) {
-  console.log("❌ Google login attempted with NO ACCOUNT:", emailLower);
-  return res.json({
-    status: "no_account",
-    error: "No account found. Please sign up first.",
-  });
-}
 
+    console.log("GOOGLE EMAIL →", emailLower);
+    console.log("FOUND USER? →", user ? "YES" : "NO");
 
-    const jwtToken = signToken({ id: user.id, email: user.email }, JWT_SECRET, TOKEN_EXPIRES_IN);
-    const isProfileComplete = Boolean(user.profileComplete);
+    // ❗ If user does NOT exist → return no_account
+    if (!user) {
+      console.log("❌ Google login attempted with NO ACCOUNT:", emailLower);
+      return res.json({
+        status: "no_account",
+        error: "No account found. Please sign up first.",
+      });
+    }
 
-    if (isNew || !isProfileComplete) {
-      console.log("🧩 Returning INCOMPLETE_PROFILE for:", user.email);
+    // Existing user → issue token
+    const jwtToken = signToken(
+      { id: user.id, email: user.email },
+      JWT_SECRET,
+      TOKEN_EXPIRES_IN
+    );
+
+    if (!user.profileComplete) {
       return res.json({
         status: "incomplete_profile",
         token: jwtToken,
@@ -100,17 +104,17 @@ if (isNew) {
       });
     }
 
-    console.log("🟢 Returning OK for:", user.email);
-    res.json({
+    return res.json({
       status: "ok",
       token: jwtToken,
       user: baseSanitizeUser(user),
     });
   } catch (err) {
     console.error("❌ Google login failed:", err);
-    res.status(401).json({ error: "Google login failed" });
+    return res.status(401).json({ error: "Google login failed" });
   }
 });
+
 
 console.log("✅ Auth: Login + Google routes initialized");
 module.exports = router;
