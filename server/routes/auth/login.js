@@ -14,29 +14,68 @@ const { baseSanitizeUser } = require("../../utils/helpers");
 const { googleClient } = require("../../config/config");
 const User = require("../../models/User");
 
-// =======================
-// EMAIL / PASSWORD LOGIN
-// =======================
+/* ============================================================
+   🧠 Helper: Dynamically check if profile is complete
+============================================================ */
+function computeProfileComplete(user) {
+  if (!user) return false;
+
+  const required = [
+    user.firstName,
+    user.lastName,
+    user.gender,
+    user.dob,
+    user.avatar,
+  ];
+
+  const hasPhotos =
+    Array.isArray(user.photos) && user.photos.length > 0;
+
+  const hasInterests =
+    Array.isArray(user.interests) && user.interests.length > 0;
+
+  const hasLookingFor = Boolean(user.lookingFor);
+
+  const basicFieldsOk = required.every(Boolean);
+
+  return basicFieldsOk && hasPhotos && hasInterests && hasLookingFor;
+}
+
+/* ============================================================
+   EMAIL / PASSWORD LOGIN
+============================================================ */
 router.post("/login", async (req, res) => {
   console.log("🟢 Login API hit with body:", req.body);
 
   const { email, password } = req.body;
-  if (!email || !password) {
+  if (!email || !password)
     return res.status(400).json({ error: "Email & password required" });
-  }
 
   const emailLower = String(email || "").trim().toLowerCase();
   const user = await User.findOne({ email: emailLower }).lean();
-if (!user) {
-  return res.status(401).json({
-    status: "no_account",
-    error: "No account found. Please sign up first.",
-  });
-}
+
+  if (!user) {
+    return res.status(401).json({
+      status: "no_account",
+      error: "No account found. Please sign up first.",
+    });
+  }
+
+  // 🧠 Compute profile complete
+  const isProfileComplete = computeProfileComplete(user);
+
+  // 🔧 Sync DB if needed
+  if (user.profileComplete !== isProfileComplete) {
+    await User.updateOne(
+      { id: user.id },
+      { profileComplete: isProfileComplete }
+    );
+  }
 
   console.log("DEBUG LOGIN →", {
     email: emailLower,
     hasPasswordHash: !!user.passwordHash,
+    profileComplete: isProfileComplete,
   });
 
   let match = false;
@@ -54,16 +93,23 @@ if (!user) {
     return res.status(401).json({ error: "Invalid credentials" });
   }
 
-  const token = signToken({ id: user.id, email: user.email }, JWT_SECRET, TOKEN_EXPIRES_IN);
+  const token = signToken(
+    { id: user.id, email: user.email },
+    JWT_SECRET,
+    TOKEN_EXPIRES_IN
+  );
+
   res.json({ token, user: baseSanitizeUser(user) });
 });
 
-// =======================
-// GOOGLE LOGIN / SIGNUP
-// =======================
+/* ============================================================
+   GOOGLE LOGIN
+============================================================ */
 router.post("/google", async (req, res) => {
   const { token } = req.body;
-  if (!token) return res.status(400).json({ error: "Google token required" });
+
+  if (!token)
+    return res.status(400).json({ error: "Google token required" });
 
   try {
     const ticket = await googleClient.verifyIdToken({
@@ -74,13 +120,13 @@ router.post("/google", async (req, res) => {
     const payload = ticket.getPayload();
     const emailLower = String(payload.email || "").toLowerCase();
 
-    // 🔍 Try Mongo first
+    // 🔍 Fetch user from DB
     let user = await User.findOne({ email: emailLower }).lean();
 
     console.log("GOOGLE EMAIL →", emailLower);
     console.log("FOUND USER? →", user ? "YES" : "NO");
 
-    // ❗ If user does NOT exist → return no_account
+    // ❗ No account found
     if (!user) {
       console.log("❌ Google login attempted with NO ACCOUNT:", emailLower);
       return res.json({
@@ -96,7 +142,21 @@ router.post("/google", async (req, res) => {
       TOKEN_EXPIRES_IN
     );
 
-    if (!user.profileComplete) {
+    // 🧠 Compute profile completeness
+    const isProfileComplete = computeProfileComplete(user);
+
+    // 🔧 Sync DB if needed
+    if (user.profileComplete !== isProfileComplete) {
+      await User.updateOne(
+        { id: user.id },
+        { profileComplete: isProfileComplete }
+      );
+      user.profileComplete = isProfileComplete;
+    }
+
+    // Incomplete → redirect to complete profile
+    if (!isProfileComplete) {
+      console.log("🧩 Returning INCOMPLETE_PROFILE for:", user.email);
       return res.json({
         status: "incomplete_profile",
         token: jwtToken,
@@ -104,17 +164,18 @@ router.post("/google", async (req, res) => {
       });
     }
 
+    // Complete → direct login
     return res.json({
       status: "ok",
       token: jwtToken,
       user: baseSanitizeUser(user),
     });
+
   } catch (err) {
     console.error("❌ Google login failed:", err);
     return res.status(401).json({ error: "Google login failed" });
   }
 });
-
 
 console.log("✅ Auth: Login + Google routes initialized");
 module.exports = router;
