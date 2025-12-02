@@ -27,7 +27,12 @@ router.post("/login", async (req, res) => {
 
   const emailLower = String(email || "").trim().toLowerCase();
   const user = await User.findOne({ email: emailLower }).lean();
-  if (!user) return res.status(401).json({ error: "Invalid credentials" });
+if (!user) {
+  return res.status(401).json({
+    status: "no_account",
+    error: "No account found. Please sign up first.",
+  });
+}
 
   console.log("DEBUG LOGIN →", {
     email: emailLower,
@@ -71,47 +76,15 @@ router.post("/google", async (req, res) => {
     // 🔍 Try Mongo first
     let user = await User.findOne({ email: emailLower }).lean();
     const isNew = !user;
+// ❗ If user does NOT exist → do NOT auto-create account
+if (isNew) {
+  console.log("❌ Google login attempted with NO ACCOUNT:", emailLower);
+  return res.json({
+    status: "no_account",
+    error: "No account found. Please sign up first.",
+  });
+}
 
-    // 🆕 Create if not found
-    if (isNew) {
-      const newGoogleUser = {
-        id: shortid.generate(),
-        email: emailLower,
-        firstName: payload.given_name || "",
-        lastName: payload.family_name || "",
-        avatar: payload.picture || "",
-        passwordHash: "",
-        createdAt: Date.now(),
-        profileComplete: false,
-        hasOnboarded: false,
-        bio: "",
-        dob: null,
-        gender: "",
-        location: null,
-        visibility: "active",
-        media: [],
-        posts: [],
-        interests: [],
-        hobbies: [],
-        favorites: [],
-        visibilityMode: "auto",
-        fieldVisibility: {
-          age: "public",
-          height: "public",
-          city: "public",
-          orientation: "public",
-          interests: "public",
-          hobbies: "public",
-          likes: "public",
-          dislikes: "public",
-          lookingFor: "public",
-          voiceIntro: "public",
-          photos: "matches",
-        },
-      };
-      await User.create(newGoogleUser);
-      user = newGoogleUser;
-    }
 
     const jwtToken = signToken({ id: user.id, email: user.email }, JWT_SECRET, TOKEN_EXPIRES_IN);
     const isProfileComplete = Boolean(user.profileComplete);
