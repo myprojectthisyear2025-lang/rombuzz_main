@@ -76,20 +76,10 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
     if (post.userId !== myId) {
       const user = await User.findOne({ id: myId }).lean();
       const commenterName = user?.firstName || "Someone";
-     // Detect correct link based on post.type
-let link = `/buzz/post/${postId}`;
+   // 🔥 Always send correct deep-link for comments
+// Opens ViewProfile → Scrolls to post → Auto-opens comments drawer
+const link = `/viewprofile/${post.userId}?post=${postId}`;
 
-// Avatar post
-if (post.type === "avatar") {
-  link = `/viewProfile/${post.userId}?highlight=avatar&post=${postId}`;
-}
-
-// Reel post
-if (post.type === "reel") {
-  link = `/buzz/reel/${postId}`;
-}
-
-// Fallback → normal buzz post
 const notif = {
   id: shortid.generate(),
   toId: post.userId,
@@ -102,6 +92,7 @@ const notif = {
   postId,
   postOwnerId: post.userId,
 };
+
 
      await Notification.create(notif);
 
