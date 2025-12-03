@@ -674,7 +674,11 @@ async function respondToBuzz(accepted) {
   <>
     {/* NEW — OPEN CAMERA */}
     <button
-      onClick={() => setIsCameraOpen(true)}
+onClick={async () => {
+  setIsCameraOpen(true);
+  setError("");
+  await startMicroBuzz();
+}}
       className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
     >
       <span>📸</span>
