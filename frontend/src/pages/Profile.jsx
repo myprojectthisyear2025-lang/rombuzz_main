@@ -363,9 +363,12 @@ const [openMenuForComment, setOpenMenuForComment] = useState(null); // ⬅️ ad
       if (!u) {
         const token = getToken();
         if (token) {
-          const r = await fetch(`${API_BASE}/profile/full`, { headers: { Authorization: `Bearer ${token}` } });
-          const data = await r.json();
-          u = data.user || null;
+         const r = await fetch(`${API_BASE}/users/me`, { 
+  headers: { Authorization: `Bearer ${token}` } 
+});
+const data = await r.json();
+u = data || data.user || null;
+
         }
       }
       if (u) {
