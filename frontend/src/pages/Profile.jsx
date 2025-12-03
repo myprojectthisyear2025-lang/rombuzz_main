@@ -367,7 +367,8 @@ const [openMenuForComment, setOpenMenuForComment] = useState(null); // ⬅️ ad
   headers: { Authorization: `Bearer ${token}` } 
 });
 const data = await r.json();
-u = data || data.user || null;
+u = data;   // backend returns the user directly
+
 
         }
       }
