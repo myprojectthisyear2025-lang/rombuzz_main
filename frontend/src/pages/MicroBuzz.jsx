@@ -83,6 +83,12 @@ useEffect(() => {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
    const [selfieUrl, setSelfieUrl] = useState("");
+   // NEW — controls the custom camera UI
+const [isCameraOpen, setIsCameraOpen] = useState(false);
+
+// NEW — stores the temporary selfie image before upload
+const canvasRef = useRef(null);
+
   const [coords, setCoords] = useState(null);
 
   // 🔍 Enlarged-preview target for long-press / right-click
@@ -665,25 +671,32 @@ async function respondToBuzz(accepted) {
           {/* Controls */}
           <div className="flex flex-wrap items-center gap-3 mb-8">
             {!isActive ? (
-              <>
-                <button
-                  onClick={startMicroBuzz}
-                  className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-                >
-                  <span>🚀</span>
-                 Activate Microbuzz
-                </button>
-                {!!streamRef.current && (
-                  <button
-                    onClick={takeSelfieAndActivate}
-                    className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-                  >
-                    <span>📸</span>
-                    Take Selfie & Start
-                  </button>
-                )}
-              </>
-            ) : (
+  <>
+    {/* NEW — OPEN CAMERA */}
+    <button
+      onClick={() => setIsCameraOpen(true)}
+      className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
+    >
+      <span>📸</span>
+      Open Camera
+    </button>
+
+    {/* NEW — ACTIVATE MICROBUZZ (DISABLED UNTIL SELFIE TAKEN) */}
+    <button
+      onClick={() => coords && selfieUrl && activatePresence(coords, selfieUrl) && setIsActive(true)}
+      disabled={!selfieUrl}
+      className={`px-6 py-3 rounded-xl font-semibold shadow-lg transition-all duration-200 flex items-center gap-2 ${
+        selfieUrl
+          ? "bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white hover:shadow-xl hover:scale-105"
+          : "bg-gray-600 text-white/50 cursor-not-allowed"
+      }`}
+    >
+      <span>🚀</span>
+      Activate MicroBuzz
+    </button>
+  </>
+) : (
+
               <>
                 <button
                   onClick={stopMicroBuzz}
@@ -703,23 +716,76 @@ async function respondToBuzz(accepted) {
             )}
           </div>
 
-          {/* Camera preview (only when awaiting selfie) */}
-          {!isActive && streamRef.current && (
-            <div className="mb-8">
-              <div className="rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl max-w-sm mx-auto transform hover:scale-105 transition-transform duration-300">
-                <video
-                  ref={videoRef}
-                  className="w-full h-auto bg-black"
-                  playsInline
-                  muted
-                />
-              </div>
-              <p className="text-white/60 text-xs text-center mt-3">
-                Click Activate Microbuzz, Position your face and click "📸 Take Selfie & Start".<br />
-                Your camera will turn off after the selfie is taken.
-              </p>
-            </div>
-          )}
+{/* NEW CAMERA UI */}
+{isCameraOpen && (
+  <div className="relative w-full max-w-lg mx-auto mb-8">
+    
+    {/* Close Button */}
+    <button
+      onClick={() => {
+        cleanupCamera();
+        setIsCameraOpen(false);
+      }}
+      className="absolute top-3 right-3 z-20 bg-black/50 text-white px-3 py-2 rounded-full hover:bg-black transition"
+    >
+      ✖
+    </button>
+
+    {/* Camera Stream */}
+    <div className="rounded-2xl overflow-hidden border-2 border-white/20 shadow-xl bg-black">
+      <video
+        ref={videoRef}
+        className="w-full h-auto object-cover"
+        playsInline
+        muted
+      />
+    </div>
+
+    {/* Shutter Button */}
+    <div className="flex justify-center mt-4">
+      <button
+        onClick={async () => {
+          try {
+            // Capture selfie
+            const video = videoRef.current;
+            const size = Math.min(video.videoWidth, video.videoHeight);
+            const cv = document.createElement("canvas");
+            cv.width = 320;
+            cv.height = 320;
+
+            const ctx = cv.getContext("2d");
+            const sx = (video.videoWidth - size) / 2;
+            const sy = (video.videoHeight - size) / 2;
+            ctx.drawImage(video, sx, sy, size, size, 0, 0, 320, 320);
+
+            const blob = await new Promise((res) => cv.toBlob(res, "image/jpeg", 0.85));
+
+            // Upload selfie
+            const fd = new FormData();
+            fd.append("selfie", blob);
+            const upRes = await fetch(`${API_BASE}/microbuzz/selfie`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token()}` },
+              body: fd,
+            });
+            const upData = await upRes.json();
+            setSelfieUrl(upData.url);
+
+            // Close camera
+            cleanupCamera();
+            setIsCameraOpen(false);
+          } catch (err) {
+            console.error(err);
+            alert("Selfie failed. Try again.");
+          }
+        }}
+        className="w-20 h-20 bg-white rounded-full shadow-xl border-4 border-white/40 active:scale-95 transition"
+      />
+    </div>
+  </div>
+)}
+
+        
 
                   {/* Radar + inline selfie preview */}
               {/* Preference Selector */}
