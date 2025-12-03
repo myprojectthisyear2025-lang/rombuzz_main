@@ -53,7 +53,7 @@ export default function MicroBuzz({ user }) {
   // ---------- UI States ----------
   const [isActive, setIsActive] = useState(false);
   const [status, setStatus] = useState(
-    "Super-fast way to find a date. Click on Activate Microbuzz, take a quick selfie, and we'll show nearby people who did the same. If you both tap Connect, it's an instant match."
+    "Super-fast way to find a date. Take a quick selfie, and click on activate. We'll show nearby people who did the same. If you both tap Connect, it's an instant match."
   );
   const [error, setError] = useState("");
   const [debug, setDebug] = useState("");
