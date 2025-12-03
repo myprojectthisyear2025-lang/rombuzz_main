@@ -473,9 +473,10 @@ const reloadMe = async () => {
   const token = getToken();
   if (!token) return;
   try {
-    const r = await fetch(`${API_BASE}/profile/full`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const r = await fetch(`${API_BASE}/users/me`, {
+  headers: { Authorization: `Bearer ${token}` },
+});
+
     const data = await r.json();
     if (data.user) {
       setLocalUser(data.user);
