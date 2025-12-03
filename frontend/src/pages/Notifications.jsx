@@ -106,27 +106,33 @@ socket.on("notification:new_post", (notif) => {
   }, [token]);
 
   // ---------- Normalize app routes (stay in-app, avoid homepage) ----------
-  const normalizeHref = (raw) => {
-    if (!raw) return null;
-    try {
-      // allow absolute or relative; strip origin if absolute
-      const url = new URL(raw, window.location.origin);
-      let p = (url.pathname + url.search + url.hash) || "/";
+ const normalizeHref = (raw) => {
+  if (!raw) return "/notifications";
 
-      // normalize to your actual routes (lowercase)
-      // backend may send /viewprofile or /viewProfile; we force lowercase
-      p = p
-        .replace(/^\/viewprofile/i, "/viewprofile")
-        .replace(/^\/letsbuzz/i, "/letsbuzz")
-        .replace(/^\/notifications$/i, "/notifications");
+  try {
+    // Always ensure leading slash
+    let fixed = raw.trim();
+    if (!fixed.startsWith("/")) fixed = "/" + fixed;
 
-      if (!p.startsWith("/")) p = "/" + p;
-      return p;
-    } catch {
-      const s = String(raw);
-      return s.startsWith("/") ? s : "/" + s;
-    }
-  };
+    // Build proper URL
+    const url = new URL(fixed, window.location.origin);
+
+    let path = url.pathname.toLowerCase(); // lowercase path only
+    let query = url.search; // keep query EXACT match (?post=ID)
+
+    // Normalize paths
+    if (path.startsWith("/viewprofile")) path = "/viewprofile";
+    if (path.startsWith("/letsbuzz")) path = "/letsbuzz";
+    if (path.startsWith("/notifications")) path = "/notifications";
+
+    return path + query;
+  } catch (err) {
+    // Final fallback: ensure leading slash and never return empty
+    if (!raw || raw.trim() === "") return "/notifications";
+    return raw.startsWith("/") ? raw : "/" + raw;
+  }
+};
+
 
   // ---------- Deep-link builder ----------
   const resolveHref = (n) => {
