@@ -132,19 +132,20 @@ useEffect(() => {
           {/* --- Public Routes --- */}
           <Route path="/" element={<Home />} />
           <Route path="/letsbuzz" element={<LetsBuzz />} />
-          <Route
+         <Route
               path="/login"
               element={
-                user && user.profileComplete ? <Navigate to="/discover" /> : <Login setUser={setUser} />
+                user && user.profileComplete ? <Navigate to="/" /> : <Login setUser={setUser} />
               }
             />
 
-              <Route
-                  path="/signup"
-                  element={
-                    user && user.profileComplete ? <Navigate to="/discover" /> : <Signup setUser={setUser} />
-                  }
-                />
+            <Route
+              path="/signup"
+              element={
+                user && user.profileComplete ? <Navigate to="/" /> : <Signup setUser={setUser} />
+              }
+            />
+
 
           {/* --- Protected Routes --- */}
           <Route
