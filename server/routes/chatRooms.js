@@ -329,7 +329,7 @@ res.json({ ok: true, reactions: Object.fromEntries(msg.reactions) });
 // 🧹 DEBUG — DELETE BROKEN CHAT ROOM (no auth)
 // URL: /api/chat/debug/room/<roomId>
 // ============================================================
-router.delete("/chat/debug/room/:roomId", async (req, res) => {
+router.delete("/debug/room/:roomId", async (req, res) => {
   try {
     const { roomId } = req.params;
     const result = await ChatRoom.deleteOne({ roomId });
