@@ -35,11 +35,31 @@ const { onlineUsers } = require("../models/state");
 // 🧩 Utilities
 // =======================
 
-// Parse participants from roomId ("a_b")
+// Parse participants from roomId
+// Supports both "a_b" and legacy "a__b" formats
 function getPeersFromRoomId(roomId) {
-  const [a, b] = String(roomId).split("_");
-  return { a, b };
+  const raw = String(roomId || "");
+  const parts = raw.split("_");
+
+  // Normal case: "userA_userB"
+  if (parts.length === 2) {
+    const [a, b] = parts;
+    return { a, b };
+  }
+
+  // Legacy case: "userA__userB" → ["userA", "", "userB"]
+  if (parts.length === 3 && parts[1] === "") {
+    return { a: parts[0], b: parts[2] };
+  }
+
+  // Fallback: use first two non-empty pieces
+  const nonEmpty = parts.filter(Boolean);
+  return {
+    a: nonEmpty[0] || "",
+    b: nonEmpty[1] || "",
+  };
 }
+
 
 // Ensure ChatRoom exists or create new
 async function getRoomDoc(roomId) {
