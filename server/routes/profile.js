@@ -37,7 +37,7 @@ const authMiddleware = require("./auth-middleware");
 const User = require("../models/User");
 const PostModel = require("../models/PostModel");
 const Notification = require("../models/Notification");
-const MatchModel = require("../models/MatchModel");
+const Match = require("../models/Match");
 
 /* ============================================================
    👤 SECTION 1: FULL PROFILE (with media & posts)
@@ -146,7 +146,7 @@ router.post("/profile/complete", authMiddleware, async (req, res) => {
 
     // 3️⃣ Notify matched users about new photos / completed profile
     //    Find matches where this user is user1 or user2 and status is "matched".
-    const matches = await MatchModel.find({
+    const matches = await Match.find({
       status: "matched",
       $or: [{ user1: user.id }, { user2: user.id }],
     }).lean();

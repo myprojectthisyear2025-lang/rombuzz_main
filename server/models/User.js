@@ -19,21 +19,57 @@ const userSchema = new mongoose.Schema(
     passwordHash: { type: String, default: "" },
     googleId: { type: String, default: "" },
 
-    // 💫 Profile fields
+        // 💫 Profile fields
     gender: { type: String, default: "" },
     dob: { type: String, default: "" },
     lookingFor: { type: String, default: "" },
     interestedIn: { type: [String], default: [] },
+
+    // generic preferences object (Discover filters etc.)
     preferences: { type: Object, default: {} },
-    visibilityMode: { type: String, default: "full" },
+
+    // visibility controls
+    visibilityMode: { type: String, default: "full" },         // full / blurred / ghost etc.
+    fieldVisibility: { type: Object, default: {} },            // who can see each item
+    visibility: { type: String, default: "active" },           // active / paused / hidden
+
+    // main profile fields
+    bio: { type: String, default: "" },
+    orientation: { type: String, default: "" },
     interests: { type: [String], default: [] },
+    hobbies: { type: [String], default: [] },
+    favorites: { type: [String], default: [] },                // also stores voice: / blur: tags
+
     avatar: { type: String, default: "" },
-    photos: { type: [String], default: [] },
+    photos: { type: [String], default: [] },                   // legacy gallery
+    media: { type: [Object], default: [] },                    // structured gallery items
+
+    // location + vibes
+    location: { type: Object, default: null },                 // { lat, lng }
+    vibe: { type: String, default: "" },
+    filterVibe: { type: Object, default: {} },
+
+    // onboarding / matching prefs
+    matchPref: { type: Object, default: {} },
+    locationRadius: { type: Number, default: 50 },
+    ageRange: {
+      type: Object,
+      default: { min: 18, max: 99 },
+    },
+    profileComplete: { type: Boolean, default: false },
+    hasOnboarded: { type: Boolean, default: false },
+
+    // contact
     phone: { type: String, default: "" },
     voiceUrl: { type: String, default: "" },
 
+    // premium + settings
+    premiumTier: { type: String, default: "free" },
+    settings: { type: Object, default: {} },
+
     // 💬 Activity / status
     lastActive: { type: Date, default: Date.now },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
 
