@@ -325,5 +325,18 @@ res.json({ ok: true, reactions: Object.fromEntries(msg.reactions) });
   }
 });
 
+// TEMP ROUTE: DELETE BROKEN ROOM BY roomId
+router.delete("/debug/delete-room/:roomId", async (req, res) => {
+  try {
+    const roomId = req.params.roomId;
+    const result = await ChatRoom.deleteOne({ roomId });
+    res.json({ ok: true, deleted: result.deletedCount, roomId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 module.exports = router;
 
