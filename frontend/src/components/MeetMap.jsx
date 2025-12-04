@@ -1,12 +1,12 @@
 // src/components/MeetMap.jsx
-import React, { useEffect, useState, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from "react-leaflet";
-import { FaHeart, FaTimes, FaMapMarkerAlt } from "react-icons/fa";
+import { AnimatePresence, motion } from "framer-motion";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { getSocket } from "../socket";
+import { useCallback, useEffect, useState } from "react";
+import { FaHeart, FaMapMarkerAlt, FaTimes } from "react-icons/fa";
+import { Circle, MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import { API_BASE } from "../config";
+import { getSocket } from "../socket";
 
 // Fix Leaflet icon paths
 delete L.Icon.Default.prototype._getIconUrl;
@@ -99,10 +99,24 @@ function FlyTo({ center }) {
   return null;
 }
 
-export default function MeetMap({ me, peer, onClose, autoStart = false }) {
+export default function MeetMap({
+  me,
+  peer,
+  onClose,
+  autoStart = false,
+  initialPrompt = "",
+}) {
   const socket = getSocket();
   const [prompt, setPrompt] = useState(null);
   const [myLoc, setMyLoc] = useState(null);
+
+  // 🔔 If ChatWindow passes a requester name, show the popup immediately
+  useEffect(() => {
+    if (initialPrompt) {
+      setPrompt(initialPrompt);
+    }
+  }, [initialPrompt]);
+
   const [peerLoc, setPeerLoc] = useState(null);
 
   const [midpoint, setMidpoint] = useState(null);
@@ -195,114 +209,79 @@ if (window.navigator.userAgent.includes("Edg")) {
   );
 };
 
-  // 🔹 Socket listeners
   useEffect(() => {
     if (!socket) return;
 
-    socket.on("meet:request", ({ from }) => {
-      console.log("📍 meet:request received from", from);
-      if (from.id !== myId)
-        setPrompt(`${from.firstName || "Someone"} ${from.lastName || ""}`.trim());
+    socket.on("meet:accept", ({ from, coords }) => {
+      console.log("📍 meet:accept from", from, coords);
+      if (!coords || typeof coords.lat !== "number" || typeof coords.lng !== "number") {
+        return;
+      }
+
+      // If this came from my partner, treat as peer location
+      if (from === peerId || from?.id === peerId) {
+        setPeerLoc(coords);
+      }
+
+      // If I emitted it myself, make sure myLoc is set
+      if (from === myId || from?.id === myId) {
+        setMyLoc((prev) => prev || coords);
+      }
     });
 
- socket.on("meet:accept", ({ from, coords }) => {
-  console.log("✅ meet:accept received from", from, coords);
+    socket.on("meet:decline", ({ from }) => {
+      console.log("❌ meet:decline from", from);
+      resetAll();
+      alert(`${from?.firstName || "They"} don't want to meet right now.`);
+    });
 
-  if (!coords || typeof coords.lat !== "number" || typeof coords.lng !== "number") {
-    console.warn("⚠️ Invalid peer coordinates received:", coords);
-    return;
-  }
+    socket.on("meet:place:selected", ({ from, place }) => {
+      console.log("📍 meet:place:selected from", from, place);
+      if (!place) return;
+      // This runs for the *receiver* → show confirm popup
+      if (from === peerId || from?.id === peerId) {
+        setPendingFrom(from);
+        setPendingPlace(place);
+      }
+    });
 
-  // STEP 1 — update peer location
-  setPeerLoc(coords);
-  setWaiting(false);
+    socket.on("meet:suggest", ({ midpoint, smartMidpoint, places, canExpand }) => {
+      console.log("📍 meet:suggest payload:", { midpoint, smartMidpoint, places });
+      if (midpoint) setMidpoint(midpoint);
+      if (smartMidpoint) setSmartMidpoint(smartMidpoint);
+      setPlaces(Array.isArray(places) ? places : []);
+      setCanExpand(!!canExpand);
+      setShowMap(true);
+      setWaiting(false);
+      setShowNoPlacesCard(!places?.length);
+    });
 
-  
+    socket.on("meet:place:accepted", ({ from, place }) => {
+      console.log("✅ meet:place:accepted", from, place);
+      setSelected(place || null);
+      const lat = place?.coords?.lat ?? place?.lat;
+      const lng = place?.coords?.lng ?? place?.lng;
+      if (typeof lat === "number" && typeof lng === "number") {
+        setFocusCenter({ lat, lng });
+      }
+    });
 
-  // STEP 3 — if BOTH locations exist → compute midpoint
-  if (myLoc && coords) {
-    const mid = {
-      lat: (myLoc.lat + coords.lat) / 2,
-      lng: (myLoc.lng + coords.lng) / 2,
+    socket.on("meet:place:rejected", ({ from, place }) => {
+      console.log("❌ meet:place:rejected", from, place);
+      setPendingPlace(null);
+      setPendingFrom(null);
+    });
+
+    return () => {
+      socket.off("meet:accept");
+      socket.off("meet:decline");
+      socket.off("meet:place:selected");
+      socket.off("meet:suggest");
+      socket.off("meet:place:accepted");
+      socket.off("meet:place:rejected");
     };
-
-    console.log("📍 midpoint via accept()", mid);
-    setMidpoint(mid);
-
-    // fetch place suggestions
-    fetchSuggestions(myLoc, coords);
-
-    // show map
-    setShowMap(true);
-    setWaiting(false);
-  }
-});
-
-
-
-// 🆕 When partner chooses a place
-// partner accepted my chosen place
-socket.on("meet:place:accepted", ({ from, place }) => {
-  console.log("❤️ meet:place ACCEPTED", place);
-  // close popup
-  setPendingPlace(null);
-
-  // keep map open
-  setShowMap(true);
-});
-
-// partner rejected my chosen place
-socket.on("meet:place:rejected", ({ from, place }) => {
-  console.log("❌ meet:place REJECTED", place);
-  // close popup
-  setPendingPlace(null);
-
-  // keep map open so they can pick again
-  setShowMap(true);
-});
-
-// 🧭 Both users shared location → backend sends midpoint + places
-socket.on("meet:suggest", ({ midpoint, smartMidpoint, places, canExpand }) => {
-  console.log("💞 meet:suggest received");
-
-  setMidpoint(midpoint || null);
-  setSmartMidpoint(smartMidpoint || midpoint || null);
-
-  const safePlaces = Array.isArray(places) ? places : [];
-  setPlaces(safePlaces);
-
-  setWaiting(false);
-  setShowMap(true);
-  setLoading(false);
-
-  setCanExpand(!!canExpand);
-  setRadiusMiles(2);
-
-  // reset focus so map centers properly
-  setFocusCenter(null);
-
-  // no places? show no-places card
-  if (!safePlaces.length && canExpand) {
-    setShowNoPlacesCard(true);
-    setSheetOpen(false);
-  } else {
-    setShowNoPlacesCard(false);
-    setSheetOpen(safePlaces.length > 0);
-  }
-});
-
-   return () => {
-  socket.off("meet:request");
-  socket.off("meet:accept");
-  socket.off("meet:decline");
-  socket.off("meet:place:selected");
-  socket.off("meet:suggest");
-
-  socket.off("meet:place:accepted");   // add
-  socket.off("meet:place:rejected");   // add
-};
-
   }, [socket, myLoc, fetchSuggestions]);
+
 
      // 🔁 When BOTH myLoc and peerLoc exist → compute midpoint, fetch places, show map
   useEffect(() => {
@@ -344,19 +323,29 @@ socket.on("meet:suggest", ({ midpoint, smartMidpoint, places, canExpand }) => {
 
   
 
-    // 🔹 Initiate meet request
+   // 🔹 Initiate meet request (initiator shares location + asks partner)
   const startMeet = () => {
     getMyLocation((loc) => {
-      // We already have myLoc at this point
-      setShowMap(true);        // show map immediately on initiator side
-      setWaiting(true);        // still waiting for partner to share
+      // Save my coord in local state
+      setMyLoc(loc);
+      setShowMap(true);   // show map immediately on initiator side
+      setWaiting(true);   // wait until partner shares
 
+      // 1️⃣ Ask partner for permission (popup on their side)
       socket.emit("meet:request", {
         from: myId,
         to: peerId,
       });
+
+      // 2️⃣ ALSO share my coords with backend so it has BOTH locations once partner accepts
+      socket.emit("meet:accept", {
+        from: myId,
+        to: peerId,
+        coords: loc,
+      });
     });
   };
+
 
 // Auto-start when used as overlay
 useEffect(() => {
@@ -388,7 +377,7 @@ useEffect(() => {
 
    // 🔹 Choose a place
   const choosePlace = (p) => {
-    socket.emit("meet:chosen", { from: myId, to: peerId, place: p });
+    socket.emit("meet:place:selected", { from: myId, to: peerId, place: p });
     alert(`📍 You picked ${p.name}`);
     setSelected(p);
 

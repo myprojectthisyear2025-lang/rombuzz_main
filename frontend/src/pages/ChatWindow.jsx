@@ -1,31 +1,24 @@
 
 // src/pages/ChatWindow.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  FaPhone,
-  FaVideo,
-  FaTimes,
   FaPaperclip,
-  FaSmile,
   FaPaperPlane,
-  FaMicrophone,
-  FaMicrophoneSlash,
-  FaVideoSlash,
-  FaSyncAlt,
-  FaPalette,
+  FaPhone,
   FaPhoneSlash,
+  FaTimes,
+  FaVideo
 } from "react-icons/fa";
 
 import EmojiPicker from "emoji-picker-react";
 import { useNavigate } from "react-router-dom";
 import AiWingmanChat from "../components/AiWingmanChat";
-import MeetMap from "../components/MeetMap";
-import { FaMapMarkerAlt } from "react-icons/fa";
-import SnapCameraSheet from "../components/SnapCameraSheet";
 import { FullscreenViewer } from "../components/FullscreenViewer";
-import { API_BASE } from "../config";
 import GameHub from "../components/GameHub";
 import GamesManager from "../components/GamesManager";
+import MeetMap from "../components/MeetMap";
+import SnapCameraSheet from "../components/SnapCameraSheet";
+import { API_BASE } from "../config";
 
 //const API_BASE = "http://localhost:4000";
 //const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com";
@@ -153,10 +146,14 @@ const [memoryOpen, setMemoryOpen] = useState(false);
 const [theme, setTheme] = useState("default");
 const [showHeaderMenu, setShowHeaderMenu] = useState(false); // 👈 new
 
-  // Wingman
+// Wingman
 const [showWing, setShowWing] = useState(false);
 // Meet-in-the-middle overlay
 const [meetOpen, setMeetOpen] = useState(false);
+// Who is asking me to meet (for popup text)
+const [meetRequesterName, setMeetRequesterName] = useState("");
+// Am I the initiator? (controls autoStart)
+const [isMeetInitiator, setIsMeetInitiator] = useState(false);
 
 
 // 🔇 Mute per-chat
@@ -492,6 +489,22 @@ useEffect(() => {
     };
     setMessages((prev) => [...prev, sysMsg]);
   };
+  // 🆕 Incoming meet request → receiver sees popup + map
+  const onMeetRequest = ({ from }) => {
+    if (!from?.id) return;
+
+    // Only handle if this request is from the person I'm chatting with
+    if (String(from.id) !== String(peerId)) return;
+
+    // On receiver side we are NOT initiator
+    setIsMeetInitiator(false);
+
+    const fullName = `${from.firstName || "Someone"} ${from.lastName || ""}`.trim();
+    setMeetRequesterName(fullName);
+
+    // Open MeetMap overlay – it will read initialPrompt and show popup
+    setMeetOpen(true);
+  };
 
   socket.on("message", onMsg);
   socket.on("chat:message", onMsg);
@@ -521,15 +534,19 @@ useEffect(() => {
   };
   socket.on("message:removed", onRemoved);
 
-  // 🆕 Listen for final meet confirmation from MeetMap
+ // 🆕 Listen for final meet confirmation from MeetMap
   socket.on("meet:final-confirm", onMeetFinal);
-// 🆕 When partner selects a place → popup should open map overlay
-socket.on("meet:place:selected", ({ from, place }) => {
-  setMeetOpen(true); // open MeetMap
-});
 
-// 🆕 Partner accepted selected location
-socket.on("meet:place:accepted", ({ from, place }) => {
+  // 🆕 Incoming meet request from partner
+  socket.on("meet:request", onMeetRequest);
+
+  // 🆕 When partner selects a place → popup should open map overlay
+  socket.on("meet:place:selected", ({ from, place }) => {
+    setMeetOpen(true); // open MeetMap
+  });
+
+  // 🆕 Partner accepted selected location
+  socket.on("meet:place:accepted", ({ from, place }) => {
   const sysMsg = {
     id: crypto.randomUUID(),
     roomId,
@@ -576,11 +593,13 @@ socket.on("meet:place:rejected", ({ from, place }) => {
     socket.off("message:delivered", onDelivered);
     socket.off("message:removed", onRemoved);
 
-    // 🆕 cleanup meet listener
+       // 🆕 cleanup meet listener
     socket.off("meet:final-confirm", onMeetFinal);
+    socket.off("meet:request", onMeetRequest);
     socket.off("meet:place:selected");
     socket.off("meet:place:accepted");
     socket.off("meet:place:rejected");
+
 
 
     socket.emit("leaveRoom", roomId);
@@ -718,18 +737,17 @@ useEffect(() => {
     await sendSerialized(payload);
   };
 // 📍 Send Meet Request (triggers immediate popup to receiver)
-const sendMeetRequest = async () => {
-  console.log("📍 Sending meet request to:", peerId);
-  
-  // Send socket event for immediate popup
-  socket.emit("meet:request", {
-    from: myId,
-    to: peerId,
-  });
-  
-  // Open map for initiator immediately
+const sendMeetRequest = () => {
+  if (!socket) return;
+
+  // I'm starting the meet
+  setIsMeetInitiator(true);
+  setMeetRequesterName("");
+
+  socket.emit("meet:request", { from: myId, to: peerId });
   setMeetOpen(true);
 };
+
 
 // Replace the meet button handler in render (around line 600):
 // Change from: onClick={sendMeetCard}
@@ -2338,15 +2356,21 @@ onClose?.();
           onUseTip={(t) => setInput((p) => (p ? `${p} ${t}` : t))}
         />
       )}
-          {/* Meet-in-the-middle fullscreen overlay */}
-        {meetOpen && (
-          <MeetMap
-            me={me}
-            peer={peer}
-            autoStart
-            onClose={() => setMeetOpen(false)}
-          />
-        )}
+           {/* Meet-in-the-middle fullscreen overlay */}
+      {meetOpen && (
+        <MeetMap
+          me={me}
+          peer={peer}
+          autoStart={isMeetInitiator}
+          initialPrompt={meetRequesterName}
+          onClose={() => {
+            setMeetOpen(false);
+            setMeetRequesterName("");
+            setIsMeetInitiator(false);
+          }}
+        />
+      )}
+
 
       {/* tiny CSS */}
            <style>{`

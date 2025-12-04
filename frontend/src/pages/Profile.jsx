@@ -1762,7 +1762,7 @@ const showMemberSince = user.createdAt
             <button
               key={opt}
               type="button"
-              onClick={() => toggleChip("interests", opt, 5)}
+onClick={() => toggleChip("interests", opt, Infinity)}
               disabled={disabled}
               className={`px-3 py-1 rounded-full text-sm border transition ${
                 selected
@@ -1781,7 +1781,7 @@ const showMemberSince = user.createdAt
             <button
               key={custom}
               type="button"
-              onClick={() => toggleChip("interests", custom, 5)}
+onClick={() => toggleChip("interests", opt, Infinity)}
               className="px-3 py-1 rounded-full text-sm border bg-white text-gray-700 hover:border-red-400"
               title="Remove"
             >
@@ -1802,9 +1802,10 @@ const showMemberSince = user.createdAt
   if (e.key === "Enter") {
     e.preventDefault(); // 🔥 STOP FORM FROM SUBMITTING
 
-    if (v && !form.interests.includes(v) && form.interests.length < 5) {
-      setForm((p) => ({ ...p, interests: [...p.interests, v] }));
-    }
+    if (!form.interests.includes(v)) {
+    setForm((p) => ({ ...p, interests: [...p.interests, v] }));
+}
+
 
     e.currentTarget.value = "";
   }
@@ -1847,7 +1848,7 @@ const showMemberSince = user.createdAt
             <button
               key={opt}
               type="button"
-              onClick={() => toggleChip("hobbies", opt, 5)}
+onClick={() => toggleChip("hobbies", opt, Infinity)}
               disabled={disabled}
               className={`px-3 py-1 rounded-full text-sm border transition ${
                 selected
@@ -1866,7 +1867,7 @@ const showMemberSince = user.createdAt
             <button
               key={custom}
               type="button"
-              onClick={() => toggleChip("hobbies", custom, 5)}
+onClick={() => toggleChip("hobbies", opt, Infinity)}
               className="px-3 py-1 rounded-full text-sm border bg-white text-gray-700 hover:border-pink-400"
               title="Remove"
             >
@@ -1887,9 +1888,10 @@ const showMemberSince = user.createdAt
   if (e.key === "Enter") {
     e.preventDefault(); // 🔥 THIS FIXES YOUR ISSUE
 
-    if (v && !form.hobbies.includes(v) && form.hobbies.length < 5) {
-      setForm((p) => ({ ...p, hobbies: [...p.hobbies, v] }));
-    }
+   if (!form.hobbies.includes(v)) {
+    setForm((p) => ({ ...p, hobbies: [...p.hobbies, v] }));
+}
+
 
     e.currentTarget.value = "";
   }
