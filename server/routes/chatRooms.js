@@ -325,17 +325,26 @@ res.json({ ok: true, reactions: Object.fromEntries(msg.reactions) });
   }
 });
 
-// TEMP ROUTE: DELETE BROKEN ROOM BY roomId
-router.delete("/debug/delete-room/:roomId", async (req, res) => {
+// ============================================================
+// 🧹 DEBUG — DELETE BROKEN CHAT ROOM (no auth)
+// URL: /api/chat/debug/room/<roomId>
+// ============================================================
+router.delete("/chat/debug/room/:roomId", async (req, res) => {
   try {
-    const roomId = req.params.roomId;
+    const { roomId } = req.params;
     const result = await ChatRoom.deleteOne({ roomId });
-    res.json({ ok: true, deleted: result.deletedCount, roomId });
+
+    res.json({
+      ok: true,
+      roomId,
+      deleted: result.deletedCount,
+    });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Debug delete error:", err);
     res.status(500).json({ error: err.message });
   }
 });
+
 
 
 module.exports = router;
