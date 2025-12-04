@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { FaHeart, FaUserFriends, FaHandshake } from "react-icons/fa";
+
+//Rombuzz_main/frontend/src/components/SocialSection.jsx
+
+import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { FaHandshake, FaHeart, FaUserFriends } from "react-icons/fa";
 import { IoClose } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
 
@@ -12,6 +15,40 @@ import { API_BASE } from "../config";
 const getToken = () =>
   localStorage.getItem("token") || sessionStorage.getItem("token") || "";
 
+// =============== CONFIRM POPUP ===============
+function ConfirmPopup({ visible, text, onConfirm, onCancel }) {
+  if (!visible) return null;
+
+  return (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <motion.div
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.8, opacity: 0 }}
+        className="bg-white/20 backdrop-blur-xl border border-white/30 shadow-2xl p-6 rounded-2xl max-w-sm w-full text-center"
+      >
+        <div className="text-lg text-white font-semibold mb-4">{text}</div>
+
+        <div className="flex gap-3 justify-center mt-2">
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 rounded-full bg-rose-500 text-white hover:bg-rose-600 transition"
+          >
+            Yes
+          </button>
+
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 rounded-full bg-white/40 text-white hover:bg-white/60 transition"
+          >
+            Cancel
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function SocialSection({ user }) {
   const token = getToken();
   const [stats, setStats] = useState({
@@ -22,6 +59,13 @@ export default function SocialSection({ user }) {
   const [list, setList] = useState([]);
   const [activeTab, setActiveTab] = useState(null);
   const [loading, setLoading] = useState(false);
+  // --- NEW Confirm Popup State ---
+const [confirmData, setConfirmData] = useState({
+  visible: false,
+  text: "",
+  onConfirm: null,
+});
+
   const navigate = useNavigate();
 
   // Fetch counters
@@ -88,6 +132,41 @@ export default function SocialSection({ user }) {
     setActiveTab(null);
     setList([]);
   };
+
+  // --- NEW: Accept / Reject / Remove handlers ---
+const handleRespond = async (fromId, action) => {
+  try {
+    const res = await fetch(`${API_BASE}/likes/respond`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ fromId, action }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      // Remove user from list without refresh
+      setList((prev) => prev.filter((u) => u.id !== fromId));
+      // Update counters
+      setStats((s) => ({
+        ...s,
+        likedCount: activeTab === "liked" ? s.likedCount - 1 : s.likedCount,
+        likedYouCount:
+          activeTab === "likedYou" ? s.likedYouCount - 1 : s.likedYouCount,
+        matchCount: data.matched ? s.matchCount + 1 : s.matchCount,
+      }));
+    }
+  } catch (err) {
+    console.error("respond error", err);
+  }
+};
+
+const handleRemoveLike = async (targetId) => {
+  // "Remove" = reject from our side (same cleanup)
+  await handleRespond(targetId, "reject");
+};
 
   // Card hover animation
   const cardHover = {
@@ -196,34 +275,113 @@ export default function SocialSection({ user }) {
                       <p>No users found here yet.</p>
                     </div>
                   ) : (
-                    <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
-                      {list.map((u) => (
-                        <div
-                          key={u.id}
-                          className="flex items-center gap-3 p-3 border border-gray-100 rounded-xl hover:bg-gray-50 transition"
-                        >
-                          <img
-                            src={u.avatar || "https://via.placeholder.com/48?text=No+Photo"}
-                            alt={u.firstName}
-                            className="h-12 w-12 rounded-full object-cover border border-gray-200"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-gray-800 truncate">
-                              {u.firstName} {u.lastName}
+                    <AnimatePresence>
+                      <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">                      {list.map((u) => (
+                      <motion.div
+                        key={u.id}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 20 }}
+                        className="p-3 border border-gray-100 rounded-xl hover:bg-gray-50 transition-all shadow-sm hover:shadow-md"
+                      >
+
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={u.avatar || "https://via.placeholder.com/48?text=No+Photo"}
+                                alt={u.firstName}
+                                className="h-12 w-12 rounded-full object-cover border border-gray-200"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold text-gray-800 truncate">
+                                  {u.firstName} {u.lastName}
+                                </div>
+                                <div className="text-sm text-gray-500 truncate">
+                                  {u.bio || "No bio yet"}
+                                </div>
+                              </div>
                             </div>
-                            <div className="text-sm text-gray-500 truncate">
-                              {u.bio || "No bio yet"}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => navigate(`/view/${u.id}`)}
-                            className="px-3 py-1.5 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:scale-105 transition-transform"
+
+                            {/* BUTTONS */}
+                            {activeTab === "likedYou" && (
+                              <div className="flex gap-2 mt-3 justify-end">
+                                <button
+                                  onClick={() => handleRespond(u.id, "accept")}
+                                  className="px-3 py-1.5 rounded-full bg-green-500 text-white hover:opacity-90"
+                                >
+                                  Accept
+                                </button>
+                              <button
+                            onClick={() =>
+                              setConfirmData({
+                                visible: true,
+                                text: "Are you sure you want to reject this request?",
+                                onConfirm: () => {
+                                  setList((prev) => prev.filter((x) => x.id !== u.id)); // instant removal
+                                  handleRespond(u.id, "reject");
+                                  setConfirmData({ visible: false, text: "", onConfirm: null });
+                                },
+                              })
+                            }
+                            className="px-3 py-1.5 rounded-full bg-gray-300 text-gray-800 hover:bg-gray-400 transition"
                           >
-                            View
+                            Reject
                           </button>
-                        </div>
+
+                                <button
+                                  onClick={() => navigate(`/view/${u.id}`)}
+                                  className="px-3 py-1.5 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white"
+                                >
+                                  View
+                                </button>
+                              </div>
+                            )}
+
+                            {activeTab === "liked" && (
+                              <div className="flex gap-2 mt-3 justify-end">
+                                <button
+                                  onClick={() => navigate(`/view/${u.id}`)}
+                                  className="px-3 py-1.5 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white"
+                                >
+                                  View
+                                </button>
+                                <button
+                            onClick={() =>
+                              setConfirmData({
+                                visible: true,
+                                text: "Remove your like?",
+                                onConfirm: () => {
+                                  // instant UI removal
+                                  setList((prev) => prev.filter((x) => x.id !== u.id));
+                                  handleRemoveLike(u.id);
+                                  setConfirmData({ visible: false, text: "", onConfirm: null });
+                                },
+                              })
+                            }
+                            className="px-3 py-1.5 rounded-full bg-gray-300 text-gray-800 hover:bg-gray-400 transition"
+                          >
+                            Remove
+                          </button>
+
+                              </div>
+                            )}
+
+                            {activeTab === "matches" && (
+                              <div className="flex gap-2 mt-3 justify-end">
+                                <button
+                                  onClick={() => navigate(`/view/${u.id}`)}
+                                  className="px-3 py-1.5 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white"
+                                >
+                                  View
+                                </button>
+                              </div>
+                            )}
+                              </motion.div>
+
                       ))}
                     </div>
+                    </AnimatePresence>
+
                   )}
                 </>
               )}
@@ -231,6 +389,16 @@ export default function SocialSection({ user }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <ConfirmPopup
+  visible={confirmData.visible}
+  text={confirmData.text}
+  onConfirm={confirmData.onConfirm}
+  onCancel={() =>
+    setConfirmData({ visible: false, text: "", onConfirm: null })
+  }
+/>
+
     </div>
   );
 }
