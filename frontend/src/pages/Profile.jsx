@@ -1,20 +1,11 @@
 // src/pages/Profile.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 // === Icons & helpers ===
-import {
-  FaEllipsisV,
-  FaHeart,
-  FaReply,
-  FaTrash,
-  FaEdit,
-  FaLock,
-  FaUnlock,
-} from "react-icons/fa";
 
 import { useNavigate } from "react-router-dom";
-import SocialSection from "../components/SocialSection";
-import GallerySection from "../components/GallerySection";
 import BuzzStreak from "../components/BuzzStreak";
+import GallerySection from "../components/GallerySection";
+import SocialSection from "../components/SocialSection";
 
 
 
@@ -628,36 +619,54 @@ const setFieldAudience = async (key, audience) => {
   };
 
   // Save profile (includes interests/hobbies/orientation and favorites)
- const handleSave = async () => {
+// Save profile (includes bio, hobbies, interests, orientation, voice intro, favorites)
+const handleSave = async () => {
   const token = getToken();
   if (!token) return;
+
   try {
+    // Build EXACT payload backend expects
+    const payload = {
+      firstName: form.firstName,
+      lastName: form.lastName,
+      bio: form.bio,
+      gender: form.gender,
+      dob: form.dob,
+      interests: form.interests,
+      hobbies: form.hobbies,
+      orientation: form.orientation,
+      favorites: form.favorites,          // includes voice:<url>
+      visibilityMode: form.visibilityMode,
+      fieldVisibility: form.fieldVisibility,
+      preferences: form.preferences || {},
+    };
+
     const res = await fetch(`${API_BASE}/users/me`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify(form),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to update");
-    const updatedUser = data.user || data;
+    if (!res.ok) throw new Error(data.error || "Failed");
+
+    const updatedUser = data.user;
+
     setLocalUser(updatedUser);
     setUser?.(updatedUser);
     saveUserToStorage(updatedUser);
+
     setEditMode(false);
-    alert("Profile updated ✅");
-  } catch (e) {
-    console.error(e);
+    alert("Profile updated!");
+  } catch (err) {
+    console.error("Profile save failed", err);
     alert("Could not update profile");
   }
 };
 
-
-
-   
 
   // --------------------------------------------------------------
   // Cloudinary upload helpers
