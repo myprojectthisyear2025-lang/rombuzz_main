@@ -77,7 +77,7 @@ router.patch("/deactivate", authMiddleware, async (req, res) => {
 ============================================================ */
 const PostModel = require("../models/PostModel");
 const Notification = require("../models/Notification");
-const MatchModel = require("../models/MatchModel");
+const Match = require("../models/Match");
 const ChatRoom = require("../models/ChatRoom");
 const Relationship = require("../models/Relationship");
 
@@ -97,7 +97,7 @@ router.delete("/delete", authMiddleware, async (req, res) => {
       User.deleteOne({ id: uid }),
       PostModel.deleteMany({ userId: uid }),
       Notification.deleteMany({ $or: [{ toId: uid }, { fromId: uid }] }),
-      MatchModel.deleteMany({
+      Match.deleteMany({
         $or: [{ user1: uid }, { user2: uid }, { users: uid }],
       }),
       ChatRoom.deleteMany({ participants: uid }),

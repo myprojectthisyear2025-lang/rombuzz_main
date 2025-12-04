@@ -39,7 +39,7 @@ const { getIO } = require("../socket");
 const User = require("../models/User");
 const MicroBuzzPresence = require("../models/MicroBuzzPresence");
 const MicroBuzzBuzz = require("../models/MicroBuzzBuzz");
-const Match = require("../models/MatchModel");
+const Match = require("../models/Match");
 //const MicroBuzzSelfie = require("../models/MicroBuzzSelfie");
 
 // 🔔 Notifications helper

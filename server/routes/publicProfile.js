@@ -31,7 +31,7 @@ const { baseSanitizeUser } = require("../utils/helpers");
 // Mongo models
 const User = require("../models/User");
 const PostModel = require("../models/PostModel");
-const MatchModel = require("../models/MatchModel");
+const Match = require("../models/Match");
 const Relationship = require("../models/Relationship"); // unified like/block model
 
 router.get("/:id", authMiddleware, async (req, res) => {
@@ -60,7 +60,7 @@ const isBlocked = await Relationship.exists({
    const likedByMe = await Relationship.exists({ from: viewerId, to: targetId, type: "like" });
 const likedMe = await Relationship.exists({ from: targetId, to: viewerId, type: "like" });
 
-    const matched = await MatchModel.exists({
+    const matched = await Match.exists({
       status: "matched",
       $or: [
         { user1: viewerId, user2: targetId },

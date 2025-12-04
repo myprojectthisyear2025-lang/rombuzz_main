@@ -19,7 +19,7 @@
  *   - models/User.js              → Core user document
  *   - models/PostModel.js         → LetsBuzz posts
  *   - models/Notification.js      → In-app notifications
- *   - models/MatchModel.js        → Match relationships
+ *   - models/Match.js        → Match relationships
  *   - auth-middleware.js          → JWT protection
  *   - utils/helpers.js            → baseSanitizeUser()
  *   - sockets/connection.js       → Socket.IO (io) for real-time notifications
