@@ -23,7 +23,7 @@
  *   - Returns sanitized user data (no passwords or secrets)
  *
  * Dependencies:
- *   - mongoose User, Relationship, MatchModel
+ *   - mongoose User, Relationship, Match
  *   - authMiddleware.js  → JWT authentication
  *   - utils/helpers.js   → User sanitization
  *
@@ -45,7 +45,7 @@ const {
 // ✅ Mongo Models
 const User = require("../models/User");
 const Relationship = require("../models/Relationship"); // for likes/blocks
-const MatchModel = require("../models/MatchModel");
+const Match = require("../models/Match");
 
 /* ============================================================
    👤 SECTION 1: USER INFO & LOCATION
@@ -119,7 +119,7 @@ router.get(["/social", "/social-stats"], authMiddleware, async (req, res) => {
     });
 
     // Matched users count
-    const matchesCount = await MatchModel.countDocuments({
+    const matchesCount = await Match.countDocuments({
       status: "matched",
       $or: [{ user1: myId }, { user2: myId }],
     });
@@ -138,7 +138,7 @@ router.get("/matches", authMiddleware, async (req, res) => {
   try {
     const myId = req.user.id;
 
-    const matches = await MatchModel.find({
+    const matches = await Match.find({
       status: "matched",
       $or: [{ user1: myId }, { user2: myId }],
     }).lean();
@@ -298,7 +298,7 @@ router.get("/social-stats", authMiddleware, async (req, res) => {
       .map((l) => l.to)
       .filter((id) => likedYou.some((r) => r.from === id));
 
-    const matches = await MatchModel.find({
+    const matches = await Match.find({
       status: "matched",
       $or: [{ user1: myId }, { user2: myId }],
     }).lean();
