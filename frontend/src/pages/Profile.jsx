@@ -1796,15 +1796,20 @@ const showMemberSince = user.createdAt
           type="text"
           placeholder="Other interest… (press Enter)"
           className="border p-2 rounded flex-1"
-          onKeyDown={(e) => {
-            const v = e.currentTarget.value.trim();
-            if (e.key === "Enter" && v) {
-              if (!form.interests.includes(v) && form.interests.length < 5) {
-                setForm((p) => ({ ...p, interests: [...p.interests, v] }));
-              }
-              e.currentTarget.value = "";
-            }
-          }}
+        onKeyDown={(e) => {
+  const v = e.currentTarget.value.trim();
+
+  if (e.key === "Enter") {
+    e.preventDefault(); // 🔥 STOP FORM FROM SUBMITTING
+
+    if (v && !form.interests.includes(v) && form.interests.length < 5) {
+      setForm((p) => ({ ...p, interests: [...p.interests, v] }));
+    }
+
+    e.currentTarget.value = "";
+  }
+}}
+
         />
       </div>
     </>
@@ -1876,15 +1881,20 @@ const showMemberSince = user.createdAt
           type="text"
           placeholder="Other hobby… (press Enter)"
           className="border p-2 rounded flex-1"
-          onKeyDown={(e) => {
-            const v = e.currentTarget.value.trim();
-            if (e.key === "Enter" && v) {
-              if (!form.hobbies.includes(v) && form.hobbies.length < 5) {
-                setForm((p) => ({ ...p, hobbies: [...p.hobbies, v] }));
-              }
-              e.currentTarget.value = "";
-            }
-          }}
+         onKeyDown={(e) => {
+  const v = e.currentTarget.value.trim();
+
+  if (e.key === "Enter") {
+    e.preventDefault(); // 🔥 THIS FIXES YOUR ISSUE
+
+    if (v && !form.hobbies.includes(v) && form.hobbies.length < 5) {
+      setForm((p) => ({ ...p, hobbies: [...p.hobbies, v] }));
+    }
+
+    e.currentTarget.value = "";
+  }
+}}
+
         />
       </div>
     </>
