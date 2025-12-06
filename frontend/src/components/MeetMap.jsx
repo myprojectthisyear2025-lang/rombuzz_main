@@ -153,7 +153,7 @@ export default function MeetMap({
   // 🔹 Fetch midpoint suggestions
   const fetchSuggestions = useCallback(async (a, b) => {
     try {
-      const r = await fetch(`${API_BASE}/api/meet/suggest`, {
+      const r = await fetch(`${API_BASE}/meet/suggest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ a, b }),
@@ -413,7 +413,7 @@ useEffect(() => {
 
     try {
       setLoading(true);
-      const r = await fetch(`${API_BASE}/api/meet/suggest`, {
+      const r = await fetch(`${API_BASE}/meet/suggest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
