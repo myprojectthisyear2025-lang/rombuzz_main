@@ -23,7 +23,8 @@
 
 const express = require("express");
 const router = express.Router();
-const sgMail = require("../../config/sendgrid");
+const { Resend } = require("resend");
+const resend = new Resend(process.env.RESEND_API_KEY);
 const bcrypt = require("bcrypt");
 const shortid = require("shortid");
 const User = require("../../models/User");
@@ -62,19 +63,19 @@ router.post("/send-code", async (req, res) => {
       console.log(`📧 Updated existing Mongo user OTP for ${emailLower}`);
     }
 
-    // 2️⃣ Send via SendGrid (or dev-log)
-    if (!process.env.SENDGRID_API_KEY) {
-      console.log(`📧 [DEV] OTP for ${emailLower}: ${code}`);
-      return res.json({ success: true, dev: true });
-    }
+    // 2️⃣ Send via Resend (or dev-log)
+if (!process.env.RESEND_API_KEY) {
+  console.log(`📧 [DEV] OTP for ${emailLower}: ${code}`);
+  return res.json({ success: true, dev: true });
+}
 
-    await sgMail.send({
-      to: emailLower,
-      from: process.env.SENDGRID_FROM || "noreply@rombuzz.com",
-      subject: "Your RomBuzz verification code",
-      text: `Your RomBuzz verification code is: ${code}`,
-      html: `<p>Your RomBuzz verification code is <strong>${code}</strong>. It expires in 10 minutes.</p>`,
-    });
+await resend.emails.send({
+  from: process.env.RESEND_FROM || "no-reply@rombuzz.com",
+  to: emailLower,
+  subject: "Your RomBuzz verification code",
+  html: `<p>Your RomBuzz verification code is <strong>${code}</strong>. It expires in 10 minutes.</p>`
+});
+
 
     res.json({ success: true });
   } catch (err) {

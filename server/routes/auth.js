@@ -29,7 +29,6 @@
 
 const express = require("express");
 const router = express.Router();
-const sgMail = require("../config/sendgrid");
 const shortid = require("shortid");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
