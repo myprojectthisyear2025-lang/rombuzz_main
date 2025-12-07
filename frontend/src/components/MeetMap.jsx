@@ -137,17 +137,17 @@ export default function MeetMap({
     const [radiusMiles, setRadiusMiles] = useState(2);
   const [showNoPlacesCard, setShowNoPlacesCard] = useState(false);
 
-  // 📍 Bottom sheet open/closed
+   // 📍 Bottom sheet open/closed
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // 🧭 Focus point for centering (used when user picks a place)
   const [focusCenter, setFocusCenter] = useState(null);
 
- 
-
-
+  // 🏷️ Currently highlighted place in the bottom slider
+  const [activePlaceId, setActivePlaceId] = useState(null);
 
   const myId = me?.id || me?._id;
+
   const peerId = peer?.id || peer?._id;
 
   // 🔹 Fetch midpoint suggestions
@@ -375,8 +375,11 @@ useEffect(() => {
     resetAll();
   };
 
-   // 🔹 Choose a place
-  const choosePlace = (p) => {
+     // 🔹 Choose a place
+  const choosePlace = (p, keyOverride) => {
+    const key = keyOverride ?? p.id ?? p.name ?? "";
+    setActivePlaceId(key);
+
     socket.emit("meet:place:selected", { from: myId, to: peerId, place: p });
     alert(`📍 You picked ${p.name}`);
     setSelected(p);
@@ -387,6 +390,7 @@ useEffect(() => {
       setFocusCenter({ lat, lng });
     }
   };
+
 
 
   // User chooses to just see the exact midpoint, no more prompts
@@ -609,14 +613,13 @@ useEffect(() => {
                 </Marker>
               ))}
                   </MapContainer>
-
 {/* 📍 Bottom sheet with suggested places */}
     {Array.isArray(places) && places.length > 0 && (
       <motion.div
         initial={false}
         animate={{ y: sheetOpen ? 0 : 220 }}
         transition={{ type: "spring", stiffness: 260, damping: 32 }}
-className="absolute left-0 right-0 bottom-0 z-[60]"
+        className="absolute left-0 right-0 bottom-0 z-[60]"
       >
         <div className="mx-3 mb-3 rounded-3xl bg-white/95 shadow-2xl border border-gray-100 overflow-hidden">
           {/* Drag handle + title bar */}
@@ -631,68 +634,87 @@ className="absolute left-0 right-0 bottom-0 z-[60]"
             </div>
           </button>
 
-          {/* List of places */}
-          <div className="max-h-64 overflow-y-auto px-3 pb-3 space-y-3">
-            {places.map((p, idx) => {
-              const lat = p.coords?.lat ?? p.lat;
-              const lng = p.coords?.lng ?? p.lng;
-              const baseRef = smartMidpoint || midpoint || myLoc;
-              const dist =
-                baseRef && typeof lat === "number" && typeof lng === "number"
-                  ? distanceMiles(baseRef.lat, baseRef.lng, lat, lng)
-                  : null;
-              const prettyDist =
-                typeof dist === "number" ? `${dist.toFixed(1)} miles away` : "";
+          {/* Horizontal slider of places */}
+          <div className="px-3 pb-4 overflow-x-auto">
+            <div className="flex gap-3">
+              {places.map((p, idx) => {
+                const lat = p.coords?.lat ?? p.lat;
+                const lng = p.coords?.lng ?? p.lng;
+                const baseRef = smartMidpoint || midpoint || myLoc;
+                const dist =
+                  baseRef && typeof lat === "number" && typeof lng === "number"
+                    ? distanceMiles(baseRef.lat, baseRef.lng, lat, lng)
+                    : null;
+                const prettyDist =
+                  typeof dist === "number" ? `${dist.toFixed(1)} miles away` : "";
 
-              const category =
-                p.category ||
-                p.tags?.amenity ||
-                p.tags?.leisure ||
-                "Place";
+                const category =
+                  p.category ||
+                  p.tags?.amenity ||
+                  p.tags?.leisure ||
+                  "Place";
 
-              return (
-                <div
-                  key={p.id || idx}
-                  className="flex gap-3 p-2 rounded-2xl border border-gray-100 bg-white hover:bg-rose-50/40 transition-colors"
-                >
-                  {/* Left: avatar / placeholder */}
-                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-400 to-amber-400 flex items-center justify-center text-white text-lg font-semibold shrink-0">
-                    {(p.name && p.name[0]) || "🏠"}
-                  </div>
+                const key = p.id || `${p.name || "place"}-${idx}`;
+                const isActive = activePlaceId === key;
 
-                  {/* Middle: text info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-sm text-gray-900 truncate">
-                      {p.name || "Unknown place"}
+                return (
+                  <div
+                    key={key}
+                    onClick={() => {
+                      if (typeof lat === "number" && typeof lng === "number") {
+                        setFocusCenter({ lat, lng });
+                        setActivePlaceId(key);
+                      }
+                    }}
+                    className={`min-w-[230px] max-w-[260px] flex gap-3 p-3 rounded-2xl border bg-white transition-all cursor-pointer ${
+                      isActive
+                        ? "border-rose-400 shadow-lg ring-2 ring-rose-300"
+                        : "border-gray-100 hover:bg-rose-50/40"
+                    }`}
+                  >
+                    {/* Left: avatar / placeholder */}
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-400 to-amber-400 flex items-center justify-center text-white text-lg font-semibold shrink-0">
+                      {(p.name && p.name[0]) || "🏠"}
                     </div>
-                    <div className="text-xs text-gray-600 truncate">
-                      {category}
-                      {prettyDist && ` · ${prettyDist}`}
-                    </div>
-                    {p.address && (
-                      <div className="text-[11px] text-gray-500 truncate mt-0.5">
-                        {p.address}
+
+                    {/* Middle: text info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-gray-900 truncate">
+                        {p.name || "Unknown place"}
                       </div>
-                    )}
-                  </div>
+                      <div className="text-xs text-gray-600 truncate">
+                        {category}
+                        {prettyDist && ` · ${prettyDist}`}
+                      </div>
+                      {p.address && (
+                        <div className="text-[11px] text-gray-500 truncate mt-0.5">
+                          {p.address}
+                        </div>
+                      )}
 
-                  {/* Right: Meet button */}
-                  <div className="flex items-center">
-                    <button
-                      type="button"
-                      onClick={() => choosePlace(p)}
-                      className="px-3 py-1.5 rounded-full bg-rose-500 text-white text-xs font-semibold hover:bg-rose-600"
-                    >
-                      📍 Meet here
-                    </button>
+                      {/* Pick button */}
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation(); // don't re-trigger card click
+                            choosePlace(p, key);
+                          }}
+                          className="px-3 py-1.5 rounded-full bg-rose-500 text-white text-xs font-semibold hover:bg-rose-600"
+                        >
+                          ✅ Pick this
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
       </motion.div>
     )}
+
 
           {/* 😕 No places found near midpoint → ask what to do */}
           {showNoPlacesCard && (

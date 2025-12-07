@@ -1,7 +1,7 @@
 {
   "name": "rombuzz-backend-modular",
   "version": "1.0.0",
-  "description": "RomBuzz Backend API - Real-time Dating App for Introverts 💗",
+  "description": "RomBuzz Backend API - Meet Right Here, Right Now ",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
