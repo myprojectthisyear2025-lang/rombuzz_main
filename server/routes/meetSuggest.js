@@ -78,24 +78,73 @@ router.post("/suggest", async (req, res) => {
       lng: (Number(a.lng) + Number(b.lng)) / 2,
     };
 
-    // 👉 Smart midpoint (conceptually 1 mile in from each side around here)
+       // 👉 Smart midpoint (conceptually 1 mile in from each side around here)
     const smartMidpoint = { ...midpoint };
 
-    // 📏 Radius in miles (default 2; expansion will use 5, 10, 20)
-    const miles = Number(radiusMiles) || 2;
+    // 📏 Radius in miles (default 5; can be overridden by caller)
+    const miles = Number(radiusMiles) || 5;
     const radiusMeters = miles * 1609.34;
 
-    // Overpass API query for social venues
+    // Overpass API query for social / dating-friendly venues
+    // 🔥 Includes node + way + relation and many amenity types
     const overpassQuery = `
       [out:json][timeout:25];
       (
+        // Cafés & restaurants
         node["amenity"="cafe"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="cafe"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="cafe"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
         node["amenity"="restaurant"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="restaurant"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="restaurant"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="fast_food"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="fast_food"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="fast_food"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        // Drinks / bars
+        node["amenity"="bar"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="bar"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="bar"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="pub"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="pub"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="pub"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="ice_cream"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="ice_cream"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="ice_cream"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="tea"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="tea"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="tea"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="food_court"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="food_court"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="food_court"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="bakery"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="bakery"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="bakery"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        // Parks (Lake Park etc.)
         node["leisure"="park"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["leisure"="park"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["leisure"="park"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        // Malls & cinemas
+        node["shop"="mall"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["shop"="mall"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["shop"="mall"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
         node["amenity"="cinema"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="cinema"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="cinema"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
       );
       out center;
     `;
+
     const overpassURL = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(
       overpassQuery
     )}`;

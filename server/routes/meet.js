@@ -93,26 +93,71 @@ router.get("/meet-suggest", authMiddleware, async (req, res) => {
       lng: (meUser.location.lng + otherUser.location.lng) / 2,
     };
 
-    // 👉 "Smart" midpoint: conceptually 1 mile in from each side,
-    // but we treat it as the same coordinates and use a 2-mile radius
-    // around this area to look for venues.
+       // 👉 "Smart" midpoint: conceptually 1 mile in from each side,
+    // but we treat it as the same coordinates and use a radius around
+    // this area to look for venues.
     const smartMidpoint = { ...midpoint };
 
-    // 🎯 Base search radius: ~2 miles (in meters)
-    const RADIUS_MILES = 2;
+    // 🎯 Base search radius: ~5 miles (in meters)
+    const RADIUS_MILES = 5;
     const radiusMeters = RADIUS_MILES * 1609.34;
 
     // Overpass query for social / dating-friendly venues
+    // 🔥 Includes node + way + relation and extended amenity list
     const overpassQuery = `
       [out:json][timeout:25];
       (
         node["amenity"="cafe"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="cafe"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="cafe"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
         node["amenity"="restaurant"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="restaurant"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="restaurant"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="fast_food"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="fast_food"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="fast_food"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="bar"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="bar"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="bar"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="pub"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="pub"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="pub"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="ice_cream"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="ice_cream"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="ice_cream"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="tea"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="tea"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="tea"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="food_court"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="food_court"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="food_court"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["amenity"="bakery"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="bakery"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="bakery"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
         node["leisure"="park"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["leisure"="park"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["leisure"="park"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
+        node["shop"="mall"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["shop"="mall"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["shop"="mall"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+
         node["amenity"="cinema"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        way["amenity"="cinema"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
+        relation["amenity"="cinema"](around:${radiusMeters},${smartMidpoint.lat},${smartMidpoint.lng});
       );
       out center;
     `;
+
     const overpassURL = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(
       overpassQuery
     )}`;
@@ -174,24 +219,69 @@ router.post("/suggest", async (req, res) => {
       return res.status(400).json({ error: "Both coordinates (a & b) required" });
     }
 
-    const midpoint = {
+        const midpoint = {
       lat: (Number(a.lat) + Number(b.lat)) / 2,
       lng: (Number(a.lng) + Number(b.lng)) / 2,
     };
 
-    const radius = 1500;
+    const RADIUS_MILES = 5;
+    const radius = RADIUS_MILES * 1609.34;
     let places = [];
 
     const overpassQuery = `
       [out:json][timeout:25];
       (
         node["amenity"="cafe"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["amenity"="cafe"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["amenity"="cafe"](around:${radius},${midpoint.lat},${midpoint.lng});
+
         node["amenity"="restaurant"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["amenity"="restaurant"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["amenity"="restaurant"](around:${radius},${midpoint.lat},${midpoint.lng});
+
+        node["amenity"="fast_food"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["amenity"="fast_food"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["amenity"="fast_food"](around:${radius},${midpoint.lat},${midpoint.lng});
+
+        node["amenity"="bar"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["amenity"="bar"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["amenity"="bar"](around:${radius},${midpoint.lat},${midpoint.lng});
+
+        node["amenity"="pub"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["amenity"="pub"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["amenity"="pub"](around:${radius},${midpoint.lat},${midpoint.lng});
+
+        node["amenity"="ice_cream"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["amenity"="ice_cream"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["amenity"="ice_cream"](around:${radius},${midpoint.lat},${midpoint.lng});
+
+        node["amenity"="tea"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["amenity"="tea"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["amenity"="tea"](around:${radius},${midpoint.lat},${midpoint.lng});
+
+        node["amenity"="food_court"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["amenity"="food_court"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["amenity"="food_court"](around:${radius},${midpoint.lat},${midpoint.lng});
+
+        node["amenity"="bakery"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["amenity"="bakery"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["amenity"="bakery"](around:${radius},${midpoint.lat},${midpoint.lng});
+
         node["leisure"="park"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["leisure"="park"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["leisure"="park"](around:${radius},${midpoint.lat},${midpoint.lng});
+
+        node["shop"="mall"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["shop"="mall"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["shop"="mall"](around:${radius},${midpoint.lat},${midpoint.lng});
+
         node["amenity"="cinema"](around:${radius},${midpoint.lat},${midpoint.lng});
+        way["amenity"="cinema"](around:${radius},${midpoint.lat},${midpoint.lng});
+        relation["amenity"="cinema"](around:${radius},${midpoint.lat},${midpoint.lng});
       );
       out center;
     `;
+
     const overpassURL = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(
       overpassQuery
     )}`;
