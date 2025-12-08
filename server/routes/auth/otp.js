@@ -72,7 +72,7 @@ if (!process.env.RESEND_API_KEY) {
 await resend.emails.send({
   from: process.env.RESEND_FROM || "no-reply@rombuzz.com",
   to: emailLower,
-  subject: "🔐 Your RomBuzz Verification Code",
+  subject: "Your RomBuzz Verification Code",
   html: `
     <div style="
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; 
@@ -141,8 +141,8 @@ await resend.emails.send({
           margin-bottom: 22px;
         ">
           ⚠️ <strong>Security Notice</strong>: Never share your verification code with
-          anyone — not even RomBuzz support. If you didn’t request this code,
-          someone might be trying to access your account.
+          anyone. If you didn’t request this code,
+          someone might be trying to access your account. Change your password immediately to protect your account.
         </p>
 
         <p style="color:#999; font-size: 12px; margin-top: 10px;">
