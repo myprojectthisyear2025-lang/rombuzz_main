@@ -72,8 +72,44 @@ if (!process.env.RESEND_API_KEY) {
 await resend.emails.send({
   from: process.env.RESEND_FROM || "no-reply@rombuzz.com",
   to: emailLower,
-  subject: "Your RomBuzz verification code",
-  html: `<p>Your RomBuzz verification code is <strong>${code}</strong>. It expires in 10 minutes.</p>`
+  subject: "Your RomBuzz Verification Code",
+  html: `
+    <div style="font-family: Arial, sans-serif; padding: 16px; line-height: 1.6;">
+      <h2 style="color:#ff3366; margin-bottom: 8px;">RomBuzz Verification</h2>
+
+      <p>Your one-time verification code is:</p>
+
+      <div style="
+        text-align: center;
+        margin: 20px 0;
+      ">
+        <p style="
+          display: inline-block;
+          font-size: 36px;
+          font-weight: 900;
+          letter-spacing: 6px;
+          color:#000;
+          padding: 12px 20px;
+        ">
+          <strong>${code}</strong>
+        </p>
+      </div>
+
+      <p>This code will expire in <strong>10 minutes</strong>.<br>
+      Please enter it in the app to verify your email address.</p>
+      <hr style="margin: 20px 0;">
+
+      <p style="color:#555;">
+        ⚠️ <strong>Security Warning:</strong><br>
+        Do NOT share this code with anyone.<br>
+        If you did not request this code, someone may be trying to access your account.
+      </p>
+
+      <p style="margin-top: 20px; color:#777; font-size: 12px;">
+        RomBuzz © 2025 • Real-Time Social Matching
+      </p>
+    </div>
+  `
 });
 
 
