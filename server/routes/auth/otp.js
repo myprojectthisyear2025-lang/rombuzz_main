@@ -72,45 +72,90 @@ if (!process.env.RESEND_API_KEY) {
 await resend.emails.send({
   from: process.env.RESEND_FROM || "no-reply@rombuzz.com",
   to: emailLower,
-  subject: "Your RomBuzz Verification Code",
+  subject: "🔐 Your RomBuzz Verification Code",
   html: `
-    <div style="font-family: Arial, sans-serif; padding: 16px; line-height: 1.6;">
-      <h2 style="color:#ff3366; margin-bottom: 8px;">RomBuzz Verification</h2>
-
-      <p>Your one-time verification code is:</p>
+    <div style="
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; 
+      padding: 24px;
+      background-color: #f5f5f7;
+      color: #111;
+    ">
 
       <div style="
+        max-width: 420px;
+        margin: 0 auto;
+        background: #ffffff;
+        border-radius: 20px;
+        padding: 32px 28px;
+        box-shadow: 0 8px 28px rgba(0,0,0,0.10);
         text-align: center;
-        margin: 20px 0;
       ">
-        <p style="
-          display: inline-block;
-          font-size: 36px;
-          font-weight: 900;
-          letter-spacing: 6px;
-          color:#000;
-          padding: 12px 20px;
+
+        <img 
+          src="https://raw.githubusercontent.com/myprojectthisyear2025-lang/rombuzz_main/main/frontend/public/assets/logo.png"
+          alt="RomBuzz Logo"
+          style="width: 90px; margin: 0 auto 20px auto; display: block;"
+        />
+
+        <h2 style="
+          font-size: 22px;
+          font-weight: 600;
+          margin-bottom: 12px;
+          color: #000;
         ">
-          <strong>${code}</strong>
+          Your Verification Code
+        </h2>
+
+        <p style="color:#444; margin-bottom: 24px;">
+          Use this code to verify your identity and continue.
         </p>
+
+        <div style="
+          background: #f2f2f7;
+          border-radius: 14px;
+          padding: 18px 0;
+          margin-bottom: 26px;
+        ">
+          <p style="
+            font-size: 40px;
+            font-weight: 800;
+            letter-spacing: 10px;
+            margin: 0;
+            color: #000;
+          ">
+            <strong>${code}</strong>
+          </p>
+        </div>
+
+        <p style="color:#555; margin-bottom: 16px;">
+          This code expires in <strong>10 minutes</strong>.
+        </p>
+
+        <p style="
+          background:#fffbe6;
+          padding: 12px;
+          border-radius: 12px;
+          color:#8a6d1f;
+          font-size: 14px;
+          line-height: 1.5;
+          margin-bottom: 22px;
+        ">
+          ⚠️ <strong>Security Notice</strong>: Never share your verification code with
+          anyone — not even RomBuzz support. If you didn’t request this code,
+          someone might be trying to access your account.
+        </p>
+
+        <p style="color:#999; font-size: 12px; margin-top: 10px;">
+          RomBuzz © 2025 • All rights reserved.
+        </p>
+
       </div>
 
-      <p>This code will expire in <strong>10 minutes</strong>.<br>
-      Please enter it in the app to verify your email address.</p>
-      <hr style="margin: 20px 0;">
-
-      <p style="color:#555;">
-        ⚠️ <strong>Security Warning:</strong><br>
-        Do NOT share this code with anyone.<br>
-        If you did not request this code, someone may be trying to access your account.
-      </p>
-
-      <p style="margin-top: 20px; color:#777; font-size: 12px;">
-        RomBuzz © 2025 • Real-Time Social Matching
-      </p>
     </div>
   `
 });
+
+
 
 
     res.json({ success: true });
