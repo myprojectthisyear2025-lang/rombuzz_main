@@ -181,7 +181,7 @@ router.post("/register", async (req, res) => {
       return res.status(404).json({ error: "No OTP request found" });
 
     // ❌ Validate OTP
-    if (user.verificationCode !== code)
+if (String(user.verificationCode).trim() !== String(code).trim())
       return res.status(400).json({ error: "Invalid verification code" });
 
     if (user.codeExpiresAt && user.codeExpiresAt < new Date())
