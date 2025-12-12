@@ -1,8 +1,8 @@
 // src/pages/Signup.jsx
-import React, { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
-import axios from "axios";
 import { GoogleLogin } from "@react-oauth/google";
+import axios from "axios";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 //const API_BASE = "http://localhost:4000/api";
 //const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com/api";
@@ -58,33 +58,47 @@ export default function Signup({ setUser }) {
     }
   };
 
-  // Verify the code
+   // Verify the code (real backend verification)
   const verifyCode = async () => {
     setError("");
-    if (!code) return setError("Please enter the 6-digit code.");
+    setSuccess("");
+
+    const trimmedEmail = email.trim();
+    const trimmedCode = code.trim();
+
+    if (!trimmedCode || trimmedCode.length !== 6) {
+      return setError("Please enter the 6-digit code.");
+    }
 
     setLoading(true);
     try {
-      // Here we just simulate verification because backend doesn’t yet have /verify-code.
-      // Normally, you'd POST to /api/auth/verify-code and validate.
-     if (code.trim().length === 6) {
-  setSuccess("Email verified successfully! Redirecting...");
-  setTimeout(() => {
-    navigate("/register", {
-      state: { verifiedEmail: email.trim(), from: "signup" },
-      replace: true,
-    });
-  }, 800);
-} else {
-  setError("Incorrect code. Please check again.");
-}
+      const res = await axios.post(`${API_BASE}/auth/register`, {
+        email: trimmedEmail.toLowerCase(),
+        code: trimmedCode,
+      });
 
+      if (!res.data || !res.data.token || !res.data.user) {
+        throw new Error("Invalid verification response.");
+      }
+
+      setSuccess("Email verified successfully! Redirecting...");
+      setTimeout(() => {
+        navigate("/register", {
+          state: { verifiedEmail: trimmedEmail, from: "signup" },
+          replace: true,
+        });
+      }, 800);
     } catch (e) {
-      setError("Invalid or expired code.");
+      const msg =
+        e?.response?.data?.error ||
+        e?.message ||
+        "Invalid or expired verification code.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
   };
+
 
  // ✅ FIXED Google Signup Handler
 const handleGoogleSignup = async (response) => {
