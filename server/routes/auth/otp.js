@@ -166,11 +166,12 @@ await resend.emails.send({
 });
 
 /* ============================================================
-   📝 VERIFY CODE + REGISTER USER
+   🧪 VERIFY OTP ONLY (NO ACCOUNT CREATION)
+   Used by mobile + web initial step
 ============================================================ */
-router.post("/register", async (req, res) => {
+router.post("/verify-code", async (req, res) => {
   try {
-    const { email, code, firstName, lastName, password } = req.body || {};
+    const { email, code } = req.body || {};
     if (!email || !code)
       return res.status(400).json({ error: "Email and code required" });
 
@@ -180,13 +181,40 @@ router.post("/register", async (req, res) => {
     if (!user)
       return res.status(404).json({ error: "No OTP request found" });
 
-    // ❌ Validate OTP
-if (String(user.verificationCode).trim() !== String(code).trim())
+    // Validate OTP safely
+    if (String(user.verificationCode).trim() !== String(code).trim())
       return res.status(400).json({ error: "Invalid verification code" });
 
     if (user.codeExpiresAt && user.codeExpiresAt < new Date())
       return res.status(400).json({ error: "Verification code expired" });
 
+    // Mark only verified email — DO NOT finalize account yet
+    user.isVerified = true;
+    await user.save();
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("❌ verify-code error:", err);
+    return res.status(500).json({ error: "Server error verifying code" });
+  }
+});
+
+/* ============================================================
+   📝 VERIFY CODE + REGISTER USER
+============================================================ */
+router.post("/register", async (req, res) => {
+  try {
+   const { email, firstName, lastName, password } = req.body || {};
+if (!email)
+  return res.status(400).json({ error: "Email required" });
+
+    const emailLower = String(email).trim().toLowerCase();
+    let user = await User.findOne({ email: emailLower });
+
+    if (!user)
+      return res.status(404).json({ error: "No OTP request found" });
+
+    
     // 1️⃣ Set password (optional)
     if (password) {
       user.passwordHash = await bcrypt.hash(password, 10);
@@ -197,9 +225,7 @@ if (String(user.verificationCode).trim() !== String(code).trim())
     if (lastName) user.lastName = lastName;
 
     // 3️⃣ Finalize account
-    user.isVerified = true;
-    user.verificationCode = null;
-    user.codeExpiresAt = null;
+    
     user.createdAt = user.createdAt || new Date();
     await user.save();
 
