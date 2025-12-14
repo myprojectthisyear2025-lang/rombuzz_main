@@ -72,17 +72,19 @@ const userSchema = new mongoose.Schema(
 
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
-
     // 🔒 System flags
     isPremium: { type: Boolean, default: false },
     isVerified: { type: Boolean, default: false },
     blockedUsers: { type: [String], default: [] },
+    
+    // 🔐 OTP Verification (required for email verification)
+    verificationCode: { type: String, default: "" },
+    codeExpiresAt: { type: Date, default: null },
   },
   {
     timestamps: true, // auto adds createdAt + updatedAt
     minimize: true,
   }
-
 );
 
 // ❌ Remove the redundant manual index; we already have `index: true` on `email`

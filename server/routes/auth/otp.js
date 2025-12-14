@@ -176,22 +176,51 @@ router.post("/verify-code", async (req, res) => {
       return res.status(400).json({ error: "Email and code required" });
 
     const emailLower = String(email).trim().toLowerCase();
+    const codeTrimmed = String(code).trim();
+    
+    console.log(`🔍 Verifying OTP for ${emailLower}, code: ${codeTrimmed}`);
+
+    // Find user with OTP fields
     let user = await User.findOne({ email: emailLower });
+    
+    // Debug logging
+    console.log("DEBUG OTP Check:", {
+      userFound: !!user,
+      storedCode: user?.verificationCode,
+      codeExpiresAt: user?.codeExpiresAt,
+      currentTime: new Date(),
+      isExpired: user?.codeExpiresAt ? user.codeExpiresAt < new Date() : 'no expiry'
+    });
 
     if (!user)
       return res.status(404).json({ error: "No OTP request found" });
 
-    // Validate OTP safely
-    if (String(user.verificationCode).trim() !== String(code).trim())
-      return res.status(400).json({ error: "Invalid verification code" });
+    // Check if OTP exists
+    if (!user.verificationCode || user.verificationCode.trim() === "") {
+      return res.status(400).json({ error: "No verification code found. Please request a new one." });
+    }
 
-    if (user.codeExpiresAt && user.codeExpiresAt < new Date())
+    // Check expiry first
+    if (user.codeExpiresAt && user.codeExpiresAt < new Date()) {
+      // Clear expired OTP
+      user.verificationCode = "";
+      user.codeExpiresAt = null;
+      await user.save();
       return res.status(400).json({ error: "Verification code expired" });
+    }
 
-    // Mark only verified email — DO NOT finalize account yet
+    // Compare codes (both as strings, trimmed)
+    if (user.verificationCode.trim() !== codeTrimmed) {
+      return res.status(400).json({ error: "Invalid verification code" });
+    }
+
+    // Clear OTP after successful verification
+    user.verificationCode = "";
+    user.codeExpiresAt = null;
     user.isVerified = true;
     await user.save();
 
+    console.log(`✅ OTP verified successfully for ${emailLower}`);
     return res.json({ success: true });
   } catch (err) {
     console.error("❌ verify-code error:", err);
@@ -204,9 +233,9 @@ router.post("/verify-code", async (req, res) => {
 ============================================================ */
 router.post("/register", async (req, res) => {
   try {
-   const { email, firstName, lastName, password } = req.body || {};
-if (!email)
-  return res.status(400).json({ error: "Email required" });
+    const { email, firstName, lastName, password } = req.body || {};
+    if (!email)
+      return res.status(400).json({ error: "Email required" });
 
     const emailLower = String(email).trim().toLowerCase();
     let user = await User.findOne({ email: emailLower });
@@ -214,7 +243,11 @@ if (!email)
     if (!user)
       return res.status(404).json({ error: "No OTP request found" });
 
-    
+    // ✅ CRITICAL: Verify OTP is already validated
+    if (!user.isVerified) {
+      return res.status(400).json({ error: "Email not verified. Please verify your email first." });
+    }
+
     // 1️⃣ Set password (optional)
     if (password) {
       user.passwordHash = await bcrypt.hash(password, 10);
@@ -224,12 +257,15 @@ if (!email)
     if (firstName) user.firstName = firstName;
     if (lastName) user.lastName = lastName;
 
-    // 3️⃣ Finalize account
+    // 3️⃣ Clear OTP data (security cleanup)
+    user.verificationCode = "";
+    user.codeExpiresAt = null;
     
+    // 4️⃣ Finalize account
     user.createdAt = user.createdAt || new Date();
     await user.save();
 
-    // 4️⃣ Sign JWT
+    // 5️⃣ Sign JWT
     const token = signToken(
       { id: user.id, email: user.email },
       JWT_SECRET,
@@ -242,6 +278,5 @@ if (!email)
     res.status(500).json({ error: "Server error verifying code" });
   }
 });
-
 console.log("✅ Auth: OTP routes initialized (Mongo-only)");
 module.exports = router;
