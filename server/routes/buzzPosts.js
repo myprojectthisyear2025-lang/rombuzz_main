@@ -51,8 +51,15 @@ router.use(require("./buzzpost/buzz.edit"));
 // 5️⃣ Media reactions, comments, privacy toggles
 router.use(require("./buzzpost/buzz.media"));
 
+// 5.1️⃣ Media gifting (gallery gifts)
+router.use(require("./buzzpost/buzz.media.gifts"));
+
+// 5.2️⃣ Media insights + match-private threads (Insights Drawer backend)
+router.use(require("./buzzpost/buzz.media.insights"));
+
 // 6️⃣ Likes ❤️ and emoji reactions 😍🔥😂 (merged file)
 router.use(require("./buzzpost/buzz.engagement"));
+
 
 // 7️⃣ (Optional future) View counter, analytics, reports, etc.
 // router.use(require("./buzzpost/buzz.views"));
