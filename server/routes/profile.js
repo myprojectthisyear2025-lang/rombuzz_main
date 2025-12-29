@@ -65,14 +65,17 @@ router.get("/profile/full", authMiddleware, async (req, res) => {
       .lean();
 
     // 4️⃣ Build response payload
-    res.json({
-      user: {
-        ...baseSanitizeUser(user),
-        media: user.photos || [],
-        posts,
-        notifications,
-      },
-    });
+   res.json({
+  user: {
+    ...baseSanitizeUser(user),
+    media: Array.isArray(user.media) && user.media.length > 0
+      ? user.media
+      : (user.photos || []),
+    posts,
+    notifications,
+  },
+});
+
   } catch (err) {
     console.error("❌ /profile/full (Mongo) error:", err);
     res.status(500).json({ error: "Failed to fetch full profile" });
