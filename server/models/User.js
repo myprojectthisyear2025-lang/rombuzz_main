@@ -66,12 +66,22 @@ const userSchema = new mongoose.Schema(
     // premium + settings
     premiumTier: { type: String, default: "free" },
     settings: { type: Object, default: {} },
-
     // 💬 Activity / status
     lastActive: { type: Date, default: Date.now },
 
+    // 👁️ Profile Views (All-time + Today)
+    // - total: lifetime views
+    // - today: views for current YYYY-MM-DD
+    // - lastViewDate: used to reset "today" safely without cron jobs
+    profileViews: {
+      total: { type: Number, default: 0 },
+      today: { type: Number, default: 0 },
+      lastViewDate: { type: String, default: "" }, // YYYY-MM-DD
+    },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
+
     // 🔒 System flags
     isPremium: { type: Boolean, default: false },
     isVerified: { type: Boolean, default: false },

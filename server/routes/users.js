@@ -64,6 +64,68 @@ router.get("/me", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch user" });
   }
 });
+/**
+ * POST /api/users/:id/view
+ * Increments profile view counts for the target user.
+ * Tracks:
+ *  - total (all-time)
+ *  - today (daily)
+ *
+ * Rules:
+ *  - viewer must be authenticated
+ *  - viewer cannot be the same user
+ *  - resets "today" automatically when date changes (no cron)
+ */
+router.post("/:id/view", authMiddleware, async (req, res) => {
+  try {
+    const viewerId = req.user.id;
+    const targetId = req.params.id;
+
+    if (!targetId)
+      return res.status(400).json({ error: "Target user id required" });
+
+    if (viewerId === targetId)
+      return res.json({ ok: true, ignored: true });
+
+    const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const target = await User.findOne({ id: targetId });
+    if (!target)
+      return res.status(404).json({ error: "User not found" });
+
+    // Init safety
+    if (!target.profileViews) {
+      target.profileViews = { total: 0, today: 0, lastViewDate: "" };
+    }
+
+    // Reset daily count if day changed
+    if (target.profileViews.lastViewDate !== todayStr) {
+      target.profileViews.today = 0;
+      target.profileViews.lastViewDate = todayStr;
+    }
+
+    target.profileViews.total =
+      Number(target.profileViews.total || 0) + 1;
+
+    target.profileViews.today =
+      Number(target.profileViews.today || 0) + 1;
+
+    target.updatedAt = Date.now();
+    await target.save();
+
+    return res.json({
+      ok: true,
+      profileViews: {
+        total: target.profileViews.total,
+        today: target.profileViews.today,
+        lastViewDate: target.profileViews.lastViewDate,
+      },
+    });
+  } catch (err) {
+    console.error("❌ POST /users/:id/view error:", err);
+    res.status(500).json({ error: "Failed to record profile view" });
+  }
+});
 
 /**
  * POST /api/location → update user geolocation
@@ -307,6 +369,10 @@ router.get("/social-stats", authMiddleware, async (req, res) => {
       m.user1 === myId ? m.user2 : m.user1
     );
 
+      // ✅ Include profile views (today + total)
+    // If missing for older users, default safely.
+    const me = await User.findOne({ id: myId }).select("profileViews").lean();
+
     res.json({
       likedCount: liked.length,
       likedYouCount: likedYou.length,
@@ -314,7 +380,13 @@ router.get("/social-stats", authMiddleware, async (req, res) => {
       liked: liked.map((l) => l.to),
       likedYou: likedYou.map((l) => l.from),
       matches: matchIds,
+
+      profileViews: {
+        today: Number(me?.profileViews?.today || 0),
+        total: Number(me?.profileViews?.total || 0),
+      },
     });
+
   } catch (err) {
     console.error("❌ /users/social-stats error:", err);
     res.status(500).json({ error: "Failed to fetch social stats" });
