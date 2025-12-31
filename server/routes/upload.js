@@ -191,11 +191,107 @@ router.post("/upload-media", authMiddleware, async (req, res) => {
     await user.save();
 
     res.json({ success: true, media: user.media });
+} catch (err) {
+  console.error("❌ /upload-media error:", err);
+  res.status(500).json({ error: "Upload failed" });
+}
+});
+
+/* ============================================================
+   🧩 6️⃣ UPDATE MEDIA PRIVACY  (public/private)
+   PATCH /api/media/:id/privacy
+============================================================ */
+router.patch("/media/:id/privacy", authMiddleware, async (req, res) => {
+  try {
+    const mediaId = String(req.params.id || "");
+    const { privacy } = req.body || {};
+
+    const user = await User.findOne({ id: req.user.id });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.media ||= [];
+    const idx = user.media.findIndex((m) => String(m.id) === mediaId);
+    if (idx < 0) return res.status(404).json({ error: "Media not found" });
+
+    const current = user.media[idx];
+    const next =
+      privacy === "public" || privacy === "private"
+        ? privacy
+        : current.privacy === "private"
+        ? "public"
+        : "private";
+
+    user.media[idx] = { ...current, privacy: next };
+    await user.save();
+
+    return res.json({ success: true, media: user.media[idx], privacy: next });
   } catch (err) {
-    console.error("❌ /upload-media error:", err);
-    res.status(500).json({ error: "Upload failed" });
+    console.error("❌ PATCH /media/:id/privacy error:", err);
+    res.status(500).json({ error: "Failed to update privacy" });
+  }
+});
+
+/* ============================================================
+   🧩 7️⃣ UPDATE MEDIA (caption and/or privacy)
+   PATCH /api/media/:id
+============================================================ */
+router.patch("/media/:id", authMiddleware, async (req, res) => {
+  try {
+    const mediaId = String(req.params.id || "");
+    const { caption, privacy } = req.body || {};
+
+    const user = await User.findOne({ id: req.user.id });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.media ||= [];
+    const idx = user.media.findIndex((m) => String(m.id) === mediaId);
+    if (idx < 0) return res.status(404).json({ error: "Media not found" });
+
+    const current = user.media[idx];
+
+    const next = {
+      ...current,
+      ...(typeof caption === "string" ? { caption } : null),
+      ...(privacy === "public" || privacy === "private" ? { privacy } : null),
+    };
+
+    user.media[idx] = next;
+    await user.save();
+
+    return res.json({ success: true, media: next });
+  } catch (err) {
+    console.error("❌ PATCH /media/:id error:", err);
+    res.status(500).json({ error: "Failed to update media" });
+  }
+});
+
+/* ============================================================
+   🧩 8️⃣ DELETE MEDIA (remove from Mongo user.media[])
+   DELETE /api/media/:id
+============================================================ */
+router.delete("/media/:id", authMiddleware, async (req, res) => {
+  try {
+    const mediaId = String(req.params.id || "");
+
+    const user = await User.findOne({ id: req.user.id });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.media ||= [];
+    const before = user.media.length;
+    user.media = user.media.filter((m) => String(m.id) !== mediaId);
+
+    if (user.media.length === before) {
+      return res.status(404).json({ error: "Media not found" });
+    }
+
+    await user.save();
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("❌ DELETE /media/:id error:", err);
+    res.status(500).json({ error: "Failed to delete media" });
   }
 });
 
 console.log("✅ Upload routes initialized (MongoDB)");
 module.exports = router;
+
