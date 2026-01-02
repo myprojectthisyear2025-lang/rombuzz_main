@@ -64,17 +64,39 @@ router.get("/profile/full", authMiddleware, async (req, res) => {
       .limit(20)
       .lean();
 
-    // 4️⃣ Build response payload
-   res.json({
-  user: {
-    ...baseSanitizeUser(user),
-    media: Array.isArray(user.media) && user.media.length > 0
-      ? user.media
-      : (user.photos || []),
-    posts,
-    notifications,
-  },
-});
+     // 4️⃣ Build response payload
+    const sanitized = baseSanitizeUser(user);
+
+    res.json({
+      user: {
+        ...sanitized,
+
+        // ✅ FORCE INCLUDE: editable profile fields (so mobile can persist after refresh/restart)
+        firstName: user.firstName ?? sanitized.firstName ?? "",
+        lastName: user.lastName ?? sanitized.lastName ?? "",
+        bio: user.bio ?? sanitized.bio ?? "",
+        gender: user.gender ?? sanitized.gender ?? "",
+        dob: user.dob ?? sanitized.dob ?? "",
+        city: user.city ?? sanitized.city ?? "",
+        height: user.height ?? sanitized.height ?? "",
+        orientation: user.orientation ?? sanitized.orientation ?? "",
+        lookingFor: user.lookingFor ?? sanitized.lookingFor ?? "",
+        likes: user.likes ?? sanitized.likes ?? [],
+        dislikes: user.dislikes ?? sanitized.dislikes ?? [],
+        interests: user.interests ?? sanitized.interests ?? [],
+        hobbies: user.hobbies ?? sanitized.hobbies ?? [],
+
+        // ✅ keep your media logic (web/mobile compatibility)
+        media:
+          Array.isArray(user.media) && user.media.length > 0
+            ? user.media
+            : user.photos || [],
+
+        posts,
+        notifications,
+      },
+    });
+
 
   } catch (err) {
     console.error("❌ /profile/full (Mongo) error:", err);
