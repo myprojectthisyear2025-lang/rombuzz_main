@@ -19,14 +19,24 @@ const userSchema = new mongoose.Schema(
     passwordHash: { type: String, default: "" },
     googleId: { type: String, default: "" },
 
-        // 💫 Profile fields
+       // 💫 Profile fields
     gender: { type: String, default: "" },
     dob: { type: String, default: "" },
+
+    // ✅ Basics (editable + shown in Info tab)
+    city: { type: String, default: "" },
+    height: { type: String, default: "" },
+
     lookingFor: { type: String, default: "" },
     interestedIn: { type: [String], default: [] },
 
+    // ✅ Vibe (editable + shown in Info tab)
+    likes: { type: String, default: "" },
+    dislikes: { type: String, default: "" },
+
     // generic preferences object (Discover filters etc.)
     preferences: { type: Object, default: {} },
+
 
     // visibility controls
     visibilityMode: { type: String, default: "full" },         // full / blurred / ghost etc.

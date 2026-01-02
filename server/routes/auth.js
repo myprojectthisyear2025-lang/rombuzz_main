@@ -64,23 +64,33 @@ router.use("/", require("./auth/otp"));
 // =======================
 router.post("/register-full", async (req, res) => {
   try {
-    const {
-      email,
-      firstName,
-      lastName,
-      password,
-      gender,
-      dob,
-      lookingFor,
-      interestedIn,
-      preferences,
-      visibilityMode,
-      interests,
-      avatar,
-      photos,
-      phone,
-      voiceUrl,
-    } = req.body || {};
+ const {
+  email,
+  firstName,
+  lastName,
+  password,
+  gender,
+  dob,
+  lookingFor,
+  interestedIn,
+
+  // ✅ Basics (optional for now)
+  city,
+  height,
+
+  // ✅ Vibe (optional for now)
+  likes,
+  dislikes,
+
+  preferences,
+  visibilityMode,
+  interests,
+  avatar,
+  photos,
+  phone,
+  voiceUrl,
+} = req.body || {};
+
 
     if (!email || !firstName || !lastName) {
       return res.status(400).json({ error: "Missing required fields." });
@@ -93,9 +103,15 @@ router.post("/register-full", async (req, res) => {
     if (user) {
       user.firstName = firstName;
       user.lastName = lastName;
-      user.gender = gender;
-      user.dob = dob;
-      user.lookingFor = lookingFor;
+    user.gender = gender;
+user.dob = dob;
+user.lookingFor = lookingFor;
+
+if (city !== undefined) user.city = city;
+if (height !== undefined) user.height = height;
+if (likes !== undefined) user.likes = likes;
+if (dislikes !== undefined) user.dislikes = dislikes;
+
       user.interestedIn = interestedIn || [];
       user.preferences = preferences || {};
       user.visibilityMode = visibilityMode || "public";
@@ -118,28 +134,40 @@ router.post("/register-full", async (req, res) => {
 
     // 🔁 Fallback: no Mongo record yet → create new
     const passwordHash = password ? await bcrypt.hash(password, 10) : null;
-    const newUser = {
-      id: shortid.generate(),
-      email: emailLower,
-      firstName,
-      lastName,
-      passwordHash,
-      gender,
-      dob,
-      lookingFor,
-      interestedIn,
-      preferences,
-      visibilityMode,
-      interests,
-      avatar,
-      photos,
-      phone,
-      voiceUrl,
-      isVerified: true,
-      profileComplete: true,
-      hasOnboarded: true,
-      createdAt: Date.now(),
-    };
+   const newUser = {
+  id: shortid.generate(),
+  email: emailLower,
+  firstName,
+  lastName,
+  passwordHash,
+
+  gender,
+  dob,
+  lookingFor,
+  interestedIn,
+
+  // ✅ Basics
+  city: city || "",
+  height: height || "",
+
+  // ✅ Vibe
+  likes: likes || "",
+  dislikes: dislikes || "",
+
+  preferences,
+  visibilityMode,
+  interests,
+  avatar,
+  photos,
+  phone,
+  voiceUrl,
+
+  isVerified: true,
+  profileComplete: true,
+  hasOnboarded: true,
+  createdAt: Date.now(),
+};
+
 
     await User.create(newUser);
 

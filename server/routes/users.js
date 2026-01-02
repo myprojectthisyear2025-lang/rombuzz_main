@@ -234,13 +234,24 @@ router.get("/matches", authMiddleware, async (req, res) => {
  */
 router.put("/me", authMiddleware, async (req, res) => {
   try {
-    const allowed = [
+       const allowed = [
       "firstName", "lastName", "dob", "gender", "bio", "location",
+
+      // ✅ Basics
+      "city", "height", "lookingFor",
+
+      // ✅ Vibe
+      "likes", "dislikes",
+
       "visibility", "avatar", "phone", "interests", "favorites",
       "orientation", "hobbies", "vibe", "filterVibe", "premiumTier",
       "settings", "visibilityMode", "fieldVisibility",
-      "preferences"
+      "preferences",
+
+      // (optional but safe if you ever expose it later)
+      "interestedIn"
     ];
+
 
     const updates = {};
     for (const k of allowed) {
