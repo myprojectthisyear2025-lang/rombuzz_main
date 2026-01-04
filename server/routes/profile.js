@@ -38,6 +38,7 @@ const User = require("../models/User");
 const PostModel = require("../models/PostModel");
 const Notification = require("../models/Notification");
 const Match = require("../models/Match");
+const PrivateNote = require("../models/PrivateNote");
 
 /* ============================================================
    👤 SECTION 1: FULL PROFILE (with media & posts)
@@ -242,6 +243,102 @@ router.put("/users/complete-profile", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Failed to complete profile" });
   }
 });
+/* ============================================================
+   📝 SECTION 4: PRIVATE NOTES (Diary-style, user-only)
+============================================================ */
+
+/**
+ * GET /api/profile/notes
+ * Returns all private notes for the authenticated user.
+ */
+router.get("/profile/notes", authMiddleware, async (req, res) => {
+  try {
+    const notes = await PrivateNote.find({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({ notes });
+  } catch (err) {
+    console.error("❌ GET /profile/notes error:", err);
+    res.status(500).json({ error: "Failed to fetch private notes" });
+  }
+});
+
+/**
+ * POST /api/profile/notes
+ * Creates a new private note.
+ */
+router.post("/profile/notes", authMiddleware, async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: "Note text is required" });
+    }
+
+    const note = await PrivateNote.create({
+      userId: req.user.id,
+      text,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    res.json({ note });
+  } catch (err) {
+    console.error("❌ POST /profile/notes error:", err);
+    res.status(500).json({ error: "Failed to create note" });
+  }
+});
+
+/**
+ * PUT /api/profile/notes/:id
+ * Updates an existing private note (owner only).
+ */
+router.put("/profile/notes/:id", authMiddleware, async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: "Note text is required" });
+    }
+
+    const note = await PrivateNote.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { $set: { text, updatedAt: Date.now() } },
+      { new: true }
+    ).lean();
+
+    if (!note) {
+      return res.status(404).json({ error: "Note not found" });
+    }
+
+    res.json({ note });
+  } catch (err) {
+    console.error("❌ PUT /profile/notes error:", err);
+    res.status(500).json({ error: "Failed to update note" });
+  }
+});
+
+/**
+ * DELETE /api/profile/notes/:id
+ * Deletes a private note (owner only).
+ */
+router.delete("/profile/notes/:id", authMiddleware, async (req, res) => {
+  try {
+    const result = await PrivateNote.deleteOne({
+      _id: req.params.id,
+      userId: req.user.id,
+    });
+
+    if (!result.deletedCount) {
+      return res.status(404).json({ error: "Note not found" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ DELETE /profile/notes error:", err);
+    res.status(500).json({ error: "Failed to delete note" });
+  }
+});
+
 
 console.log("✅ Profile routes initialized (full + complete + google)");
 
