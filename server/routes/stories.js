@@ -89,16 +89,36 @@ router.post("/", authMiddleware, async (req, res) => {
 // ============================================================
 router.get("/me", authMiddleware, async (req, res) => {
   try {
-    const stories = await StoryModel.find(onlyActiveQuery({ userId: req.user.id }))
+    const myId = req.user.id;
+
+    const stories = await StoryModel.find(
+      onlyActiveQuery({ userId: myId })
+    )
       .sort({ createdAt: -1 })
       .lean();
 
-    return res.json({ stories: stories || [] });
+    // fetch owner once (safe + minimal)
+    const user = await User.findOne({ id: myId })
+      .select("id firstName lastName avatar")
+      .lean();
+
+    return res.json({
+      user: user
+        ? {
+            id: user.id,
+            firstName: user.firstName || "",
+            lastName: user.lastName || "",
+            avatar: user.avatar || "",
+          }
+        : { id: myId, firstName: "", lastName: "", avatar: "" },
+      stories: stories || [],
+    });
   } catch (err) {
     console.error("❌ GET /api/stories/me error:", err);
     return res.status(500).json({ error: "Failed to load my stories" });
   }
 });
+
 
 // ============================================================
 // GET /api/stories/feed
