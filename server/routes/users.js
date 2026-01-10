@@ -234,24 +234,85 @@ router.get("/matches", authMiddleware, async (req, res) => {
  */
 router.put("/me", authMiddleware, async (req, res) => {
   try {
-       const allowed = [
-      "firstName", "lastName", "dob", "gender", "bio", "location",
+     const allowed = [
+  // Identity
+  "firstName",
+  "lastName",
+  "dob",
+  "gender",
+  "genderVisibility",
+  "pronouns",
+  "orientation",
+  "orientationVisibility",
 
-      // ✅ Basics
-      "city", "height", "lookingFor",
+  // Location
+  "city",
+  "country",
+  "hometown",
+  "latitude",
+  "longitude",
+  "distanceVisibility",
+  "travelMode",
+  "location",
 
-      // ✅ Vibe
-      "likes", "dislikes",
+  // About
+  "bio",
+  "voiceUrl",
+  "vibeTags",
 
-      "visibility", "avatar", "phone", "interests", "favorites",
-      "orientation", "hobbies", "vibe", "filterVibe", "premiumTier",
-      "settings", "visibilityMode", "fieldVisibility",
-      "preferences",
+  // Dating intentions
+  "lookingFor",
+  "relationshipStyle",
+  "interestedIn",
 
-      // (optional but safe if you ever expose it later)
-      "interestedIn"
-    ];
+  // Body
+  "height",
+  "bodyType",
+  "fitnessLevel",
 
+  // Lifestyle
+  "smoking",
+  "drinking",
+  "workoutFrequency",
+  "diet",
+  "sleepSchedule",
+
+  // Background
+  "educationLevel",
+  "school",
+  "jobTitle",
+  "company",
+  "languages",
+
+  // Beliefs
+  "religion",
+  "politicalViews",
+  "zodiac",
+
+  // Interests
+  "interests",
+  "hobbies",
+  "favoriteMusic",
+  "favoriteMovies",
+  "travelStyle",
+  "petsPreference",
+
+  // Existing vibe
+  "likes",
+  "dislikes",
+  "favorites",
+
+  // Visibility & settings
+  "visibility",
+  "visibilityMode",
+  "fieldVisibility",
+  "preferences",
+  "settings",
+
+  // Media
+  "avatar",
+  "phone",
+];
 
     const updates = {};
     for (const k of allowed) {

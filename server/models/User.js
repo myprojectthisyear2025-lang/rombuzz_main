@@ -10,7 +10,7 @@ const mongoose = require("mongoose");
 const userSchema = new mongoose.Schema(
   {
     // ✅ Primary identity
-    id: { type: String, required: true, unique: true, index: true }, // mirrors LowDB shortid
+    id: { type: String, required: true, unique: true, index: true },
     email: { type: String, required: true, unique: true, index: true },
     firstName: { type: String, default: "" },
     lastName: { type: String, default: "" },
@@ -19,96 +19,145 @@ const userSchema = new mongoose.Schema(
     passwordHash: { type: String, default: "" },
     googleId: { type: String, default: "" },
 
-       // 💫 Profile fields
+    /* ============================================================
+       🧑 IDENTITY
+    ============================================================ */
     gender: { type: String, default: "" },
-    dob: { type: String, default: "" },
+    genderVisibility: { type: String, default: "public" }, // public | hidden
 
-    // ✅ Basics (editable + shown in Info tab)
-    city: { type: String, default: "" },
-    height: { type: String, default: "" },
+    pronouns: { type: String, default: "" },
 
-    lookingFor: { type: String, default: "" },
-    interestedIn: { type: [String], default: [] },
-
-    // ✅ Vibe (editable + shown in Info tab)
-    likes: { type: String, default: "" },
-    dislikes: { type: String, default: "" },
-
-    // generic preferences object (Discover filters etc.)
-    preferences: { type: Object, default: {} },
-
-
-    // visibility controls
-    visibilityMode: { type: String, default: "full" },         // full / blurred / ghost etc.
-    fieldVisibility: { type: Object, default: {} },            // who can see each item
-    visibility: { type: String, default: "active" },           // active / paused / hidden
-
-    // main profile fields
-    bio: { type: String, default: "" },
     orientation: { type: String, default: "" },
+    orientationVisibility: { type: String, default: "public" },
+
+    dob: { type: String, default: "" }, // DOB (locked after verification)
+
+    /* ============================================================
+       📍 LOCATION & DISTANCE
+    ============================================================ */
+    city: { type: String, default: "" },
+    country: { type: String, default: "" },
+    hometown: { type: String, default: "" },
+
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+
+    location: { type: Object, default: null }, // { lat, lng }
+    distanceVisibility: { type: String, default: "public" },
+    travelMode: { type: Boolean, default: false },
+
+    /* ============================================================
+       💬 ABOUT ME
+    ============================================================ */
+    bio: { type: String, default: "" },
+    voiceUrl: { type: String, default: "" },
+
+    vibeTags: { type: [String], default: [] }, // Chill, Romantic, etc.
+
+    /* ============================================================
+       💖 DATING INTENTIONS
+    ============================================================ */
+    lookingFor: { type: String, default: "" },
+    relationshipStyle: { type: String, default: "" },
+    interestedIn: { type: [String], default: [] }, // Men / Women / Everyone
+
+    /* ============================================================
+       📏 BODY & BASICS
+    ============================================================ */
+    height: { type: String, default: "" },
+    bodyType: { type: String, default: "" },
+    fitnessLevel: { type: String, default: "" },
+
+    /* ============================================================
+       🧠 LIFESTYLE & HABITS
+    ============================================================ */
+    smoking: { type: String, default: "" },
+    drinking: { type: String, default: "" },
+    workoutFrequency: { type: String, default: "" },
+    diet: { type: String, default: "" },
+    sleepSchedule: { type: String, default: "" },
+
+    /* ============================================================
+       🎓 BACKGROUND
+    ============================================================ */
+    educationLevel: { type: String, default: "" },
+    school: { type: String, default: "" },
+    jobTitle: { type: String, default: "" },
+    company: { type: String, default: "" },
+    languages: { type: [String], default: [] },
+
+    /* ============================================================
+       🧬 BELIEFS & VALUES
+    ============================================================ */
+    religion: { type: String, default: "" },
+    politicalViews: { type: String, default: "" },
+    zodiac: { type: String, default: "" },
+
+    /* ============================================================
+       🎯 INTERESTS & PREFERENCES
+    ============================================================ */
     interests: { type: [String], default: [] },
     hobbies: { type: [String], default: [] },
-    favorites: { type: [String], default: [] },                // also stores voice: / blur: tags
+    favoriteMusic: { type: [String], default: [] },
+    favoriteMovies: { type: [String], default: [] },
+    travelStyle: { type: String, default: "" },
+    petsPreference: { type: String, default: "" },
 
+    likes: { type: String, default: "" },
+    dislikes: { type: String, default: "" },
+    favorites: { type: [String], default: [] },
+
+    /* ============================================================
+       🖼️ MEDIA
+    ============================================================ */
     avatar: { type: String, default: "" },
-    photos: { type: [String], default: [] },                   // legacy gallery
-    media: { type: [Object], default: [] },                    // structured gallery items
+    photos: { type: [String], default: [] },
+    media: { type: [Object], default: [] },
 
-    // location + vibes
-    location: { type: Object, default: null },                 // { lat, lng }
-    vibe: { type: String, default: "" },
-    filterVibe: { type: Object, default: {} },
+    /* ============================================================
+       🔐 VISIBILITY & SETTINGS
+    ============================================================ */
+    visibilityMode: { type: String, default: "full" },
+    fieldVisibility: { type: Object, default: {} },
+    visibility: { type: String, default: "active" },
+    preferences: { type: Object, default: {} },
+    settings: { type: Object, default: {} },
 
-    // onboarding / matching prefs
+    /* ============================================================
+       🔁 MATCHING / ONBOARDING
+    ============================================================ */
     matchPref: { type: Object, default: {} },
     locationRadius: { type: Number, default: 50 },
-    ageRange: {
-      type: Object,
-      default: { min: 18, max: 99 },
-    },
+    ageRange: { type: Object, default: { min: 18, max: 99 } },
     profileComplete: { type: Boolean, default: false },
     hasOnboarded: { type: Boolean, default: false },
 
-    // contact
-    phone: { type: String, default: "" },
-    voiceUrl: { type: String, default: "" },
-
-    // premium + settings
-    premiumTier: { type: String, default: "free" },
-    settings: { type: Object, default: {} },
-    // 💬 Activity / status
+    /* ============================================================
+       📊 ACTIVITY
+    ============================================================ */
     lastActive: { type: Date, default: Date.now },
-
-    // 👁️ Profile Views (All-time + Today)
-    // - total: lifetime views
-    // - today: views for current YYYY-MM-DD
-    // - lastViewDate: used to reset "today" safely without cron jobs
     profileViews: {
       total: { type: Number, default: 0 },
       today: { type: Number, default: 0 },
-      lastViewDate: { type: String, default: "" }, // YYYY-MM-DD
+      lastViewDate: { type: String, default: "" },
     },
 
-    createdAt: { type: Date, default: Date.now },
-    updatedAt: { type: Date, default: Date.now },
-
-    // 🔒 System flags
+    /* ============================================================
+       🔒 SYSTEM
+    ============================================================ */
+    premiumTier: { type: String, default: "free" },
     isPremium: { type: Boolean, default: false },
     isVerified: { type: Boolean, default: false },
     blockedUsers: { type: [String], default: [] },
-    
-    // 🔐 OTP Verification (required for email verification)
+
     verificationCode: { type: String, default: "" },
     codeExpiresAt: { type: Date, default: null },
   },
   {
-    timestamps: true, // auto adds createdAt + updatedAt
+    timestamps: true,
     minimize: true,
   }
 );
-
-// ❌ Remove the redundant manual index; we already have `index: true` on `email`
-// userSchema.index({ email: 1 });
 
 module.exports =
   mongoose.models.User || mongoose.model("User", userSchema);
