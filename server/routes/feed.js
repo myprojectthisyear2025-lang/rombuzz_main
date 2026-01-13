@@ -107,4 +107,61 @@ router.get("/", authMiddleware, async (req, res) => {
   }
 });
 
+/* ============================================================
+   🔥 LETSBUZZ GALLERY FEED — matched users media
+   Uses User.media[] with visibility rules
+============================================================ */
+router.get("/letsbuzz", authMiddleware, async (req, res) => {
+  try {
+    const myId = String(req.user.id);
+
+    // 1️⃣ Fetch matches
+    const matches = await Match.find({ users: myId }).lean();
+    const matchedIds = matches
+      .flatMap((m) => m.users)
+      .filter((id) => String(id) !== myId);
+
+    // 2️⃣ Fetch matched users
+    const users = await User.find({ id: { $in: matchedIds } }).lean();
+
+    const feed = [];
+
+    for (const u of users) {
+      if (!Array.isArray(u.media)) continue;
+
+      for (const m of u.media) {
+        const caption = String(m.caption || "");
+
+        // ❌ NEVER show private
+        if (caption.includes("scope:private")) continue;
+
+        // ✅ Only public OR matches
+        if (
+          caption.includes("scope:public") ||
+          caption.includes("scope:matches")
+        ) {
+          feed.push({
+            id: m.id,
+            userId: u.id,
+            mediaUrl: m.url,
+            type: m.type === "video" ? "video" : "image",
+            caption: m.caption,
+            createdAt: m.createdAt || Date.now(),
+            user: baseSanitizeUser(u),
+          });
+        }
+      }
+    }
+
+    // 3️⃣ Newest first
+    feed.sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+
+    res.json({ items: feed });
+  } catch (err) {
+    console.error("❌ LetsBuzz gallery feed failed:", err);
+    res.status(500).json({ error: "failed_to_load_letsbuzz" });
+  }
+});
+
+
 module.exports = router;

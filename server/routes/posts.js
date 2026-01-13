@@ -72,11 +72,38 @@ router.post("/", authMiddleware, async (req, res) => {
     };
 
     // 🗄️ Save to MongoDB
-    const created = await PostModel.create(newPost);
+  const created = await PostModel.create(newPost);
 
-    console.log(`🪶 New post created by ${req.user.id}: ${created.id}`);
+console.log(`🪶 New post created by ${req.user.id}: ${created.id}`);
 
-    res.json({ post: created });
+// 🔴 REALTIME: notify matched users (posts + reels)
+try {
+  const io = global.io;
+  const onlineUsers = global.onlineUsers || {};
+
+  await db.read();
+  const myId = req.user.id;
+
+  const matches = (db.data.matches || [])
+    .filter(m => Array.isArray(m.users) && m.users.includes(myId))
+    .flatMap(m => m.users)
+    .filter(id => id !== myId);
+
+  matches.forEach(uid => {
+    const socketId = onlineUsers[uid];
+    if (socketId) {
+      io.to(String(socketId)).emit("buzz:post:new", {
+        post: created,
+        fromId: myId,
+      });
+    }
+  });
+} catch (e) {
+  console.log("⚠️ buzz realtime emit failed", e);
+}
+
+res.json({ post: created });
+
   } catch (err) {
     console.error("❌ Mongo create /posts error:", err);
     res.status(500).json({ error: "Failed to create post" });
