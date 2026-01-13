@@ -257,10 +257,16 @@ router.delete("/buzz/posts/:postId/comments/:commentId", authMiddleware, async (
     const comment = post.comments.find((c) => c.id === commentId);
     if (!comment) return res.status(404).json({ error: "Comment not found" });
 
-    // 3️⃣ Only the author can delete
-    if (String(comment.userId) !== String(me)) {
-      return res.status(403).json({ error: "Not your comment" });
-    }
+    // 3️⃣ Delete permissions:
+// - Author can delete their own comment
+// - Post owner can delete ANY comment on their post (moderation)
+const isAuthor = String(comment.userId) === String(me);
+const isPostOwner = String(post.userId) === String(me);
+
+if (!isAuthor && !isPostOwner) {
+  return res.status(403).json({ error: "Not allowed" });
+}
+
 
     // 4️⃣ Remove it
     const before = post.comments.length;
