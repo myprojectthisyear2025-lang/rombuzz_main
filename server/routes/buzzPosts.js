@@ -54,6 +54,9 @@ router.use(require("./buzzpost/buzz.media"));
 // 5.1️⃣ Media gifting (gallery gifts)
 router.use(require("./buzzpost/buzz.media.gifts"));
 
+// ✅ 5.1.1️⃣ Post/Reel gifting (LetsBuzz feed gifts)
+router.use(require("./buzzpost/buzz.post.gifts"));
+
 // 5.2️⃣ Media insights + match-private threads (Insights Drawer backend)
 router.use(require("./buzzpost/buzz.media.insights"));
 
