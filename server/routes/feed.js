@@ -31,11 +31,34 @@ const Match = require("../models/Match");
 const PostModel = require("../models/PostModel");
 const { baseSanitizeUser } = require("../utils/helpers");
 
+// ============================================================
+// ✅ Gallery caption tags parser (scope + kind)
+// We store visibility inside caption like: "scope:public scope:matches scope:private"
+// and type inside caption like: "kind:photo kind:reel"
+// ============================================================
+function parseCaptionTags(caption) {
+  const text = String(caption || "").toLowerCase();
+
+  const scope =
+    text.includes("scope:public") ? "public" :
+    text.includes("scope:matches") ? "matches" :
+    text.includes("scope:private") ? "private" :
+    null;
+
+  const kind =
+    text.includes("kind:reel") ? "reel" :
+    text.includes("kind:photo") ? "photo" :
+    null;
+
+  return { scope, kind };
+}
+
 
 /* ============================================================
    🏠 FEED ENDPOINT — show matched users’ posts & reels
 ============================================================ */
 router.get("/", authMiddleware, async (req, res) => {
+
   try {
     const myId = req.user.id;
 
@@ -77,7 +100,7 @@ router.get("/", authMiddleware, async (req, res) => {
       });
     }
 
-    // 2️⃣ Legacy embedded posts on User (u.posts) – keep for older content
+     // 2️⃣ Legacy embedded posts on User (u.posts) – keep for older content
     for (const u of matchedUsers) {
       if (!Array.isArray(u.posts)) continue;
 
@@ -96,8 +119,51 @@ router.get("/", authMiddleware, async (req, res) => {
       }
     }
 
+    // 3️⃣ NEW: Gallery media (u.media) — include ONLY scope:public or scope:matches
+    //      - kind:photo -> image post
+    //      - kind:reel  -> video post
+    for (const u of matchedUsers) {
+      const list = Array.isArray(u.media) ? u.media : [];
+      if (!list.length) continue;
+
+      for (const m of list) {
+        const { scope, kind } = parseCaptionTags(m.caption);
+        if (!scope || scope === "private") continue; // ✅ only public/matches
+        if (kind !== "photo" && kind !== "reel") continue;
+
+        const id = String(m.id || m._id || "");
+        if (!id) continue;
+        if (seen.has(id)) continue;
+        seen.add(id);
+
+        feed.push({
+          id,
+          userId: u.id,
+
+          // match PostModel shape used by the app
+          text: "",
+          mediaUrl: m.url || m.secureUrl || m.mediaUrl || "",
+          type: kind === "reel" ? "video" : "image",
+          privacy: scope, // "public" or "matches"
+          reactions: {},
+          comments: [],
+
+          // timeline
+          createdAt: Number(m.createdAt || m.updatedAt || 0),
+
+          // metadata (safe extra fields)
+          fromGallery: true,
+          mediaId: id,
+
+          // user card
+          user: baseSanitizeUser(u),
+        });
+      }
+    }
+
     // 📅 Sort newest first
     feed.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
 
     res.json({ posts: feed });
 
