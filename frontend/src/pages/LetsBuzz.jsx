@@ -50,7 +50,7 @@ export default function LetsBuzz() {
                   background: `linear-gradient(90deg, ${RBZ.c1}, ${RBZ.c2}, ${RBZ.c3}, ${RBZ.c4})`,
                 }}
               />
-              Mobile-parity mode
+              
             </div>
           </div>
 
