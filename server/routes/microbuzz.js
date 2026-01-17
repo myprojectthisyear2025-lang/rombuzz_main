@@ -444,11 +444,18 @@ if (reverseBuzz) {
     return res.json({ ignored: true });
   }
 
-  // ❌ REJECT (soft)
-  if (confirm === false) {
-    await MicroBuzzBuzz.deleteOne({ fromId: toId, toId: fromId });
-    return res.json({ rejected: true });
-  }
+  // ❌ REJECT (soft reset — allow fresh buzz both ways)
+if (confirm === false) {
+  await MicroBuzzBuzz.deleteMany({
+    $or: [
+      { fromId: fromId, toId: toId },
+      { fromId: toId, toId: fromId },
+    ],
+  });
+
+  return res.json({ rejected: true });
+}
+
 
   // ⏳ waiting for confirm
   return res.json({ pending: true, requiresConfirm: true });
