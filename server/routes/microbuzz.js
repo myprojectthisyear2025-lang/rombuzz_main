@@ -40,6 +40,8 @@ const User = require("../models/User");
 const MicroBuzzPresence = require("../models/MicroBuzzPresence");
 const MicroBuzzBuzz = require("../models/MicroBuzzBuzz");
 const Match = require("../models/Match");
+const MicroBuzzIgnore = require("../models/MicroBuzzIgnore");
+
 //const MicroBuzzSelfie = require("../models/MicroBuzzSelfie");
 
 // 🔔 Notifications helper
@@ -240,11 +242,21 @@ router.post("/buzz", authMiddleware, async (req, res) => {
   try {
     // ✅ Socket.IO instance
     const io = getIO();
+const { toId, confirm } = req.body || {};
+const fromId = req.user.id;
 
-    const { toId, confirm } = req.body || {};
-    const fromId = req.user.id;
+if (!toId) return res.status(400).json({ error: "toId required" });
 
-    if (!toId) return res.status(400).json({ error: "toId required" });
+// 🚫 Ignore check (permanent MicroBuzz ignore)
+const ignored = await MicroBuzzIgnore.findOne({
+  byId: toId,
+  fromId: fromId,
+});
+
+if (ignored) {
+  // silently drop buzz
+  return res.json({ ignored: true });
+}
 
     const fromPresence = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
     const toPresence = await MicroBuzzPresence.findOne({ userId: toId }).lean();
@@ -421,12 +433,26 @@ if (reverseBuzz) {
     return res.json({ matched: true });
   }
 
-  // ❗ DO NOT SEND buzz_request AGAIN
-  // User B already buzzed A; now waiting only for confirm:true
+  // 🚫 IGNORE (hard, permanent)
+  if (confirm === "ignore") {
+    await MicroBuzzIgnore.create({
+      byId: fromId,
+      fromId: toId,
+    });
 
+    await MicroBuzzBuzz.deleteOne({ fromId: toId, toId: fromId });
+    return res.json({ ignored: true });
+  }
+
+  // ❌ REJECT (soft)
+  if (confirm === false) {
+    await MicroBuzzBuzz.deleteOne({ fromId: toId, toId: fromId });
+    return res.json({ rejected: true });
+  }
+
+  // ⏳ waiting for confirm
   return res.json({ pending: true, requiresConfirm: true });
 }
-
 
       /* ============================================================
          ONE-WAY BUZZ
