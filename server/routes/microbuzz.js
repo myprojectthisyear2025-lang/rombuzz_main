@@ -453,17 +453,20 @@ if (reverseBuzz) {
       console.warn("MicroBuzz one-way notification failed:", e);
     }
 
-    // 📡 Live popup if they are online (existing behavior)
-    if (onlineUsers[toId]) {
-      io.to(onlineUsers[toId]).emit("buzz_request", {
-        fromId,
-        selfieUrl: fromPresence?.selfieUrl,
-        name: firstName,
-        distanceMeters,
-        message: `${firstName} wants to buzz you!`,
-        type: "microbuzz",
-      });
-    }
+  // 📡 Live popup if they are online (existing behavior)
+if (onlineUsers[toId]) {
+  io.to(onlineUsers[toId]).emit("buzz_request", {
+    fromId,
+    selfieUrl: fromPresence?.selfieUrl,
+    firstName: fromProfile?.firstName || "Someone",
+    lastName: fromProfile?.lastName || "",
+    dob: fromProfile?.dob || "",
+    distanceMeters,
+    message: `${firstName} wants to buzz you!`,
+    type: "microbuzz",
+  });
+}
+
 
     res.json({ success: true });
 
