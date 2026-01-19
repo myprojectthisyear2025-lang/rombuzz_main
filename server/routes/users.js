@@ -359,6 +359,72 @@ router.get("/blocks", authMiddleware, async (req, res) => {
 });
 
 /**
+ * GET /api/users/:id
+ * Public profile (Discover / ViewProfile)
+ */
+router.get("/:id", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findOne({ id: req.params.id }).lean();
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    res.json({
+      user: {
+        id: user.id,
+        firstName: user.firstName,
+        dob: user.dob,
+        avatar: user.avatar,
+        bio: user.bio,
+
+        pronouns: user.pronouns,
+        country: user.country,
+        hometown: user.hometown,
+        travelMode: user.travelMode,
+
+        relationshipStyle: user.relationshipStyle,
+        bodyType: user.bodyType,
+        fitnessLevel: user.fitnessLevel,
+        smoking: user.smoking,
+        drinking: user.drinking,
+        workoutFrequency: user.workoutFrequency,
+        diet: user.diet,
+        sleepSchedule: user.sleepSchedule,
+
+        educationLevel: user.educationLevel,
+        school: user.school,
+        jobTitle: user.jobTitle,
+        company: user.company,
+        languages: user.languages,
+
+        religion: user.religion,
+        politicalViews: user.politicalViews,
+        zodiac: user.zodiac,
+
+        favoriteMusic: user.favoriteMusic,
+        favoriteMovies: user.favoriteMovies,
+        travelStyle: user.travelStyle,
+        petsPreference: user.petsPreference,
+
+        likes: user.likes,
+        dislikes: user.dislikes,
+
+        interests: user.interests,
+        hobbies: user.hobbies,
+
+        media: user.media,
+        photos: user.photos,
+        voiceIntro: user.voiceUrl,
+
+        visibilityMode: user.visibilityMode,
+        fieldVisibility: user.fieldVisibility,
+      },
+    });
+  } catch (err) {
+    console.error("❌ GET /users/:id error:", err);
+    res.status(500).json({ error: "Failed to fetch user profile" });
+  }
+});
+
+/**
  * POST /api/users/blocks/:userId → block another user
  */
 router.post("/blocks/:userId", authMiddleware, async (req, res) => {
