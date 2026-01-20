@@ -25,6 +25,7 @@ const router = express.Router();
 const shortid = require("shortid");
 const authMiddleware = require("../routes/auth-middleware");
 const ChatRoom = require("../models/ChatRoom");
+const MediaGift = require("../models/MediaGift");
 
 // ✅ Proper Socket.IO + state wiring
 const { getIO } = require("../socket");
@@ -86,25 +87,16 @@ router.get("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
     const room = await getRoomDoc(roomId);
     if (!room) return res.status(404).json({ error: "Room not found" });
 
-    // Filter out ephemeral messages
-    const keep = [];
-    const remove = [];
+   // ✅ Return messages that are NOT hidden for me
+// ✅ Ephemeral messages are NOT deleted on fetch.
+// ✅ They are deleted ONLY after receiver views (via /viewed endpoint).
+const visible = (room.messages || []).filter((m) => {
+  if (m.hiddenFor?.includes(userId)) return false;
+  return true;
+});
 
-    for (const msg of room.messages) {
-      if (msg.ephemeral?.mode === "once" && msg.from !== userId) {
-        remove.push(msg.id);
-      } else {
-        keep.push(msg);
-      }
-    }
+res.json(visible);
 
-    // Remove ephemeral messages if needed
-    if (remove.length) {
-      room.messages = room.messages.filter((m) => !remove.includes(m.id));
-      await room.save();
-    }
-
-    res.json(keep);
   } catch (err) {
     console.error("❌ GET chat room error:", err);
     res.status(500).json({ error: "Failed to load messages" });
@@ -127,22 +119,41 @@ router.post("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
     const fromId = req.user.id;
     const toId = fromId === a ? b : a;
 
-  // 🔍 Detect ephemeral "view-once" from ::RBZ:: payload
+// ✅ Detect ephemeral + gift lock from ::RBZ:: payload
 let epMode = "none";
+let viewsLeft = 0;
+
+let giftLocked = false;
+let giftStickerId = "sticker_basic";
+let giftAmount = 0;
+
 if (text.startsWith("::RBZ::")) {
   try {
     const payload = JSON.parse(text.slice("::RBZ::".length));
-    if (
-      payload?.ephemeral === "once" ||
-      payload?.ephemeral?.mode === "once" ||
-      payload?.viewOnce === true
-    ) {
+
+    const mode =
+      payload?.ephemeral?.mode ||
+      payload?.ephemeral ||
+      (payload?.viewOnce ? "once" : null);
+
+    if (mode === "once") {
       epMode = "once";
+      viewsLeft = 1;
+    } else if (mode === "twice") {
+      epMode = "twice";
+      viewsLeft = 2;
+    }
+
+    if (payload?.gift?.locked) {
+      giftLocked = true;
+      giftStickerId = String(payload?.gift?.stickerId || "sticker_basic");
+      giftAmount = Number(payload?.gift?.amount || 0);
     }
   } catch (e) {
-    console.warn("RBZ payload parse failed for ephemeral:", e);
+    console.warn("RBZ payload parse failed:", e);
   }
 }
+
 
 const msg = {
   id: shortid.generate(),
@@ -155,7 +166,13 @@ const msg = {
   deleted: false,
   reactions: {},
   hiddenFor: [],
-  ephemeral: { mode: epMode },
+ephemeral: { mode: epMode, viewsLeft },
+gift: {
+  locked: giftLocked,
+  stickerId: giftStickerId,
+  amount: giftAmount,
+  unlockedBy: [],
+},
 };
 
 const room = await getRoomDoc(roomId);
@@ -345,7 +362,119 @@ router.delete("/debug/room/:roomId", async (req, res) => {
   }
 });
 
+// ============================================================
+// 👁️ EPHEMERAL VIEW TRACK (ON OPEN)
+// POST /api/chat/rooms/:roomId/:msgId/viewed
+// - Only receiver can call
+// - Decrements viewsLeft
+// - When 0 => permanently remove message everywhere + socket notify
+// ============================================================
+router.post("/chat/rooms/:roomId/:msgId/viewed", authMiddleware, async (req, res) => {
+  try {
+    const { roomId, msgId } = req.params;
+    const me = String(req.user.id);
 
+    const room = await getRoomDoc(roomId);
+    const idx = (room.messages || []).findIndex((m) => String(m.id) === String(msgId));
+    if (idx === -1) return res.status(404).json({ error: "not_found" });
+
+    const msg = room.messages[idx];
+
+    // ✅ Only receiver can consume views
+    if (String(msg.to) !== me) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    const mode = msg?.ephemeral?.mode || "none";
+    if (mode !== "once" && mode !== "twice") {
+      return res.json({ ok: true, mode, viewsLeft: msg?.ephemeral?.viewsLeft || 0 });
+    }
+
+    const left = Number(msg?.ephemeral?.viewsLeft || 0);
+    const nextLeft = Math.max(0, left - 1);
+
+    msg.ephemeral.viewsLeft = nextLeft;
+    await room.save();
+
+    const io = getIO();
+    io?.to(roomId).emit("chat:ephemeral:update", {
+      roomId,
+      msgId: String(msgId),
+      viewsLeft: nextLeft,
+    });
+
+    // ✅ when finished => permanently delete message from room
+    if (nextLeft === 0) {
+      room.messages.splice(idx, 1);
+      await room.save();
+
+      io?.to(roomId).emit("chat:ephemeral:expired", {
+        roomId,
+        msgId: String(msgId),
+      });
+    }
+
+    return res.json({ ok: true, mode, viewsLeft: nextLeft });
+  } catch (err) {
+    console.error("❌ viewed error:", err);
+    return res.status(500).json({ error: "failed" });
+  }
+});
+
+// ============================================================
+// 🎁 UNLOCK GIFT-LOCKED CHAT MEDIA
+// POST /api/chat/rooms/:roomId/:msgId/unlock
+// body: { stickerId?, amount? }
+// ============================================================
+router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res) => {
+  try {
+    const { roomId, msgId } = req.params;
+    const me = String(req.user.id);
+    const { stickerId = "sticker_basic", amount = 0 } = req.body || {};
+
+    const room = await getRoomDoc(roomId);
+    const msg = (room.messages || []).find((m) => String(m.id) === String(msgId));
+    if (!msg) return res.status(404).json({ error: "not_found" });
+
+    // ✅ only receiver can unlock
+    if (String(msg.to) !== me) return res.status(403).json({ error: "forbidden" });
+
+    // already unlocked
+    if (!msg?.gift?.locked) {
+      return res.json({ ok: true, locked: false });
+    }
+
+    // record gift (reuse existing MediaGift model)
+    await MediaGift.create({
+      id: shortid.generate(),
+      mediaId: String(msg.id),       // treat msgId as mediaId
+      ownerId: String(msg.from),     // sender receives gift
+      fromId: me,                    // receiver gifts to unlock
+      stickerId: String(stickerId),
+      amount: Number(amount) || 0,
+      createdAt: Date.now(),
+    });
+
+    // unlock message for this receiver
+    msg.gift.locked = false;
+    msg.gift.unlockedBy ||= [];
+    if (!msg.gift.unlockedBy.includes(me)) msg.gift.unlockedBy.push(me);
+
+    await room.save();
+
+    const io = getIO();
+    io?.to(roomId).emit("chat:gift:unlocked", {
+      roomId,
+      msgId: String(msgId),
+      unlockedBy: me,
+    });
+
+    return res.json({ ok: true, locked: false });
+  } catch (err) {
+    console.error("❌ unlock error:", err);
+    return res.status(500).json({ error: "failed" });
+  }
+});
 
 module.exports = router;
 

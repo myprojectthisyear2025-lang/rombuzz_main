@@ -26,9 +26,17 @@ type: { type: String, enum: ["text", "media", "meetup"], default: "text" },
     deleted: { type: Boolean, default: false },
     reactions: { type: Map, of: String, default: {} },   // { userId: "❤️" }
     hiddenFor: [{ type: String, default: [] }],
-    ephemeral: {
-      mode: { type: String, enum: ["none", "once"], default: "none" },
-    },
+   ephemeral: {
+  mode: { type: String, enum: ["none", "once", "twice"], default: "none" },
+  viewsLeft: { type: Number, default: 0 }, // receiver views remaining
+},
+gift: {
+  locked: { type: Boolean, default: false },
+  stickerId: { type: String, default: "sticker_basic" },
+  amount: { type: Number, default: 0 },
+  unlockedBy: [{ type: String, default: [] }], // userIds who unlocked (1:1 => receiver)
+},
+
   },
   { _id: false }
 );
