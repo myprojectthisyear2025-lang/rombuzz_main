@@ -22,10 +22,15 @@ const messageSchema = new mongoose.Schema(
     text: { type: String, default: "" },
 type: { type: String, enum: ["text", "media", "meetup"], default: "text" },
     time: { type: Date, default: Date.now },
-    edited: { type: Boolean, default: false },
-    deleted: { type: Boolean, default: false },
-    reactions: { type: Map, of: String, default: {} },   // { userId: "❤️" }
-    hiddenFor: [{ type: String, default: [] }],
+  edited: { type: Boolean, default: false },
+deleted: { type: Boolean, default: false },
+
+// ✅ system bubble marker (view-once removed notice etc.)
+system: { type: Boolean, default: false },
+
+reactions: { type: Map, of: String, default: {} },   // { userId: "❤️" }
+hiddenFor: [{ type: String, default: [] }],
+
    ephemeral: {
   mode: { type: String, enum: ["none", "once", "twice"], default: "none" },
   viewsLeft: { type: Number, default: 0 }, // receiver views remaining

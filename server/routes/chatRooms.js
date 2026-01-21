@@ -222,8 +222,11 @@ router.patch("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => {
     if (!text) return res.status(400).json({ error: "text required" });
 
     const room = await getRoomDoc(roomId);
-    const msg = room.messages.find((m) => m.id === msgId);
-    if (!msg) return res.status(404).json({ error: "not found" });
+// 🚫 no reactions allowed on system bubbles
+if (msg.system) {
+  return res.status(400).json({ error: "cannot_react_to_system" });
+}
+
     if (msg.from !== req.user.id) return res.status(403).json({ error: "not owner" });
 
     const oneHour = 60 * 60 * 1000;
@@ -402,19 +405,49 @@ router.post("/chat/rooms/:roomId/:msgId/viewed", authMiddleware, async (req, res
       msgId: String(msgId),
       viewsLeft: nextLeft,
     });
+// ✅ when finished => permanently delete message from room + insert system bubble
+let systemMessage = null;
 
-    // ✅ when finished => permanently delete message from room
-    if (nextLeft === 0) {
-      room.messages.splice(idx, 1);
-      await room.save();
+if (nextLeft === 0) {
+  // remove the ephemeral media message for BOTH sides
+  room.messages.splice(idx, 1);
 
-      io?.to(roomId).emit("chat:ephemeral:expired", {
-        roomId,
-        msgId: String(msgId),
-      });
-    }
+  // add a "removal notice" bubble (deletable via scope=me)
+  const label = mode === "once" ? "View once" : "View twice";
 
-    return res.json({ ok: true, mode, viewsLeft: nextLeft });
+  systemMessage = {
+    id: shortid.generate(),
+    from: "system",
+    to: "system",
+    text: `🔒 ${label} media was opened and removed`,
+    type: "text",
+    time: new Date(),
+    edited: false,
+    deleted: false,
+    system: true,
+    reactions: {},
+    hiddenFor: [],
+    ephemeral: { mode: "none", viewsLeft: 0 },
+    gift: {
+      locked: false,
+      stickerId: "sticker_basic",
+      amount: 0,
+      unlockedBy: [],
+    },
+  };
+
+  room.messages.push(systemMessage);
+  await room.save();
+
+  io?.to(roomId).emit("chat:ephemeral:expired", {
+    roomId,
+    msgId: String(msgId),
+    systemMessage,
+  });
+}
+
+return res.json({ ok: true, mode, viewsLeft: nextLeft, systemMessage });
+
   } catch (err) {
     console.error("❌ viewed error:", err);
     return res.status(500).json({ error: "failed" });
