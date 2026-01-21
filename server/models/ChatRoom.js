@@ -19,9 +19,16 @@ const messageSchema = new mongoose.Schema(
     id: { type: String, required: true, index: true },   // shortid-style
     from: { type: String, required: true },
     to: { type: String, required: true },
-    text: { type: String, default: "" },
-type: { type: String, enum: ["text", "media", "meetup"], default: "text" },
+      text: { type: String, default: "" },
+
+    // ✅ important: store media fields so realtime + refresh behave the same
+    url: { type: String, default: null }, // cloudinary url for media
+    mediaType: { type: String, enum: ["image", "video", null], default: null },
+    overlayText: { type: String, default: "" },
+
+    type: { type: String, enum: ["text", "media", "meetup"], default: "text" },
     time: { type: Date, default: Date.now },
+
   edited: { type: Boolean, default: false },
 deleted: { type: Boolean, default: false },
 

@@ -127,6 +127,12 @@ let giftLocked = false;
 let giftStickerId = "sticker_basic";
 let giftAmount = 0;
 
+// ✅ NEW: media fields (so realtime doesn’t render black/blank)
+let mediaUrl = null;
+let mediaType = null; // "image" | "video"
+let overlayText = "";
+
+
 if (text.startsWith("::RBZ::")) {
   try {
     const payload = JSON.parse(text.slice("::RBZ::".length));
@@ -149,31 +155,50 @@ if (text.startsWith("::RBZ::")) {
       giftStickerId = String(payload?.gift?.stickerId || "sticker_basic");
       giftAmount = Number(payload?.gift?.amount || 0);
     }
+
+    // ✅ NEW: store media fields explicitly
+    if (payload?.url) mediaUrl = String(payload.url);
+    if (payload?.mediaType === "video" || payload?.mediaType === "image") {
+      mediaType = payload.mediaType;
+    } else if (payload?.type === "media" && payload?.url) {
+      // fallback (if mediaType missing)
+      mediaType = "image";
+    }
+
+    if (payload?.overlayText) overlayText = String(payload.overlayText || "");
   } catch (e) {
     console.warn("RBZ payload parse failed:", e);
   }
 }
 
+const isRBZ = text.startsWith("::RBZ::");
 
 const msg = {
   id: shortid.generate(),
   from: fromId,
   to: toId,
   text,
-  type: text.startsWith("::RBZ::") ? "media" : "text",
+  type: isRBZ ? "media" : "text",
+
+  // ✅ NEW: keep media as real fields too
+  url: isRBZ ? mediaUrl : null,
+  mediaType: isRBZ ? mediaType : null,
+  overlayText: isRBZ ? overlayText : "",
+
   time: new Date(),
   edited: false,
   deleted: false,
   reactions: {},
   hiddenFor: [],
-ephemeral: { mode: epMode, viewsLeft },
-gift: {
-  locked: giftLocked,
-  stickerId: giftStickerId,
-  amount: giftAmount,
-  unlockedBy: [],
-},
+  ephemeral: { mode: epMode, viewsLeft },
+  gift: {
+    locked: giftLocked,
+    stickerId: giftStickerId,
+    amount: giftAmount,
+    unlockedBy: [],
+  },
 };
+
 
 const room = await getRoomDoc(roomId);
 room.messages.push(msg);
