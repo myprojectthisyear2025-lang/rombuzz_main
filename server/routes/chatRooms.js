@@ -158,12 +158,17 @@ if (text.startsWith("::RBZ::")) {
 
     // ✅ NEW: store media fields explicitly
     if (payload?.url) mediaUrl = String(payload.url);
-    if (payload?.mediaType === "video" || payload?.mediaType === "image") {
-      mediaType = payload.mediaType;
-    } else if (payload?.type === "media" && payload?.url) {
-      // fallback (if mediaType missing)
-      mediaType = "image";
-    }
+   if (
+  payload?.mediaType === "video" ||
+  payload?.mediaType === "image" ||
+  payload?.mediaType === "audio"
+) {
+  mediaType = payload.mediaType;
+} else if (payload?.type === "media" && payload?.url) {
+  // fallback (if mediaType missing)
+  mediaType = "image";
+}
+
 
     if (payload?.overlayText) overlayText = String(payload.overlayText || "");
   } catch (e) {

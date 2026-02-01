@@ -23,7 +23,7 @@ const messageSchema = new mongoose.Schema(
 
     // ✅ important: store media fields so realtime + refresh behave the same
     url: { type: String, default: null }, // cloudinary url for media
-    mediaType: { type: String, enum: ["image", "video", null], default: null },
+mediaType: { type: String, enum: ["image", "video", "audio", null], default: null },
     overlayText: { type: String, default: "" },
 
     type: { type: String, enum: ["text", "media", "meetup"], default: "text" },
