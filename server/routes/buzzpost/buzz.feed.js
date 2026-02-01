@@ -60,28 +60,25 @@ router.get("/buzz/feed", authMiddleware, async (req, res) => {
       .filter(Boolean);
 
        // 2️⃣ Build visibility query – ONLY me + my matches
-    const allowedAuthors = [myId, ...myMatches];
+    const allowedAuthors = myMatches;
 
     const visibilityQuery = {
-      userId: { $in: allowedAuthors },
+      userId: { $in: myMatches },
       isActive: true,
-      $or: [
-        // ✅ My own posts (any privacy)
-        { userId: myId },
+    $or: [
+  // ✅ Posts from my matches with allowed privacy
+  {
+    userId: { $in: myMatches },
+    privacy: { $in: ["matches", "public"] },
+  },
 
-        // ✅ Posts from my matches with normal privacy
-        {
-          userId: { $in: myMatches },
-          privacy: { $in: ["matches", "public"] },
-        },
-
-        // ✅ Specific posts that have explicitly sharedWith me
-        {
-          privacy: "specific",
-          sharedWith: myId,
-        },
-      ],
-    };
+  // ✅ Specific posts shared with me (still allowed)
+  {
+    privacy: "specific",
+    sharedWith: myId,
+  },
+],
+  };
 
     // Optional type filter (photo / reel / video, etc.)
     if (type && type !== "all") visibilityQuery.type = type;
