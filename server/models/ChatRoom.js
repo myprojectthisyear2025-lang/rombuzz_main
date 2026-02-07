@@ -57,12 +57,18 @@ const chatRoomSchema = new mongoose.Schema(
   {
     roomId: { type: String, required: true, unique: true, index: true },
     participants: [{ type: String, required: true }],     // [a, b]
+
+    // ✅ NEW: read state (per conversation, per user)
+    // lastReadAtByUser.get(userId) => Date
+    lastReadAtByUser: { type: Map, of: Date, default: {} },
+
     messages: [messageSchema],
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
+
 
 module.exports =
   mongoose.models.ChatRoom || mongoose.model("ChatRoom", chatRoomSchema);

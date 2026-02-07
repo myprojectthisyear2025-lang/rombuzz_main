@@ -62,19 +62,42 @@ function getPeersFromRoomId(roomId) {
 }
 
 
-// Ensure ChatRoom exists or create new
 async function getRoomDoc(roomId) {
   let room = await ChatRoom.findOne({ roomId });
+
   if (!room) {
     const { a, b } = getPeersFromRoomId(roomId);
+
+    // ✅ init read state for both users
+    const epoch = new Date(0);
     room = await ChatRoom.create({
       roomId,
       participants: [a, b],
+      lastReadAtByUser: { [a]: epoch, [b]: epoch },
       messages: [],
     });
+
+    return room;
   }
+
+  // ✅ backfill read state for old rooms (no breaking changes)
+  let changed = false;
+  if (!room.lastReadAtByUser) {
+    room.lastReadAtByUser = new Map();
+    changed = true;
+  }
+  const epoch = new Date(0);
+  for (const pid of room.participants || []) {
+    if (!room.lastReadAtByUser.get(String(pid))) {
+      room.lastReadAtByUser.set(String(pid), epoch);
+      changed = true;
+    }
+  }
+  if (changed) await room.save();
+
   return room;
 }
+
 
 // ============================================================
 // 💬 GET CHAT ROOM MESSAGES
@@ -204,7 +227,6 @@ const msg = {
   },
 };
 
-
 const room = await getRoomDoc(roomId);
 room.messages.push(msg);
 await room.save();
@@ -220,6 +242,16 @@ const sid = onlineUsers?.[toId];
 if (sid) {
   io.to(sid).emit("chat:message", msg);
 }
+
+// ✅ NEW: emit unread summary update to receiver (server-accurate)
+try {
+  const summary = await computeUnreadSummaryForUser(String(toId));
+  if (sid) io.to(sid).emit("chat:unread:update", summary);
+  io.to(String(toId)).emit("chat:unread:update", summary);
+} catch (e) {
+  console.warn("unread summary emit failed:", e?.message || e);
+}
+
 
 // 🔥 Navbar/unread bubble handler
 if (sid) {
@@ -539,5 +571,117 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
   }
 });
 
+
+// ============================================================
+// ✅ UNREAD HELPERS + ENDPOINTS (server-accurate, cross-device)
+// ============================================================
+
+function buildRoomId(userA, userB) {
+  return [String(userA), String(userB)].sort().join("_");
+}
+
+function legacyRoomId(userA, userB) {
+  return [String(userA), String(userB)].sort().join("__");
+}
+
+function countUnreadForRoom(room, me) {
+  const myId = String(me);
+  const lastRead =
+    (room.lastReadAtByUser?.get && room.lastReadAtByUser.get(myId)) ||
+    (room.lastReadAtByUser && room.lastReadAtByUser[myId]) ||
+    new Date(0);
+
+  const msgs = room.messages || [];
+  let n = 0;
+
+  for (const m of msgs) {
+    if (!m) continue;
+    if (String(m.to) !== myId) continue;
+    if (m.deleted) continue;
+    if (m.hiddenFor?.includes?.(myId)) continue;
+
+    const t = new Date(m.time || 0);
+    if (t > new Date(lastRead || 0)) n++;
+  }
+
+  return n;
+}
+
+async function computeUnreadSummaryForUser(userId) {
+  const me = String(userId);
+  const rooms = await ChatRoom.find({ participants: me }).lean(false);
+
+  const byPeer = {};
+  let total = 0;
+
+  for (const room of rooms) {
+    const participants = room.participants || [];
+    const peerId = String(participants.find((p) => String(p) !== me) || "");
+
+    if (!peerId) continue;
+    const c = countUnreadForRoom(room, me);
+    if (c > 0) byPeer[peerId] = c;
+    total += c;
+  }
+
+  return { total, byPeer };
+}
+
+
+// ============================================================
+// GET /api/chat/unread-summary
+// ============================================================
+router.get("/chat/unread-summary", authMiddleware, async (req, res) => {
+  try {
+    const me = String(req.user.id);
+    const summary = await computeUnreadSummaryForUser(me);
+    return res.json(summary);
+  } catch (err) {
+    console.error("❌ unread-summary error:", err);
+    return res.status(500).json({ error: "failed" });
+  }
+});
+
+
+// ============================================================
+// POST /api/chat/mark-read
+// body: { peerId: "..." }
+// ============================================================
+router.post("/chat/mark-read", authMiddleware, async (req, res) => {
+  try {
+    const me = String(req.user.id);
+    const { peerId } = req.body || {};
+    if (!peerId) return res.status(400).json({ error: "peerId required" });
+
+    const rid = buildRoomId(me, peerId);
+    const ridLegacy = legacyRoomId(me, peerId);
+
+    const room =
+      (await ChatRoom.findOne({ roomId: rid })) ||
+      (await ChatRoom.findOne({ roomId: ridLegacy }));
+
+    if (!room) return res.status(404).json({ error: "Room not found" });
+
+    if (!room.lastReadAtByUser) room.lastReadAtByUser = new Map();
+    room.lastReadAtByUser.set(me, new Date());
+    await room.save();
+
+    const summary = await computeUnreadSummaryForUser(me);
+
+    // ✅ optional realtime update back to this user (all devices)
+    const io = getIO();
+    const sid = onlineUsers?.[me];
+    if (sid) io.to(sid).emit("chat:unread:update", summary);
+    io.to(String(me)).emit("chat:unread:update", summary);
+
+    return res.json({ ok: true, summary });
+  } catch (err) {
+    console.error("❌ mark-read error:", err);
+    return res.status(500).json({ error: "failed" });
+  }
+});
+
+
 module.exports = router;
+
 
