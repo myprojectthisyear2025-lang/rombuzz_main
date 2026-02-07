@@ -682,6 +682,41 @@ router.post("/chat/mark-read", authMiddleware, async (req, res) => {
 });
 
 
+// ============================================================
+// POST /api/chat/mark-all-read
+// Marks ALL conversations as read for authenticated user
+// (used when tapping Chat tab -> clear total badge to 0)
+// ============================================================
+router.post("/chat/mark-all-read", authMiddleware, async (req, res) => {
+  try {
+    const me = String(req.user.id);
+    const now = new Date();
+
+    const rooms = await ChatRoom.find({ participants: me }).lean(false);
+
+    for (const room of rooms) {
+      if (!room.lastReadAtByUser) room.lastReadAtByUser = new Map();
+      room.lastReadAtByUser.set(me, now);
+      await room.save();
+    }
+
+    const summary = await computeUnreadSummaryForUser(me);
+
+    // ✅ push updated summary to this user (all devices)
+    const io = getIO();
+    const sid = onlineUsers?.[me];
+    if (sid) io.to(sid).emit("chat:unread:update", summary);
+    io.to(String(me)).emit("chat:unread:update", summary);
+
+    return res.json({ ok: true, summary });
+  } catch (err) {
+    console.error("❌ mark-all-read error:", err);
+    return res.status(500).json({ error: "failed" });
+  }
+});
+
+
 module.exports = router;
+
 
 
