@@ -49,26 +49,38 @@ router.get("/", authMiddleware, async (req, res) => {
           out.href = "/discover";
           break;
 
-        case "match":
-        case "buzz":
-        case "like":
+         case "match":
+        case "buzz": {
+          // ✅ Profile-based notifications
           out.href = `/viewprofile/${n.fromId}`;
           break;
+        }
 
-        case "comment":
-        case "reaction":
-        case "new_post":
-        case "share": {
+        case "like": {
+          // ✅ TEMP: Treat "like" as "gift" until we rename on creator routes
           const postId = n.postId || n.entityId;
-          const ownerId = n.postOwnerId || n.ownerId || n.fromId;
-
-          if (postId && ownerId)
-            out.href = `/viewprofile/${ownerId}?post=${postId}`;
-          else if (n.fromId)
-            out.href = `/viewprofile/${n.fromId}`;
-
+          if (postId) out.href = `/letsbuzz?post=${postId}`;
+          else if (n.fromId) out.href = `/viewprofile/${n.fromId}`;
           break;
         }
+
+        case "comment":
+        case "new_post":
+        case "share": {
+          // ✅ Post-based notifications → open LetsBuzz and focus that post
+          const postId = n.postId || n.entityId;
+          if (postId) out.href = `/letsbuzz?post=${postId}`;
+          else if (n.fromId) out.href = `/viewprofile/${n.fromId}`;
+          break;
+        }
+
+        case "reaction": {
+          // ⏸️ Leave reaction routing for later (as you asked)
+          // Keep current behavior if you want: fallback to profile
+          if (n.fromId) out.href = `/viewprofile/${n.fromId}`;
+          break;
+        }
+
 
         default:
           out.href = "/notifications";

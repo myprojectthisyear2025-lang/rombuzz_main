@@ -22,17 +22,19 @@ const notificationSchema = new mongoose.Schema(
     fromId: { type: String, default: "" }, // sender (userId or "system")
     type: {
       type: String,
-      enum: [
-        "wingman",
-        "match",
-        "buzz",
-        "like",
-        "comment",
-        "reaction",
-        "new_post",
-        "share",
-        "system",
-      ],
+          enum: [
+         "wingman",
+         "match",
+         "buzz",
+         "like",   // legacy (will be phased out)
+         "gift",   // ✅ new
+         "comment",
+         "reaction",
+         "new_post",
+         "share",
+         "system",
+       ],
+
       default: "system",
     },
     message: { type: String, required: true },

@@ -127,7 +127,7 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
       const user = await User.findOne({ id: myId }).lean();
       const commenterName = user?.firstName || "Someone";
 
-      const link = `/viewprofile/${post.userId}?post=${postId}`;
+         const link = `/letsbuzz?post=${postId}`;
 
       const notif = {
         id: shortid.generate(),
@@ -142,6 +142,7 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
         postOwnerId: post.userId,
         createdAt: Date.now(),
       };
+
 
       // If your sendNotification helper is reliable, use it; else fallback to model
       try {
