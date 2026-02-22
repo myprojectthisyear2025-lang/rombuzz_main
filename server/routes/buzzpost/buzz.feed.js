@@ -147,23 +147,43 @@ router.get("/buzz/feed", authMiddleware, async (req, res) => {
 // =======================================================
 router.get("/buzz/reels", authMiddleware, async (req, res) => {
   try {
-    const myId = req.user.id;
+    const myId = String(req.user.id || "");
 
-    // 1️⃣ Get matches from Mongo
+    // 1️⃣ Get matches from Mongo (Match.js confirms status is "matched")
     const mongoMatches = await Match.find({
       users: myId,
       status: "matched",
     }).lean();
 
     const myMatches = mongoMatches
-      .map((m) => m.users.find((u) => u !== myId))
-      .filter(Boolean);
+      .map((m) => (m.users || []).find((u) => String(u) !== myId))
+      .filter(Boolean)
+      .map((u) => String(u));
+
+    // If no matches, no reels (by design: matched users only)
+    if (!myMatches.length) return res.json({ posts: [] });
 
     // 2️⃣ Find reels
+    // ✅ Accept reel/video even if type varies, OR infer from mediaUrl extension
+    // ✅ Exclude ONLY privacy==="private" (case-insensitive). Missing/unknown privacy is allowed.
     const reels = await PostModel.find({
       userId: { $in: myMatches },
-      type: { $in: ["reel", "video"] },
       isActive: true,
+      $and: [
+        {
+          $or: [
+            { type: { $in: ["reel", "reels", "video"] } },
+            { mediaUrl: { $regex: /\.(mp4|mov|m4v|webm|ogg|m3u8)(\?|$)/i } },
+          ],
+        },
+        {
+          $or: [
+            { privacy: { $exists: false } },
+            { privacy: { $eq: "" } },
+            { privacy: { $not: /^private$/i } },
+          ],
+        },
+      ],
     })
       .sort({ createdAt: -1 })
       .lean();
@@ -171,21 +191,40 @@ router.get("/buzz/reels", authMiddleware, async (req, res) => {
     if (!reels.length) return res.json({ posts: [] });
 
     // 3️⃣ Fetch owners
-    const ownerIds = [...new Set(reels.map((p) => p.userId))];
+    const ownerIds = [...new Set(reels.map((p) => String(p.userId)))];
     const owners = await User.find({ id: { $in: ownerIds } }).lean();
-    const ownerMap = new Map(owners.map((u) => [u.id, baseSanitizeUser(u)]));
+    const ownerMap = new Map(owners.map((u) => [String(u.id), baseSanitizeUser(u)]));
 
-    // 4️⃣ Build response
-    const posts = reels.map((p) => ({
-      ...p,
-      user:
-        ownerMap.get(p.userId) || {
-          id: p.userId,
-          firstName: "",
-          lastName: "",
-          avatar: "",
+    // 4️⃣ Build response (ensure required fields exist)
+    const posts = reels.map((p) => {
+      const uid = String(p.userId || "");
+      const safeUser = ownerMap.get(uid) || {};
+
+      return {
+        id: String(p.id || p._id || ""),
+        userId: uid,
+        mediaUrl: p.mediaUrl || "",
+        type: p.type || "video",
+        privacy: p.privacy || "",
+        text: p.text || "",
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+        isActive: p.isActive !== false,
+        viewCount: p.viewCount || 0,
+        likeCount: p.likeCount || 0,
+        commentCount: p.commentCount || 0,
+        giftCount: p.giftCount || 0,
+
+        // ✅ Mobile needs these
+        user: {
+          id: uid,
+          firstName: safeUser.firstName || "",
+          lastName: safeUser.lastName || "",
+          username: safeUser.username || "",
+          avatar: safeUser.avatar || "",
         },
-    }));
+      };
+    });
 
     res.json({ posts });
   } catch (err) {
