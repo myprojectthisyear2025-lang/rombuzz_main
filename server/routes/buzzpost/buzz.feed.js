@@ -47,7 +47,13 @@ router.get("/buzz/feed", authMiddleware, async (req, res) => {
       offset = 0,
     } = req.query;
 
-    const myId = req.user.id;
+    // ✅ Resolve viewer id safely (prevents "no matches => no feed")
+    let myId = String(req.user?.id || req.user?.userId || "");
+    if (!myId && req.user?._id) {
+      const meDoc = await User.findById(req.user._id).lean();
+      myId = String(meDoc?.id || "");
+    }
+    if (!myId) return res.status(401).json({ error: "Unauthorized" });
 
     // 1️⃣ Get matches from Mongo
     const mongoMatches = await Match.find({
@@ -56,29 +62,34 @@ router.get("/buzz/feed", authMiddleware, async (req, res) => {
     }).lean();
 
     const myMatches = mongoMatches
-      .map((m) => m.users.find((u) => u !== myId))
-      .filter(Boolean);
+      .map((m) => (m.users || []).find((u) => String(u) !== String(myId)))
+      .filter(Boolean)
+      .map((u) => String(u));
 
-       // 2️⃣ Build visibility query – ONLY me + my matches
-    const allowedAuthors = myMatches;
+    // ✅ Allowed authors: me + my matches (so you can see your own posts too)
+    const allowedAuthors = [myId, ...myMatches];
 
+    // 2️⃣ Build visibility query – me always included + matches obey privacy rules
     const visibilityQuery = {
-      userId: { $in: myMatches },
+      userId: { $in: allowedAuthors },
       isActive: true,
-    $or: [
-  // ✅ Posts from my matches with allowed privacy
-  {
-    userId: { $in: myMatches },
-    privacy: { $in: ["matches", "public"] },
-  },
+      $or: [
+        // ✅ My own posts are always visible to me
+        { userId: myId },
 
-  // ✅ Specific posts shared with me (still allowed)
-  {
-    privacy: "specific",
-    sharedWith: myId,
-  },
-],
-  };
+        // ✅ Match posts visible if privacy is matches/public (unknown values allowed by default schema)
+        {
+          userId: { $in: myMatches },
+          privacy: { $in: ["matches", "public"] },
+        },
+
+        // ✅ Specific posts shared with me
+        {
+          privacy: "specific",
+          sharedWith: myId,
+        },
+      ],
+    };
 
     // Optional type filter (photo / reel / video, etc.)
     if (type && type !== "all") visibilityQuery.type = type;
