@@ -66,7 +66,7 @@ router.get("/", authMiddleware, async (req, res) => {
     let allowRequestedVibe = true;
 
     // Restricted vibes require premium/verified gate
-    if (requestedVibe && isRestricted(requestedVibe) && !canUseRestricted(me)) {
+      if (requestedVibe && isRestricted(requestedVibe) && !canUseRestricted(me)) {
       allowRequestedVibe = false;
     }
 
@@ -75,7 +75,12 @@ router.get("/", authMiddleware, async (req, res) => {
       lng,
       range, // may be undefined – we’ll apply fallbacks
       gender,
-      intent,
+
+      // ✅ "Looking for" (your Discover intent filter)
+      //    - omit or "all" = no filter
+      lookingFor,
+      phase, // "strict" | "fallback"
+
       interest,
       blur,
       online,
@@ -88,6 +93,7 @@ router.get("/", authMiddleware, async (req, res) => {
        2) Determine base location
     --------------------------- */
     let baseLat = parseFloat(lat);
+
     let baseLng = parseFloat(lng);
 
     if (isNaN(baseLat) || isNaN(baseLng)) {
@@ -148,13 +154,36 @@ router.get("/", authMiddleware, async (req, res) => {
     if (gender) {
       // explicit URL override
       baseQuery.gender = new RegExp(`^${escapeRegex(gender)}$`, "i");
-    } else if (prefGender && prefGender !== "everyone") {
+     } else if (prefGender && prefGender !== "everyone") {
       // 💗 default from saved preference
       baseQuery.gender = new RegExp(`^${escapeRegex(prefGender)}$`, "i");
     }
 
-    if (intent) {
-      baseQuery.intent = new RegExp(`^${escapeRegex(intent)}$`, "i");
+    // ✅ LookingFor filtering (STRICT) + Premium-only intents gate
+    const requestedLookingFor = String(lookingFor || "").toLowerCase().trim();
+    const phaseMode = String(phase || "strict").toLowerCase().trim();
+
+    const PREMIUM_INTENTS = new Set(["ons", "threesome", "onlyfans"]);
+    const allowPremiumIntents = canUseRestricted(me);
+
+    const allowRequestedLookingFor =
+      !requestedLookingFor ||
+      requestedLookingFor === "all" ||
+      !PREMIUM_INTENTS.has(requestedLookingFor) ||
+      allowPremiumIntents;
+
+    // Strict phase enforces the filter.
+    // Fallback phase DOES NOT enforce it (it only boosts similarity).
+    if (
+      requestedLookingFor &&
+      requestedLookingFor !== "all" &&
+      phaseMode !== "fallback" &&
+      allowRequestedLookingFor
+    ) {
+      baseQuery.lookingFor = new RegExp(
+        `^${escapeRegex(requestedLookingFor)}$`,
+        "i"
+      );
     }
 
     if (requestedVibe && allowRequestedVibe) {
@@ -312,31 +341,47 @@ router.get("/", authMiddleware, async (req, res) => {
           - online / recent
           - verified
     --------------------------- */
-    const selfInterests = new Set(
+       const selfInterests = new Set(
       (self.interests || []).map((x) => String(x).toLowerCase())
     );
     const selfHobbies = new Set(
       (self.hobbies || []).map((x) => String(x).toLowerCase())
     );
-    const selfIntent = (self.intent || "").toLowerCase();
+
+    const selfLookingFor = (self.lookingFor || "").toLowerCase();
     const selfVibe = (self.vibe || "").toLowerCase();
 
     const withScores = pool.map((u) => {
+
       let distanceScore = 0;
       if (typeof u.distanceMeters === "number") {
         const capped = Math.min(u.distanceMeters, 100_000); // 0..100km
         distanceScore = 1 - capped / 100_000; // closer → closer to 1
       }
 
-      let intentScore = 0;
-      if (selfIntent && (u.intent || "").toLowerCase() === selfIntent) {
-        intentScore = 0.3;
+        // ✅ LookingFor / Intent score
+      // - In STRICT phase: results are already filtered, but keep a small boost anyway
+      // - In FALLBACK phase: boost "closest match" (same lookingFor OR requestedLookingFor)
+      let lookingForScore = 0;
+      const uLookingFor = (u.lookingFor || "").toLowerCase();
+
+      if (selfLookingFor && uLookingFor === selfLookingFor) {
+        lookingForScore = 0.25;
+      }
+
+      if (
+        requestedLookingFor &&
+        requestedLookingFor !== "all" &&
+        uLookingFor === requestedLookingFor
+      ) {
+        lookingForScore = Math.max(lookingForScore, 0.25);
       }
 
       let vibeScore = 0;
       if (selfVibe && (u.vibe || "").toLowerCase() === selfVibe) {
         vibeScore = 0.2;
       }
+
 
       let interestsScore = 0;
       if (selfInterests.size && Array.isArray(u.interests)) {
@@ -360,18 +405,40 @@ router.get("/", authMiddleware, async (req, res) => {
       if (u._status === "active") onlineScore = 0.2;
       else if (u._status === "recent") onlineScore = 0.1;
 
-      const verifiedScore = u.verified ? 0.05 : 0;
+           const verifiedScore = u.verified ? 0.05 : 0;
+
+      // ✅ Extra similarity only when phase=fallback (after user exhausted strict pool)
+      let fallbackSimilarity = 0;
+      if (phaseMode === "fallback") {
+        const eq = (a, b) =>
+          String(a || "").toLowerCase() &&
+          String(a || "").toLowerCase() === String(b || "").toLowerCase();
+
+        if (eq(self.relationshipStyle, u.relationshipStyle)) fallbackSimilarity += 0.12;
+        if (eq(self.fitnessLevel, u.fitnessLevel)) fallbackSimilarity += 0.06;
+        if (eq(self.workoutFrequency, u.workoutFrequency)) fallbackSimilarity += 0.06;
+
+        if (eq(self.smoking, u.smoking)) fallbackSimilarity += 0.05;
+        if (eq(self.drinking, u.drinking)) fallbackSimilarity += 0.05;
+        if (eq(self.sleepSchedule, u.sleepSchedule)) fallbackSimilarity += 0.05;
+
+        if (eq(self.bodyType, u.bodyType)) fallbackSimilarity += 0.04;
+        if (eq(self.travelStyle, u.travelStyle)) fallbackSimilarity += 0.04;
+        if (eq(self.petsPreference, u.petsPreference)) fallbackSimilarity += 0.03;
+      }
 
       const score =
         distanceScore * 0.5 +
-        intentScore +
+        lookingForScore +
         vibeScore +
         interestsScore +
         hobbiesScore +
         onlineScore +
-        verifiedScore;
+        verifiedScore +
+        fallbackSimilarity;
 
       return { ...u, _score: score };
+
     });
 
     /* ---------------------------
@@ -410,12 +477,17 @@ router.get("/", authMiddleware, async (req, res) => {
           avatar:
             u.avatar ||
             "https://via.placeholder.com/400x400?text=No+Photo",
-          bio: u.bio || "",
+                bio: u.bio || "",
           gender: u.gender || "",
           vibe: u.vibe || "",
-          intent: u.intent || "",
+
+          // ✅ keep both for backward-compat (mobile used to read "intent")
+          lookingFor: u.lookingFor || "",
+          intent: u.lookingFor || "",
+
           verified: !!u.verified,
           zodiac: u.zodiac || "",
+
           loveLanguage: u.loveLanguage || "",
           distanceMeters: hasLocation ? u.distanceMeters : null,
           distanceText,
