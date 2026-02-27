@@ -158,55 +158,69 @@ router.get("/buzz/feed", authMiddleware, async (req, res) => {
 // =======================================================
 router.get("/buzz/reels", authMiddleware, async (req, res) => {
   try {
-    const myId = String(req.user.id || "");
+    // ✅ Resolve viewer id the same safe way as /buzz/feed
+    let myId = String(req.user?.id || req.user?.userId || "");
+    if (!myId && req.user?._id) {
+      const meDoc = await User.findById(req.user._id).lean();
+      myId = String(meDoc?.id || "");
+    }
+    if (!myId) return res.status(401).json({ error: "Unauthorized" });
 
-    // 1️⃣ Get matches from Mongo (Match.js confirms status is "matched")
+    // 1️⃣ Get matches from Mongo
     const mongoMatches = await Match.find({
       users: myId,
       status: "matched",
     }).lean();
 
     const myMatches = mongoMatches
-      .map((m) => (m.users || []).find((u) => String(u) !== myId))
+      .map((m) => (m.users || []).find((u) => String(u) !== String(myId)))
       .filter(Boolean)
       .map((u) => String(u));
 
-    // If no matches, no reels (by design: matched users only)
     if (!myMatches.length) return res.json({ posts: [] });
 
-    // 2️⃣ Find reels
-    // ✅ Accept reel/video even if type varies, OR infer from mediaUrl extension
-    // ✅ Exclude ONLY privacy==="private" (case-insensitive). Missing/unknown privacy is allowed.
-    const reels = await PostModel.find({
+    // 2️⃣ Fetch candidate posts first (do NOT over-filter in Mongo)
+    // Only require: matched author + active + media exists
+    const candidates = await PostModel.find({
       userId: { $in: myMatches },
       isActive: true,
-      $and: [
-        {
-          $or: [
-            { type: { $in: ["reel", "reels", "video"] } },
-            { mediaUrl: { $regex: /\.(mp4|mov|m4v|webm|ogg|m3u8)(\?|$)/i } },
-          ],
-        },
-        {
-          $or: [
-            { privacy: { $exists: false } },
-            { privacy: { $eq: "" } },
-            { privacy: { $not: /^private$/i } },
-          ],
-        },
-      ],
+      mediaUrl: { $exists: true, $ne: "" },
     })
       .sort({ createdAt: -1 })
       .lean();
 
+    if (!candidates.length) return res.json({ posts: [] });
+
+    // 3️⃣ Filter in JS (safer than brittle Mongo regex/type checks)
+    const reels = candidates.filter((p) => {
+      const type = String(p?.type || "").toLowerCase();
+      const privacy = String(p?.privacy || "").toLowerCase();
+      const hasMedia = !!String(p?.mediaUrl || "").trim();
+
+      // ✅ Show anything except private
+      const isVisible = !privacy || privacy !== "private";
+
+      // ✅ Treat reel/video/reels as reels
+      // ✅ Also allow story if it has media, since some uploaders save reels that way
+      const isReelType =
+        type === "reel" ||
+        type === "reels" ||
+        type === "video" ||
+        (type === "story" && hasMedia);
+
+      return hasMedia && isVisible && isReelType;
+    });
+
     if (!reels.length) return res.json({ posts: [] });
 
-    // 3️⃣ Fetch owners
-    const ownerIds = [...new Set(reels.map((p) => String(p.userId)))];
+    // 4️⃣ Fetch owners
+    const ownerIds = [...new Set(reels.map((p) => String(p.userId || "")))];
     const owners = await User.find({ id: { $in: ownerIds } }).lean();
-    const ownerMap = new Map(owners.map((u) => [String(u.id), baseSanitizeUser(u)]));
+    const ownerMap = new Map(
+      owners.map((u) => [String(u.id), baseSanitizeUser(u)])
+    );
 
-    // 4️⃣ Build response (ensure required fields exist)
+    // 5️⃣ Build response
     const posts = reels.map((p) => {
       const uid = String(p.userId || "");
       const safeUser = ownerMap.get(uid) || {};
@@ -222,11 +236,10 @@ router.get("/buzz/reels", authMiddleware, async (req, res) => {
         updatedAt: p.updatedAt,
         isActive: p.isActive !== false,
         viewCount: p.viewCount || 0,
-        likeCount: p.likeCount || 0,
-        commentCount: p.commentCount || 0,
+        likesCount: p.likesCount || 0,
+        commentsCount: p.commentsCount || 0,
         giftCount: p.giftCount || 0,
-
-        // ✅ Mobile needs these
+        isLiked: false,
         user: {
           id: uid,
           firstName: safeUser.firstName || "",
