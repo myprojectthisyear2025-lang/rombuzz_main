@@ -39,6 +39,7 @@ const User = require("../models/User");
 const Relationship = require("../models/Relationship");
 const Match = require("../models/Match");
 const MatchStreak = require("../models/MatchStreak");
+const ChatRoom = require("../models/ChatRoom");
 const {
   baseSanitizeUser,
   sendNotification,
@@ -435,22 +436,70 @@ router.get("/likes/status/:targetUserId", authMiddleware, async (req, res) => {
 
 router.get("/matches", authMiddleware, async (req, res) => {
   try {
-    const selfId = req.user.id;
+    const selfId = String(req.user.id);
+
     const matchDocs = await Match.find({ users: selfId }).lean();
     const ids = matchDocs
-      .map((m) => m.users.find((id) => id !== selfId))
-      .filter(Boolean);
+      .map((m) => m.users.find((id) => String(id) !== selfId))
+      .filter(Boolean)
+      .map(String);
 
     const users = await User.find({ id: { $in: ids } }).lean();
-    const result = users.map((u) => ({
-      id: u.id,
-      firstName: u.firstName,
-      lastName: u.lastName,
-      avatar: u.avatar || "https://via.placeholder.com/150x150?text=No+Photo",
-      bio: u.bio || "",
-      gender: u.gender || "",
-      verified: !!u.verified,
-    }));
+
+    const result = await Promise.all(
+      users.map(async (u) => {
+        const otherId = String(u.id);
+        const roomId = [selfId, otherId].sort().join("_");
+
+        const room = await ChatRoom.findOne({ roomId }).lean();
+
+        const visibleMessages = Array.isArray(room?.messages)
+          ? room.messages.filter((msg) => {
+              if (!msg) return false;
+              if (Array.isArray(msg.hiddenFor) && msg.hiddenFor.includes(selfId)) return false;
+              return true;
+            })
+          : [];
+
+        const lastVisible = visibleMessages.length
+          ? visibleMessages[visibleMessages.length - 1]
+          : null;
+
+        return {
+          id: u.id,
+          firstName: u.firstName,
+          lastName: u.lastName,
+          avatar: u.avatar || "https://via.placeholder.com/150x150?text=No+Photo",
+          bio: u.bio || "",
+          gender: u.gender || "",
+          verified: !!u.verified,
+
+          // ✅ send true latest visible message, regardless of read/unread
+          lastMessage: lastVisible
+            ? {
+                id: lastVisible.id,
+                from: lastVisible.from,
+                to: lastVisible.to,
+                text: lastVisible.text || "",
+                type: lastVisible.type || "text",
+                url: lastVisible.url || null,
+                mediaType: lastVisible.mediaType || null,
+                overlayText: lastVisible.overlayText || "",
+                deleted: !!lastVisible.deleted,
+                time: lastVisible.time || null,
+              }
+            : null,
+
+          lastMessageTime: lastVisible?.time || room?.updatedAt || null,
+        };
+      })
+    );
+
+    result.sort((a, b) => {
+      const at = new Date(a?.lastMessageTime || 0).getTime() || 0;
+      const bt = new Date(b?.lastMessageTime || 0).getTime() || 0;
+      return bt - at;
+    });
 
     res.json(result);
   } catch (e) {
