@@ -232,6 +232,34 @@ async function incMatchStreakOut(fromId, toId) {
   }
 }
 
+/* ============================================================
+   🔒 Discover premium/restricted helpers
+============================================================ */
+const RESTRICTED_VALUES = new Set([
+  "flirty",
+  "chill",
+  "timepass",
+  "ons",
+  "threesome",
+  "onlyfans",
+]);
+
+function isRestricted(value = "") {
+  return RESTRICTED_VALUES.has(String(value || "").toLowerCase().trim());
+}
+
+function canUseRestricted(user = {}) {
+  const tier = String(user?.premiumTier || "").toLowerCase().trim();
+
+  return !!(
+    user?.isPremium ||
+    user?.isVerified ||
+    tier === "premium" ||
+    tier === "gold" ||
+    tier === "platinum"
+  );
+}
+
 // ============================================================
 // 📦 Exports
 // ============================================================
@@ -243,5 +271,7 @@ module.exports = {
   distanceKm,
   getRoomDoc,
   incMatchStreakOut,
+  isRestricted,
+  canUseRestricted,
   THIRTY_DAYS,
 };

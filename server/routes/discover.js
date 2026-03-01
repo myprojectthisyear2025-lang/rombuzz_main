@@ -39,7 +39,40 @@ const router = express.Router();
 const User = require("../models/User");
 const Relationship = require("../models/Relationship");
 const authMiddleware = require("../routes/auth-middleware");
-const { isRestricted, canUseRestricted } = require("../utils/helpers");
+
+const helpers = require("../utils/helpers");
+
+const LOCAL_RESTRICTED_VALUES = new Set([
+  "flirty",
+  "chill",
+  "timepass",
+  "ons",
+  "threesome",
+  "onlyfans",
+]);
+
+const isRestricted =
+  typeof helpers?.isRestricted === "function"
+    ? helpers.isRestricted
+    : (value = "") =>
+        LOCAL_RESTRICTED_VALUES.has(
+          String(value || "").toLowerCase().trim()
+        );
+
+const canUseRestricted =
+  typeof helpers?.canUseRestricted === "function"
+    ? helpers.canUseRestricted
+    : (user = {}) => {
+        const tier = String(user?.premiumTier || "").toLowerCase().trim();
+
+        return !!(
+          user?.isPremium ||
+          user?.isVerified ||
+          tier === "premium" ||
+          tier === "gold" ||
+          tier === "platinum"
+        );
+      };
 
 /* ============================================================
    GET /api/discover
@@ -186,12 +219,12 @@ router.get("/", authMiddleware, async (req, res) => {
       );
     }
 
-    if (requestedVibe && allowRequestedVibe) {
+      if (requestedVibe && allowRequestedVibe) {
       baseQuery.vibe = requestedVibe;
     }
 
     if (verified === "true") {
-      baseQuery.verified = true;
+      baseQuery.isVerified = true;
     }
 
     if (zodiac) {
@@ -401,11 +434,11 @@ router.get("/", authMiddleware, async (req, res) => {
         hobbiesScore = Math.min(0.2, overlap * 0.1);
       }
 
-      let onlineScore = 0;
+           let onlineScore = 0;
       if (u._status === "active") onlineScore = 0.2;
       else if (u._status === "recent") onlineScore = 0.1;
 
-           const verifiedScore = u.verified ? 0.05 : 0;
+      const verifiedScore = u.isVerified ? 0.05 : 0;
 
       // ✅ Extra similarity only when phase=fallback (after user exhausted strict pool)
       let fallbackSimilarity = 0;
@@ -485,7 +518,7 @@ router.get("/", authMiddleware, async (req, res) => {
           lookingFor: u.lookingFor || "",
           intent: u.lookingFor || "",
 
-          verified: !!u.verified,
+          verified: !!u.isVerified,
           zodiac: u.zodiac || "",
 
           loveLanguage: u.loveLanguage || "",
