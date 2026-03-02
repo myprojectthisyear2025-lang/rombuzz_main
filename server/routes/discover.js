@@ -103,7 +103,7 @@ router.get("/", authMiddleware, async (req, res) => {
       allowRequestedVibe = false;
     }
 
-    const {
+       const {
       lat,
       lng,
       range, // may be undefined – we’ll apply fallbacks
@@ -120,6 +120,18 @@ router.get("/", authMiddleware, async (req, res) => {
       verified,
       zodiac,
       love,
+
+      relationshipStyle,
+      bodyType,
+      fitnessLevel,
+      smoking,
+      drinking,
+      workoutFrequency,
+      diet,
+      sleepSchedule,
+      educationLevel,
+      travelStyle,
+      petsPreference,
     } = req.query;
 
     /* ---------------------------
@@ -230,13 +242,81 @@ router.get("/", authMiddleware, async (req, res) => {
     if (zodiac) {
       baseQuery.zodiac = new RegExp(`^${escapeRegex(zodiac)}$`, "i");
     }
-    if (love) {
+        if (love) {
       baseQuery.loveLanguage = new RegExp(`^${escapeRegex(love)}$`, "i");
+    }
+
+    // Advanced filters apply only in strict mode.
+    // Once client switches to fallback, these are relaxed automatically.
+    if (phaseMode !== "fallback") {
+      if (relationshipStyle) {
+        baseQuery.relationshipStyle = new RegExp(
+          `^${escapeRegex(relationshipStyle)}$`,
+          "i"
+        );
+      }
+
+      if (bodyType) {
+        baseQuery.bodyType = new RegExp(`^${escapeRegex(bodyType)}$`, "i");
+      }
+
+      if (fitnessLevel) {
+        baseQuery.fitnessLevel = new RegExp(
+          `^${escapeRegex(fitnessLevel)}$`,
+          "i"
+        );
+      }
+
+      if (smoking) {
+        baseQuery.smoking = new RegExp(`^${escapeRegex(smoking)}$`, "i");
+      }
+
+      if (drinking) {
+        baseQuery.drinking = new RegExp(`^${escapeRegex(drinking)}$`, "i");
+      }
+
+      if (workoutFrequency) {
+        baseQuery.workoutFrequency = new RegExp(
+          `^${escapeRegex(workoutFrequency)}$`,
+          "i"
+        );
+      }
+
+      if (diet) {
+        baseQuery.diet = new RegExp(`^${escapeRegex(diet)}$`, "i");
+      }
+
+      if (sleepSchedule) {
+        baseQuery.sleepSchedule = new RegExp(
+          `^${escapeRegex(sleepSchedule)}$`,
+          "i"
+        );
+      }
+
+      if (educationLevel) {
+        baseQuery.educationLevel = new RegExp(
+          `^${escapeRegex(educationLevel)}$`,
+          "i"
+        );
+      }
+
+      if (travelStyle) {
+        baseQuery.travelStyle = new RegExp(
+          `^${escapeRegex(travelStyle)}$`,
+          "i"
+        );
+      }
+
+      if (petsPreference) {
+        baseQuery.petsPreference = new RegExp(
+          `^${escapeRegex(petsPreference)}$`,
+          "i"
+        );
+      }
     }
 
     // Reasonable upper bound to keep scoring cheap
     let candidates = await User.find(baseQuery).limit(400).lean();
-
     /* ---------------------------
        5) Compute distance + derive flags
     --------------------------- */
