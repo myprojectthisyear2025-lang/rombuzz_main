@@ -318,8 +318,10 @@ router.delete("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => 
     const { scope = "me" } = req.query;
 
     const room = await getRoomDoc(roomId);
-    const msg = room.messages.find((m) => m.id === msgId);
-    if (!msg) return res.status(404).json({ error: "not found" });
+    const msgIndex = room.messages.findIndex((m) => String(m.id) === String(msgId));
+    if (msgIndex === -1) return res.status(404).json({ error: "not found" });
+
+    const msg = room.messages[msgIndex];
 
     if (scope === "me") {
       if (!msg.hiddenFor.includes(req.user.id)) msg.hiddenFor.push(req.user.id);
@@ -328,15 +330,37 @@ router.delete("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => 
     }
 
     if (scope === "all") {
-      if (msg.from !== req.user.id) return res.status(403).json({ error: "not owner" });
-     msg.deleted = true;
-msg.text = "This message was unsent";
-await room.save();
+      if (String(msg.from) !== String(req.user.id)) {
+        return res.status(403).json({ error: "not owner" });
+      }
 
-const io = getIO();
-io.to(roomId).emit("message:delete", { msgId });
-return res.json({ ok: true });
+      // ✅ permanently remove from backend storage
+      room.messages.splice(msgIndex, 1);
+      await room.save();
 
+      const io = getIO();
+
+      // ✅ notify anyone inside the room
+      io.to(roomId).emit("message:delete", {
+        id: String(msgId),
+        msgId: String(msgId),
+        roomId,
+        scope: "all",
+      });
+
+      // ✅ also push directly to the peer socket in case room join is missing/stale
+      const peerId = String(msg.to);
+      const sid = onlineUsers?.[peerId];
+      if (sid) {
+        io.to(sid).emit("message:delete", {
+          id: String(msgId),
+          msgId: String(msgId),
+          roomId,
+          scope: "all",
+        });
+      }
+
+      return res.json({ ok: true, removedId: String(msgId) });
     }
 
     res.status(400).json({ error: "invalid scope" });
@@ -708,7 +732,7 @@ router.post("/chat/mark-all-read", authMiddleware, async (req, res) => {
     if (sid) io.to(sid).emit("chat:unread:update", summary);
     io.to(String(me)).emit("chat:unread:update", summary);
 
-    return res.json({ ok: true, summary });
+     return res.json({ ok: true, summary });
   } catch (err) {
     console.error("❌ mark-all-read error:", err);
     return res.status(500).json({ error: "failed" });
@@ -716,7 +740,36 @@ router.post("/chat/mark-all-read", authMiddleware, async (req, res) => {
 });
 
 
+// ============================================================
+// ✨ AI REPLY SUGGESTIONS (manual trigger only)
+// POST /api/chat/rooms/:roomId/reply-suggestions
+// body: { mode?: "natural"|"flirty"|"funny"|"safe", count?: number }
+// ============================================================
+router.post("/chat/rooms/:roomId/reply-suggestions", authMiddleware, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const me = String(req.user.id);
+    const { mode = "natural", count = 4 } = req.body || {};
+
+    const room = await getRoomDoc(roomId);
+    const participants = (room?.participants || []).map((x) => String(x));
+
+    if (!participants.includes(me)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    const visible = (room.messages || [])
+      .map((m) => summarizeReplyIdeaMessage(m, me))
+      .filter(Boolean)
+      .slice(-20);
+
+    // ...
+  } catch (err) {
+    console.error("❌ reply-suggestions error:", err);
+    return res.status(500).json({ error: "failed" });
+  }
+});
+
+
 module.exports = router;
-
-
 

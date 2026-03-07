@@ -12,16 +12,17 @@
  *
  * Endpoints:
  *   POST   /api/media/:ownerId/react                 → React / unreact to media
- *   POST   /api/media/:ownerId/comment               → Add comment to media
+ *   POST   /api/media/:ownerId/comment               → Add comment / reply to media
  *   PATCH  /api/media/:ownerId/comment/:commentId    → Edit a media comment
  *   DELETE /api/media/:ownerId/comment/:commentId    → Delete a media comment
  *   PATCH  /api/media/:id/privacy                    → Toggle privacy
  *   DELETE /api/media/:id                            → Delete media
  *
- * Dependencies:
- *   - auth-middleware.js
- *   - models/User.js (MongoDB)
- *   - utils/helpers.js → sendNotification()
+ * Notes:
+ *   - Supports reply threading via parentId
+ *   - Keeps backward compatibility with existing flat comments
+ *   - Emits comment:new / comment:updated / comment:deleted using postId = mediaId
+ *     so existing LetsBuzz frontend listeners continue to work
  * ============================================================
  */
 
@@ -53,6 +54,14 @@ function emitToUsers(userIds, event, payload) {
   }
 }
 
+function getMedia(owner, mediaId) {
+  return (owner?.media || []).find((m) => String(m?.id) === String(mediaId));
+}
+
+function getComment(media, commentId) {
+  return (media?.comments || []).find((c) => String(c?.id) === String(commentId));
+}
+
 // =======================================================
 // ✅ React / unreact to a media item (MongoDB)
 // =======================================================
@@ -71,14 +80,13 @@ router.post("/media/:ownerId/react", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "owner not found" });
     }
 
-    const media = (owner.media || []).find((m) => String(m.id) === String(mediaId));
+    const media = getMedia(owner, mediaId);
     if (!media) {
       return res.status(404).json({ error: "media not found" });
     }
 
     media.reactions = media.reactions || {};
 
-    // ❤️ Toggle reaction
     if (media.reactions[me] === emoji) {
       delete media.reactions[me];
     } else {
@@ -88,13 +96,11 @@ router.post("/media/:ownerId/react", authMiddleware, async (req, res) => {
     owner.markModified("media");
     await owner.save();
 
-    // Build counts
     const counts = {};
     for (const e of Object.values(media.reactions || {})) {
       counts[e] = (counts[e] || 0) + 1;
     }
 
-    // 🔔 Notify owner if not self
     if (String(ownerId) !== String(me)) {
       const reactor = await User.findOne({ id: me }).lean();
       await sendNotification(ownerId, {
@@ -107,7 +113,6 @@ router.post("/media/:ownerId/react", authMiddleware, async (req, res) => {
       });
     }
 
-    // Optional realtime media reaction broadcast (safe additive)
     emitToUsers([me, ownerId], "media:react", {
       ownerId: String(ownerId),
       mediaId: String(mediaId),
@@ -115,27 +120,27 @@ router.post("/media/:ownerId/react", authMiddleware, async (req, res) => {
       mine: media.reactions[me] || null,
     });
 
-    res.json({
+    return res.json({
       ok: true,
       counts,
       mine: media.reactions[me] || null,
     });
   } catch (err) {
     console.error("❌ /media/:ownerId/react error:", err);
-    res.status(500).json({ error: "Reaction failed" });
+    return res.status(500).json({ error: "Reaction failed" });
   }
 });
 
 // =======================================================
-// ✅ Comment on a media item (MongoDB)
-// ✅ NOW emits realtime comment:new using postId = mediaId
-//    so existing LetsBuzzActions listeners keep working
+// ✅ Comment / reply on a media item (MongoDB)
+//    - supports parentId for threaded replies
+//    - keeps backward compatibility for normal comments
 // =======================================================
 router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
   try {
     const me = String(req.user.id);
     const { ownerId } = req.params;
-    const { mediaId, text } = req.body || {};
+    const { mediaId, text, parentId = null } = req.body || {};
 
     const cleanText = String(text || "").trim();
 
@@ -148,18 +153,31 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "owner not found" });
     }
 
-    const media = (owner.media || []).find((m) => String(m.id) === String(mediaId));
+    const media = getMedia(owner, mediaId);
     if (!media) {
       return res.status(404).json({ error: "media not found" });
     }
 
     media.comments = media.comments || [];
 
+    let parent = null;
+    if (parentId) {
+      parent = getComment(media, parentId);
+      if (!parent) {
+        return res.status(404).json({ error: "parent comment not found" });
+      }
+    }
+
     const comment = {
       id: shortid.generate(),
       userId: me,
       text: cleanText,
       createdAt: Date.now(),
+
+      // reply support
+      parentId: parent ? String(parent.id) : null,
+      replyToCommentId: parent ? String(parent.id) : null,
+      replyToUserId: parent ? String(parent.userId) : null,
     };
 
     media.comments.push(comment);
@@ -167,37 +185,44 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
     owner.markModified("media");
     await owner.save();
 
-    // 🔔 Notify owner
     if (String(ownerId) !== String(me)) {
       const commenter = await User.findOne({ id: me }).lean();
+
+      const isReply = !!parent;
       await sendNotification(ownerId, {
         fromId: me,
-        type: "media_comment",
-        message: `${commenter?.firstName || "Someone"} commented on your photo 💬`,
+        type: isReply ? "media_reply" : "media_comment",
+        message: isReply
+          ? `${commenter?.firstName || "Someone"} replied to a comment on your photo 💬`
+          : `${commenter?.firstName || "Someone"} commented on your photo 💬`,
         entity: "media",
         entityId: mediaId,
         postOwnerId: ownerId,
       });
     }
 
-    // ✅ CRITICAL: match existing frontend listener contract
-    // Frontend listens for "comment:new" and expects payload.postId
-    emitToUsers([me, ownerId], "comment:new", {
+    const notifyUsers = [me, ownerId];
+    if (parent?.userId && String(parent.userId) !== String(ownerId)) {
+      notifyUsers.push(String(parent.userId));
+    }
+
+    emitToUsers(notifyUsers, "comment:new", {
       postId: String(mediaId),
       ownerId: String(ownerId),
       comment,
     });
 
-    res.json({ ok: true, comment });
+    return res.json({ ok: true, comment });
   } catch (err) {
     console.error("❌ /media/:ownerId/comment error:", err);
-    res.status(500).json({ error: "Failed to comment" });
+    return res.status(500).json({ error: "Failed to comment" });
   }
 });
 
 // =======================================================
 // ✅ Edit a media comment (MongoDB)
-//    - commenter can edit own comment
+//    - commenter can edit own comment only
+//    - keeps parent/reply metadata intact
 // =======================================================
 router.patch("/media/:ownerId/comment/:commentId", authMiddleware, async (req, res) => {
   try {
@@ -216,13 +241,13 @@ router.patch("/media/:ownerId/comment/:commentId", authMiddleware, async (req, r
       return res.status(404).json({ error: "owner not found" });
     }
 
-    const media = (owner.media || []).find((m) => String(m.id) === String(mediaId));
+    const media = getMedia(owner, mediaId);
     if (!media) {
       return res.status(404).json({ error: "media not found" });
     }
 
     media.comments = media.comments || [];
-    const comment = media.comments.find((c) => String(c.id) === String(commentId));
+    const comment = getComment(media, commentId);
 
     if (!comment) {
       return res.status(404).json({ error: "comment not found" });
@@ -238,25 +263,24 @@ router.patch("/media/:ownerId/comment/:commentId", authMiddleware, async (req, r
     owner.markModified("media");
     await owner.save();
 
-    // Safe additive event for future UI support
     emitToUsers([me, ownerId], "comment:updated", {
       postId: String(mediaId),
       ownerId: String(ownerId),
       comment,
     });
 
-    res.json({ ok: true, comment });
+    return res.json({ ok: true, comment });
   } catch (err) {
     console.error("❌ PATCH /media/:ownerId/comment/:commentId error:", err);
-    res.status(500).json({ error: "Failed to edit comment" });
+    return res.status(500).json({ error: "Failed to edit comment" });
   }
 });
 
 // =======================================================
 // ✅ Delete a media comment (MongoDB)
 //    - commenter can delete own comment
-//    - media owner can delete any comment on own media
-//    - emits comment:deleted with postId = mediaId
+//    - media owner can delete any comment
+//    - deleting a parent also deletes its direct/indirect replies
 // =======================================================
 router.delete("/media/:ownerId/comment/:commentId", authMiddleware, async (req, res) => {
   try {
@@ -273,19 +297,18 @@ router.delete("/media/:ownerId/comment/:commentId", authMiddleware, async (req, 
       return res.status(404).json({ error: "owner not found" });
     }
 
-    const media = (owner.media || []).find((m) => String(m.id) === String(mediaId));
+    const media = getMedia(owner, mediaId);
     if (!media) {
       return res.status(404).json({ error: "media not found" });
     }
 
     media.comments = media.comments || [];
 
-    const idx = media.comments.findIndex((c) => String(c.id) === String(commentId));
-    if (idx < 0) {
+    const target = getComment(media, commentId);
+    if (!target) {
       return res.status(404).json({ error: "comment not found" });
     }
 
-    const target = media.comments[idx];
     const canDelete =
       String(target.userId) === String(me) || String(ownerId) === String(me);
 
@@ -293,22 +316,46 @@ router.delete("/media/:ownerId/comment/:commentId", authMiddleware, async (req, 
       return res.status(403).json({ error: "Not allowed to delete this comment" });
     }
 
-    media.comments.splice(idx, 1);
+    const idsToDelete = new Set([String(commentId)]);
+    let changed = true;
+
+    // delete whole reply tree (parent + descendants)
+    while (changed) {
+      changed = false;
+      for (const c of media.comments) {
+        const p = c?.parentId ? String(c.parentId) : null;
+        const id = String(c?.id || "");
+        if (p && idsToDelete.has(p) && !idsToDelete.has(id)) {
+          idsToDelete.add(id);
+          changed = true;
+        }
+      }
+    }
+
+    const before = media.comments.length;
+    media.comments = media.comments.filter((c) => !idsToDelete.has(String(c.id)));
+    const removedCount = before - media.comments.length;
 
     owner.markModified("media");
     await owner.save();
 
-    // ✅ Match existing frontend listener contract
-    emitToUsers([me, ownerId], "comment:deleted", {
-      postId: String(mediaId),
-      ownerId: String(ownerId),
-      commentId: String(commentId),
-    });
+    for (const removedId of idsToDelete) {
+      emitToUsers([me, ownerId], "comment:deleted", {
+        postId: String(mediaId),
+        ownerId: String(ownerId),
+        commentId: String(removedId),
+      });
+    }
 
-    res.json({ ok: true, deleted: true, commentId: String(commentId) });
+    return res.json({
+      ok: true,
+      deleted: true,
+      commentId: String(commentId),
+      removedCount,
+    });
   } catch (err) {
     console.error("❌ DELETE /media/:ownerId/comment/:commentId error:", err);
-    res.status(500).json({ error: "Failed to delete comment" });
+    return res.status(500).json({ error: "Failed to delete comment" });
   }
 });
 
@@ -337,10 +384,10 @@ router.patch("/media/:id/privacy", authMiddleware, async (req, res) => {
     user.markModified("media");
     await user.save();
 
-    res.json({ success: true, media });
+    return res.json({ success: true, media });
   } catch (err) {
     console.error("❌ PATCH /media/:id/privacy error:", err);
-    res.status(500).json({ error: "Failed to update privacy" });
+    return res.status(500).json({ error: "Failed to update privacy" });
   }
 });
 
@@ -366,10 +413,10 @@ router.delete("/media/:id", authMiddleware, async (req, res) => {
       await user.save();
     }
 
-    res.json({ success: changed });
+    return res.json({ success: changed });
   } catch (err) {
     console.error("❌ DELETE /media/:id error:", err);
-    res.status(500).json({ error: "Failed to delete media" });
+    return res.status(500).json({ error: "Failed to delete media" });
   }
 });
 
