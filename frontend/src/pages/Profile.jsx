@@ -1,4 +1,12 @@
-// src/pages/Profile.jsx
+/**
+ * =============================================================
+ * Rombuzz — Profile.jsx (Full page)
+ * // src/pages/Profile.jsx
+ * =============================================================
+ */
+
+//const API_BASE = "http://localhost:4000/api";
+//const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com/api";
 import { useEffect, useMemo, useRef, useState } from "react";
 // === Icons & helpers ===
 
@@ -7,21 +15,11 @@ import BuzzStreak from "../components/BuzzStreak";
 import GallerySection from "../components/GallerySection";
 import SocialSection from "../components/SocialSection";
 
-
-
-/**
- * =============================================================
- * Rombuzz — Profile.jsx (Full page)
- * =============================================================
- */
-
-//const API_BASE = "http://localhost:4000/api";
-//const API_BASE = process.env.REACT_APP_API_BASE || "https://rombuzz-api.onrender.com/api";
 import { API_BASE } from "../config";
 
 
 // Cloudinary (unsigned) — 
-const CLOUD_NAME ="drcxu0mks";
+const CLOUD_NAME ="drhx99m5f";
 const UPLOAD_PRESET ="rombuzz_unsigned";
 
 // Reaction palette (long-press on heart)
