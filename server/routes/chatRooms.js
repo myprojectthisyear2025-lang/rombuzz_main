@@ -284,24 +284,48 @@ router.patch("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => {
     if (!text) return res.status(400).json({ error: "text required" });
 
     const room = await getRoomDoc(roomId);
-// 🚫 no reactions allowed on system bubbles
-if (msg.system) {
-  return res.status(400).json({ error: "cannot_react_to_system" });
-}
+    const msg = (room.messages || []).find((m) => String(m.id) === String(msgId));
+    if (!msg) return res.status(404).json({ error: "not_found" });
 
-    if (msg.from !== req.user.id) return res.status(403).json({ error: "not owner" });
+    if (msg.system) {
+      return res.status(400).json({ error: "cannot_edit_system" });
+    }
+
+    if (String(msg.from) !== String(req.user.id)) {
+      return res.status(403).json({ error: "not owner" });
+    }
 
     const oneHour = 60 * 60 * 1000;
-    if (Date.now() - new Date(msg.time).getTime() > oneHour)
+    if (Date.now() - new Date(msg.time).getTime() > oneHour) {
       return res.status(400).json({ error: "edit window expired" });
+    }
 
-   msg.text = text;
-msg.edited = true;
-await room.save();
+    msg.text = text;
+    msg.edited = true;
+    await room.save();
 
-const io = getIO();
-io.to(roomId).emit("message:edit", { msgId, text });
-res.json({ ok: true });
+    const updatedMessage = msg.toObject ? msg.toObject() : { ...msg };
+    const io = getIO();
+    const editPayload = {
+      roomId,
+      msgId: String(updatedMessage.id || msgId),
+      id: String(updatedMessage.id || msgId),
+      text: updatedMessage.text,
+      edited: !!updatedMessage.edited,
+      message: updatedMessage,
+    };
+
+    io.to(roomId).emit("message:edit", editPayload);
+    io.to(roomId).emit("chat:edit", editPayload);
+
+    const peerId = String(msg.to || "");
+    const sid = onlineUsers?.[peerId];
+    if (sid) {
+      io.to(sid).emit("message:edit", editPayload);
+      io.to(sid).emit("chat:edit", editPayload);
+    }
+
+    res.json({ ok: true, message: updatedMessage });
 
   } catch (err) {
     console.error("❌ PATCH edit message error:", err);
@@ -772,4 +796,3 @@ router.post("/chat/rooms/:roomId/reply-suggestions", authMiddleware, async (req,
 
 
 module.exports = router;
-
