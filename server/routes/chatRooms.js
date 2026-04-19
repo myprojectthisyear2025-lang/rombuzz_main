@@ -61,6 +61,50 @@ function getPeersFromRoomId(roomId) {
   };
 }
 
+function sanitizeReplyToSnapshot(input) {
+  if (!input || typeof input !== "object") return null;
+
+  const id = String(input.id || "");
+  const from = String(input.from || "");
+  if (!id || !from) return null;
+
+  return {
+    id,
+    from,
+    type: String(input.type || "text"),
+    text: String(input.text || ""),
+    url: input.url ? String(input.url) : null,
+    mediaType:
+      input.mediaType === "image" ||
+      input.mediaType === "video" ||
+      input.mediaType === "audio"
+        ? input.mediaType
+        : null,
+    deleted: !!input.deleted,
+  };
+}
+
+function dedupeMessagesById(messages) {
+  const latestById = new Map();
+
+  for (const msg of messages || []) {
+    latestById.set(String(msg?.id || ""), msg);
+  }
+
+  const seen = new Set();
+  const deduped = [];
+
+  for (let i = (messages || []).length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    const id = String(msg?.id || "");
+    if (seen.has(id)) continue;
+    seen.add(id);
+    deduped.push(latestById.get(id));
+  }
+
+  return deduped.reverse();
+}
+
 
 async function getRoomDoc(roomId) {
   let room = await ChatRoom.findOne({ roomId });
@@ -118,7 +162,9 @@ const visible = (room.messages || []).filter((m) => {
   return true;
 });
 
-res.json(visible);
+const dedupedVisible = dedupeMessagesById(visible);
+
+res.json(dedupedVisible);
 
   } catch (err) {
     console.error("❌ GET chat room error:", err);
@@ -132,7 +178,7 @@ res.json(visible);
 router.post("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { text } = req.body || {};
+    const { text, replyTo } = req.body || {};
     if (!text) return res.status(400).json({ error: "text required" });
 
     const { a, b } = getPeersFromRoomId(roomId);
@@ -200,6 +246,7 @@ if (text.startsWith("::RBZ::")) {
 }
 
 const isRBZ = text.startsWith("::RBZ::");
+const safeReplyTo = sanitizeReplyToSnapshot(replyTo);
 
 const msg = {
   id: shortid.generate(),
@@ -225,6 +272,7 @@ const msg = {
     amount: giftAmount,
     unlockedBy: [],
   },
+  replyTo: safeReplyTo,
 };
 
 const room = await getRoomDoc(roomId);

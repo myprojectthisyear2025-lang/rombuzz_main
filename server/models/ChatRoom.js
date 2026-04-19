@@ -14,6 +14,19 @@
 
 const mongoose = require("mongoose");
 
+const replyToSchema = new mongoose.Schema(
+  {
+    id: { type: String, default: "" },
+    from: { type: String, default: "" },
+    type: { type: String, default: "text" },
+    text: { type: String, default: "" },
+    url: { type: String, default: null },
+    mediaType: { type: String, enum: ["image", "video", "audio", null], default: null },
+    deleted: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
 const messageSchema = new mongoose.Schema(
   {
     id: { type: String, required: true, index: true },   // shortid-style
@@ -48,6 +61,7 @@ gift: {
   amount: { type: Number, default: 0 },
   unlockedBy: [{ type: String, default: [] }], // userIds who unlocked (1:1 => receiver)
 },
+replyTo: { type: replyToSchema, default: null },
 
   },
   { _id: false }
