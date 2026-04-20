@@ -90,10 +90,10 @@ router.post("/ai/wingman/suggest", authMiddleware, async (req, res) => {
         funny: [
           "Are you made of copper and tellurium? Because you're Cu-Te 😄",
           "I was today years old when I realized I should message you.",
-          "Quick question — coffee or chaotic first date?",
+          "Quick question - coffee or chaotic first date?",
         ],
         polite: [
-          "Hi! I really liked your profile — it feels warm and genuine.",
+          "Hi! I really liked your profile - it feels warm and genuine.",
           "Hey there! How’s your day going?",
           "I’d love to know what makes you smile the most.",
         ],
@@ -105,12 +105,12 @@ router.post("/ai/wingman/suggest", authMiddleware, async (req, res) => {
         casual: [
           "Hey, what’s up?",
           "How’s your week going?",
-          "You seem cool — what kind of music are you into?",
+          "You seem cool - what kind of music are you into?",
         ],
         friendly: [
           "Hey! You seem like someone fun to talk to 😊",
           "Hi! What’s one thing that always makes you laugh?",
-          "I liked your vibe — mind if we chat?",
+          "I liked your vibe - mind if we chat?",
         ],
       };
       return res.json({ suggestions: examples[style] || examples.friendly });

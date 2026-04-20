@@ -51,6 +51,35 @@ const { googleClient } = require("../config/config");
 const User = require("../models/User");
 const PasswordReset = require("../models/PasswordReset");
 
+function mergeSignupPhotosIntoMedia(existingMedia = [], photos = []) {
+  const mediaList = Array.isArray(existingMedia) ? [...existingMedia] : [];
+  const photoUrls = Array.isArray(photos) ? photos : [];
+  const seenUrls = new Set(
+    mediaList
+      .map((item) => String(item?.url || "").trim())
+      .filter(Boolean)
+  );
+
+  for (const photo of photoUrls) {
+    const url = String(photo || "").trim();
+    if (!url || seenUrls.has(url)) continue;
+
+    mediaList.push({
+      id: shortid.generate(),
+      url,
+      type: "image",
+      caption: "kind:photo scope:public intent:letsbuzz",
+      privacy: "public",
+      createdAt: Date.now(),
+      comments: [],
+      reactions: {},
+    });
+    seenUrls.add(url);
+  }
+
+  return mediaList;
+}
+
 // =======================
 // AUTH: OTP ROUTES
 // =======================
@@ -118,6 +147,7 @@ if (dislikes !== undefined) user.dislikes = dislikes;
       user.interests = interests || [];
       user.avatar = avatar || user.avatar;
       user.photos = photos || user.photos || [];
+      user.media = mergeSignupPhotosIntoMedia(user.media, user.photos);
       user.phone = phone || "";
       user.voiceUrl = voiceUrl || "";
       if (password) user.passwordHash = await bcrypt.hash(password, 10);
@@ -134,6 +164,7 @@ if (dislikes !== undefined) user.dislikes = dislikes;
 
     // 🔁 Fallback: no Mongo record yet → create new
     const passwordHash = password ? await bcrypt.hash(password, 10) : null;
+    const signupPhotos = Array.isArray(photos) ? photos : [];
    const newUser = {
   id: shortid.generate(),
   email: emailLower,
@@ -158,7 +189,8 @@ if (dislikes !== undefined) user.dislikes = dislikes;
   visibilityMode,
   interests,
   avatar,
-  photos,
+  photos: signupPhotos,
+  media: mergeSignupPhotosIntoMedia([], signupPhotos),
   phone,
   voiceUrl,
 
