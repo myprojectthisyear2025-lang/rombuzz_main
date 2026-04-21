@@ -521,44 +521,42 @@ router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) =
     msg.pinnedAt = nextPinned ? new Date() : null;
     msg.pinnedBy = nextPinned ? String(req.user.id) : null;
 
-    let systemMessage = null;
+    const actorName = String(
+      [req.user?.firstName, req.user?.lastName].filter(Boolean).join(" ").trim() ||
+      req.user?.displayName ||
+      req.user?.name ||
+      req.user?.username ||
+      req.user?.email ||
+      "Unknown user"
+    ).trim();
 
-    if (nextPinned) {
-      const actorName = String(
-        req.user?.displayName ||
-          req.user?.name ||
-          [req.user?.firstName, req.user?.lastName].filter(Boolean).join(" ").trim() ||
-          req.user?.username ||
-          "Someone"
-      );
+    const systemMessage = {
+      id: shortid.generate(),
+      from: "system",
+      to: "system",
+      text: "",
+      type: "system_pin",
+      action: nextPinned ? "pin" : "unpin",
+      time: new Date(),
+      createdAt: new Date(),
+      edited: false,
+      deleted: false,
+      system: true,
+      reactions: {},
+      hiddenFor: [],
+      actorId: String(req.user.id),
+      actorName,
+      pinnedTargetId: String(msg.id),
+      ephemeral: { mode: "none", viewsLeft: 0 },
+      gift: {
+        locked: false,
+        stickerId: "sticker_basic",
+        amount: 0,
+        unlockedBy: [],
+      },
+    };
 
-      systemMessage = {
-        id: shortid.generate(),
-        from: "system",
-        to: "system",
-        text: "",
-        type: "system_pin",
-        time: new Date(),
-        createdAt: new Date(),
-        edited: false,
-        deleted: false,
-        system: true,
-        reactions: {},
-        hiddenFor: [],
-        actorId: String(req.user.id),
-        actorName,
-        pinnedTargetId: String(msg.id),
-        ephemeral: { mode: "none", viewsLeft: 0 },
-        gift: {
-          locked: false,
-          stickerId: "sticker_basic",
-          amount: 0,
-          unlockedBy: [],
-        },
-      };
-
-      room.messages.push(systemMessage);
-    }
+    room.messages.push(systemMessage);
 
     await room.save();
 
@@ -586,7 +584,7 @@ router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) =
       io.to(sid).emit("chat:pin", pinPayload);
     }
 
-    return res.json({ ok: true, message: updatedMessage });
+    return res.json({ ok: true, message: updatedMessage, systemMessage });
   } catch (err) {
     console.error("❌ PIN message error:", err);
     return res.status(500).json({ error: "Failed to update pin" });

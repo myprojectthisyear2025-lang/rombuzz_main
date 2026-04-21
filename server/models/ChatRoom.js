@@ -40,6 +40,7 @@ mediaType: { type: String, enum: ["image", "video", "audio", null], default: nul
     overlayText: { type: String, default: "" },
 
     type: { type: String, enum: ["text", "media", "meetup", "system_pin"], default: "text" },
+    action: { type: String, enum: ["pin", "unpin", null], default: null },
     time: { type: Date, default: Date.now },
     createdAt: { type: Date, default: Date.now },
 
