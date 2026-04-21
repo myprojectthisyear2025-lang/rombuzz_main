@@ -374,7 +374,7 @@ router.post("/buzz", authMiddleware, async (req, res) => {
 
     // Cooldown
     const now = Date.now();
-    const COOLDOWN_MS = 10 * 1000;
+    const COOLDOWN_MS = 3 * 1000;
     global._buzzCooldown ||= {};
     const last = global._buzzCooldown[pairKey] || 0;
     if (now - last < COOLDOWN_MS) {
