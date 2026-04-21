@@ -552,6 +552,8 @@ router.get("/:id", authMiddleware, async (req, res) => {
       user: {
         id: user.id,
         firstName: user.firstName,
+        lastName: user.lastName,
+        name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim(),
         dob: user.dob,
         avatar: user.avatar,
         bio: user.bio,
