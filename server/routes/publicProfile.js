@@ -102,7 +102,6 @@ function canViewerSeeMatchedMedia(item, isSelf, isMatched, viewerId) {
   const privacy = String(item.privacy || "public").toLowerCase();
   const caption = String(item.caption || "").toLowerCase();
   const sharedWith = normalizeSharedWith(item.sharedWith);
-  const privacyTag = caption.match(MATCHED_MEDIA_PRIVACY_RE)?.[1] || "";
 
   if (privacy === "specific") {
     return sharedWith.includes(String(viewerId));
@@ -112,13 +111,18 @@ function canViewerSeeMatchedMedia(item, isSelf, isMatched, viewerId) {
     privacy === "matches" ||
     privacy === "matched" ||
     privacy === "matched-only" ||
-    privacyTag === "matches" ||
-    privacyTag === "matched";
+    caption.includes("scope:matches") ||
+    caption.includes("scope:matched") ||
+    caption.includes("privacy:matches");
 
   if (matchedOnly) return !!isMatched;
 
-  if (privacyTag === "private") return false;
-  if (privacy === "private") return false;
+  const privateOnly =
+    caption.includes("scope:private") ||
+    caption.includes("privacy:private") ||
+    privacy === "private";
+
+  if (privateOnly) return false;
 
   return true;
 }
@@ -236,4 +240,5 @@ const likedMe = await Relationship.exists({ from: targetId, to: viewerId, type: 
 });
 
 module.exports = router;
+
 
