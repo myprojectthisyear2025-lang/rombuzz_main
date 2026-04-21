@@ -35,6 +35,22 @@ const Match = require("../models/Match");
 const Relationship = require("../models/Relationship"); // unified like/block model
 
 const VIDEO_URL_RE = /\.(mp4|mov|m4v|webm|avi|wmv|flv|mkv|mpg|mpeg)(\?|#|$)/i;
+const MATCHED_MEDIA_PRIVACY_RE = /\b(?:scope|privacy):(matches|matched|private)\b/i;
+
+function normalizeSharedWith(sharedWith) {
+  if (!Array.isArray(sharedWith)) return [];
+
+  return sharedWith
+    .map((entry) => {
+      if (entry == null) return "";
+      if (typeof entry === "string" || typeof entry === "number") return String(entry);
+      if (typeof entry === "object") {
+        return String(entry.id || entry.userId || entry._id || entry.value || "");
+      }
+      return "";
+    })
+    .filter(Boolean);
+}
 
 function normalizeProfileMediaEntry(entry) {
   if (typeof entry === "string") {
@@ -58,6 +74,7 @@ function normalizeProfileMediaEntry(entry) {
   const caption = String(entry.caption || "").trim();
   const privacy = String(entry.privacy || entry.scope || "public").toLowerCase().trim();
   const rawType = String(entry.type || entry.mediaType || "").toLowerCase().trim();
+  const sharedWith = normalizeSharedWith(entry.sharedWith);
   const looksLikeVideo =
     rawType === "reel" ||
     rawType === "video" ||
@@ -73,6 +90,7 @@ function normalizeProfileMediaEntry(entry) {
     url,
     caption,
     privacy,
+    sharedWith,
     type: looksLikeVideo ? "reel" : "image",
   };
 }
@@ -83,7 +101,8 @@ function canViewerSeeMatchedMedia(item, isSelf, isMatched, viewerId) {
 
   const privacy = String(item.privacy || "public").toLowerCase();
   const caption = String(item.caption || "").toLowerCase();
-  const sharedWith = Array.isArray(item.sharedWith) ? item.sharedWith.map(String) : [];
+  const sharedWith = normalizeSharedWith(item.sharedWith);
+  const privacyTag = caption.match(MATCHED_MEDIA_PRIVACY_RE)?.[1] || "";
 
   if (privacy === "specific") {
     return sharedWith.includes(String(viewerId));
@@ -93,14 +112,12 @@ function canViewerSeeMatchedMedia(item, isSelf, isMatched, viewerId) {
     privacy === "matches" ||
     privacy === "matched" ||
     privacy === "matched-only" ||
-    caption.includes("scope:matches") ||
-    caption.includes("scope:matched") ||
-    caption.includes("privacy:matches");
+    privacyTag === "matches" ||
+    privacyTag === "matched";
 
   if (matchedOnly) return !!isMatched;
 
-  if (caption.includes("scope:private")) return false;
-  if (caption.includes("privacy:private")) return false;
+  if (privacyTag === "private") return false;
   if (privacy === "private") return false;
 
   return true;
