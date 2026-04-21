@@ -1,5 +1,5 @@
 // =====================================================
-// 💗 ROMBUZZ MAIN BACKEND ENTRY
+// ðŸ’— ROMBUZZ MAIN BACKEND ENTRY
 // =====================================================
 // Central API entry point for RomBuzz backend
 // Handles all routes, middleware, and sockets.
@@ -14,20 +14,20 @@ const fs = require('fs');
 const http = require('http');
 const shortid = require('shortid');
 const sgMail = require('./config/sendgrid');
-const upload = multer({ dest: 'uploads/' }); // ✅ used for avatar uploads fallback
+const upload = multer({ dest: 'uploads/' }); // âœ… used for avatar uploads fallback
 
 // =======================
-// 🪵 LOGGER (modularized)
+// ðŸªµ LOGGER (modularized)
 // =======================
 const { logInfo, logSuccess, logWarn, logError, logSocket } = require('./modules/logger');
 
 // =======================
-// ⚙️ GLOBAL CONFIG (Google + Feature Toggles)
+// âš™ï¸ GLOBAL CONFIG (Google + Feature Toggles)
 // =======================
 const { googleClient, FEATURE_TOGGLES } = require('./config/config');
 
 // =======================
-// 🌍 ENVIRONMENT CONFIG (centralized)
+// ðŸŒ ENVIRONMENT CONFIG (centralized)
 // =======================
 const {
   PORT,
@@ -40,24 +40,24 @@ const {
   SHOW_RESTRICTED,
 } = require('./config/env');
 
-// ✅ ESM-safe fetch wrapper
+// âœ… ESM-safe fetch wrapper
 const fetch = (...args) =>
   import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 // =======================
-// 🔐 JWT HELPER (modularized)
+// ðŸ” JWT HELPER (modularized)
 // =======================
 const { signToken } = require('./utils/jwt');
 
 // =======================
-// 📦 DATABASE (modularized) — LowDB (legacy) + MongoDB init
+// ðŸ“¦ DATABASE (modularized) â€” LowDB (legacy) + MongoDB init
 // =======================
-// 📦 DATABASE (modularized) — LowDB (legacy) + MongoDB init + User sync
+// ðŸ“¦ DATABASE (modularized) â€” LowDB (legacy) + MongoDB init + User sync
 const db = require("./models/db.lowdb");
 require("./models/writeGuard")(db);
-const { initMongo } = require("./config/db");  // ⭐ REAL Mongo connection
+const { initMongo } = require("./config/db");  // â­ REAL Mongo connection
 
-// 🔄 Optional one-time user sync on startup
+// ðŸ”„ Optional one-time user sync on startup
 const { bulkSyncAllUsers } = require("./modules/userSync");
 (async () => {
   try {
@@ -65,7 +65,7 @@ const { bulkSyncAllUsers } = require("./modules/userSync");
     if (db.data?.users?.length) {
       await bulkSyncAllUsers(db.data.users);
     } else {
-      console.log("⚙️  No users found in LowDB for sync");
+      console.log("âš™ï¸  No users found in LowDB for sync");
     }
   } catch (err) {
     console.error("User bulk sync error:", err);
@@ -73,12 +73,12 @@ const { bulkSyncAllUsers } = require("./modules/userSync");
 })();
 
 // =======================
-// ☁️ CLOUDINARY CONFIG (modularized)
+// â˜ï¸ CLOUDINARY CONFIG (modularized)
 // =======================
 const cloudinary = require('./config/cloudinary');
 
 // =======================
-// 💫 VIBE UTILITIES (modularized)
+// ðŸ’« VIBE UTILITIES (modularized)
 // =======================
 const {
   PUBLIC_VIBES,
@@ -92,7 +92,7 @@ const {
 } = require('./utils/vibes');
 
 // =======================
-// 🧩 HELPER FUNCTIONS (modularized)
+// ðŸ§© HELPER FUNCTIONS (modularized)
 // =======================
 const {
   baseSanitizeUser,
@@ -105,29 +105,29 @@ const {
 } = require('./utils/helpers');
 
 // =======================
-// 🔔 NOTIFICATION HELPERS (modularized)
+// ðŸ”” NOTIFICATION HELPERS (modularized)
 // =======================
 const { sendNotification, createNotification } = require('./utils/notifications');
 
 // =======================
-// 🔒 SECURITY & CORS CONFIG (modularized)
+// ðŸ”’ SECURITY & CORS CONFIG (modularized)
 // =======================
 const setupCors = require('./config/cors');
 const { setupSecurity } = require('./config/security');
 
 // =======================
-// ⚡ SOCKET.IO SETUP (modularized)
+// âš¡ SOCKET.IO SETUP (modularized)
 // =======================
 const { setupSocket } = require('./config/socket');
 const { buzzLocks, onlineUsers } = require('./models/state');
 
 // =======================
-// 🧠 SOCKET CONNECTION HANDLER
+// ðŸ§  SOCKET CONNECTION HANDLER
 // =======================
 const { registerConnection } = require('./sockets/connection');
 
 // =======================
-// 🚀 EXPRESS APP INITIALIZATION
+// ðŸš€ EXPRESS APP INITIALIZATION
 // =======================
 const app = express();
 const server = http.createServer(app);
@@ -138,7 +138,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 setupSecurity(app);
 
-// 🔓 Root health route for Render & uptime checks
+// ðŸ”“ Root health route for Render & uptime checks
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "ok",
@@ -149,96 +149,100 @@ app.get("/", (req, res) => {
 
 // Socket.IO
 const io = setupSocket(server);
+global.io = io;
+global.onlineUsers = global.onlineUsers || onlineUsers || {};
+global.sendNotification = sendNotification;
 registerConnection(io);
 
 // =====================================================
-// 📡 ROUTES (Modularized)
+// ðŸ“¡ ROUTES (Modularized)
 // =====================================================
 
-// 🔐 AUTH & PROFILE
+// ðŸ” AUTH & PROFILE
 app.use('/api/auth', require('./routes/auth'));
 
 app.use('/api', require('./routes/profile'));
 
-// 👤 USERS & NOTIFICATIONS
+// ðŸ‘¤ USERS & NOTIFICATIONS
 app.use('/api/users', require('./routes/users'));
 app.use('/api/notifications', require('./routes/notifications'));
 
-// ⚙️ SETTINGS & ACCOUNT
+// âš™ï¸ SETTINGS & ACCOUNT
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/account', require('./routes/account'));
 
-// 📍 MICROBUZZ
+// ðŸ“ MICROBUZZ
 app.use('/api/microbuzz', require('./routes/microbuzz'));
 
-// 🐝 POSTS / LETSBUZZ
+// ðŸ POSTS / LETSBUZZ
 app.use('/api/posts', require('./routes/posts'));
 
-// 🏠 FEED & UPLOADS
+// ðŸ  FEED & UPLOADS
 app.use('/api/feed', require('./routes/feed'));
 app.use('/api', require('./routes/upload'));
 
-// 📸 STORIES & PUBLIC PROFILES
+// ðŸ“¸ STORIES & PUBLIC PROFILES
 app.use('/api/stories', require('./routes/stories'));
 app.use('/api/users', require('./routes/publicProfile'));
 
-// 🔍 DISCOVER
+// ðŸ” DISCOVER
 app.use('/api/discover', require('./routes/discover'));
 
-// 💬 MESSAGES, MATCHES, SAFETY
+// ðŸ’¬ MESSAGES, MATCHES, SAFETY
 app.use('/api/messages', require('./routes/messages'));
 app.use('/api', require('./routes/likesMatches'));
 app.use('/api', require('./routes/safety'));
 
-// 🧠 AI WINGMAN & PREMIUM
+// ðŸ§  AI WINGMAN & PREMIUM
 app.use('/api', require('./routes/aiWingman'));
 app.use('/api', require('./routes/premium'));
 
-// 💬 CHAT ROOMS & SAFE MEET
+// ðŸ’¬ CHAT ROOMS & SAFE MEET
 app.use('/api', require('./routes/chatRooms'));
 app.use('/api', require('./routes/meet'));
 
-// 🧩 DEBUG ROUTES
+// ðŸ§© DEBUG ROUTES
 app.use('/api', require('./routes/debug'));
 
-// 🧩 ENHANCED LETSBUZZ POSTS SYSTEM
+// ðŸ§© ENHANCED LETSBUZZ POSTS SYSTEM
 app.use('/api', require('./routes/buzzPosts'));
 app.use('/api', require('./routes/buzzComments'));
 
-// 💫 BUZZ STREAKS
+// ðŸ’« BUZZ STREAKS
 app.use('/api', require('./routes/streak'));
-logSuccess('✅ BuzzStreak routes initialized (match & daily check-in)');
+logSuccess('âœ… BuzzStreak routes initialized (match & daily check-in)');
 
 // =======================
-// 💓 HEALTH CHECK (modularized)
+// ðŸ’“ HEALTH CHECK (modularized)
 // =======================
 app.use("/api", require("./modules/health"));
 // =====================================================
-// 🤖 BACKGROUND MODULES
+// ðŸ¤– BACKGROUND MODULES
 // =====================================================
 const { startAiWingmanTask } = require('./modules/aiWingmanTask');
 startAiWingmanTask();
 
-// 💞 Meet-in-Middle Sockets
+// ðŸ’ž Meet-in-Middle Sockets
 const { registerMeetSockets } = require('./sockets/meetSocket');
 registerMeetSockets(io);
 
-// 🧾 System Startup Summary
+// ðŸ§¾ System Startup Summary
 const { logStartupSummary } = require('./modules/system');
 logStartupSummary({ PORT, FEATURE_TOGGLES });
 
 // =======================
-// 🛡️ GLOBAL ERROR HANDLER
+// ðŸ›¡ï¸ GLOBAL ERROR HANDLER
 // =======================
 const { errorHandler } = require("./modules/errorHandler");
 app.use(errorHandler);
 
 // =====================================================
-// 🏁 START SERVER
+// ðŸ START SERVER
 // =====================================================
 (async () => {
-  await initMongo();  // ⭐ Ensure Mongo is ready
+  await initMongo();  // â­ Ensure Mongo is ready
   server.listen(PORT, () => {
-    logSuccess(`🍃 Mongo ready — Rombuzz API running on port ${PORT}`);
+    logSuccess(`ðŸƒ Mongo ready â€” Rombuzz API running on port ${PORT}`);
   });
 })();
+

@@ -1,12 +1,12 @@
 /**
  * ============================================================
- * 📁 File: routes/profile.js
- * 🧩 Purpose: Handles profile completion, onboarding, and full profile retrieval.
+ * ðŸ“ File: routes/profile.js
+ * ðŸ§© Purpose: Handles profile completion, onboarding, and full profile retrieval.
  *
  * Endpoints:
- *   GET  /api/profile/full              → Get full profile (with media & posts)
- *   POST /api/profile/complete          → Complete profile for logged-in user
- *   PUT  /api/users/complete-profile    → Complete profile for Google users
+ *   GET  /api/profile/full              â†’ Get full profile (with media & posts)
+ *   POST /api/profile/complete          â†’ Complete profile for logged-in user
+ *   PUT  /api/users/complete-profile    â†’ Complete profile for Google users
  *
  * Features:
  *   - Updates avatar, hobbies, match preferences, and photos
@@ -16,13 +16,13 @@
  *   - Returns full sanitized profile with media and posts
  *
  * Dependencies:
- *   - models/User.js              → Core user document
- *   - models/PostModel.js         → LetsBuzz posts
- *   - models/Notification.js      → In-app notifications
- *   - models/Match.js        → Match relationships
- *   - auth-middleware.js          → JWT protection
- *   - utils/helpers.js            → baseSanitizeUser()
- *   - sockets/connection.js       → Socket.IO (io) for real-time notifications
+ *   - models/User.js              â†’ Core user document
+ *   - models/PostModel.js         â†’ LetsBuzz posts
+ *   - models/Notification.js      â†’ In-app notifications
+ *   - models/Match.js        â†’ Match relationships
+ *   - auth-middleware.js          â†’ JWT protection
+ *   - utils/helpers.js            â†’ baseSanitizeUser()
+ *   - sockets/connection.js       â†’ Socket.IO (io) for real-time notifications
  * ============================================================
  */
 
@@ -33,15 +33,16 @@ const { io } = require("../sockets/connection"); // optional socket export
 const { baseSanitizeUser } = require("../utils/helpers");
 const authMiddleware = require("./auth-middleware");
 
-// ✅ Mongo models only (no LowDB)
+// âœ… Mongo models only (no LowDB)
 const User = require("../models/User");
 const PostModel = require("../models/PostModel");
 const Notification = require("../models/Notification");
 const Match = require("../models/Match");
+const { sendNotification } = require("../utils/helpers");
 const PrivateNote = require("../models/PrivateNote");
 
 /* ============================================================
-   👤 SECTION 1: FULL PROFILE (with media & posts)
+   ðŸ‘¤ SECTION 1: FULL PROFILE (with media & posts)
 ============================================================ */
 
 /**
@@ -50,29 +51,29 @@ const PrivateNote = require("../models/PrivateNote");
  */
 router.get("/profile/full", authMiddleware, async (req, res) => {
   try {
-    // 1️⃣ Fetch user from MongoDB
+    // 1ï¸âƒ£ Fetch user from MongoDB
     const user = await User.findOne({ id: req.user.id }).lean();
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // 2️⃣ Fetch this user's posts (LetsBuzz)
+    // 2ï¸âƒ£ Fetch this user's posts (LetsBuzz)
     const posts = await PostModel.find({ userId: user.id })
       .sort({ createdAt: -1 })
       .lean();
 
-    // 3️⃣ Fetch latest notifications (optional enrichment)
+    // 3ï¸âƒ£ Fetch latest notifications (optional enrichment)
     const notifications = await Notification.find({ toId: user.id })
       .sort({ createdAt: -1 })
       .limit(20)
       .lean();
 
-     // 4️⃣ Build response payload
+     // 4ï¸âƒ£ Build response payload
     const sanitized = baseSanitizeUser(user);
 
     res.json({
       user: {
         ...sanitized,
 
-        // ✅ FORCE INCLUDE: editable profile fields (so mobile can persist after refresh/restart)
+        // âœ… FORCE INCLUDE: editable profile fields (so mobile can persist after refresh/restart)
         firstName: user.firstName ?? sanitized.firstName ?? "",
         lastName: user.lastName ?? sanitized.lastName ?? "",
         bio: user.bio ?? sanitized.bio ?? "",
@@ -87,7 +88,7 @@ router.get("/profile/full", authMiddleware, async (req, res) => {
         interests: user.interests ?? sanitized.interests ?? [],
         hobbies: user.hobbies ?? sanitized.hobbies ?? [],
 
-        // ✅ keep your media logic (web/mobile compatibility)
+        // âœ… keep your media logic (web/mobile compatibility)
         media:
           Array.isArray(user.media) && user.media.length > 0
             ? user.media
@@ -100,13 +101,13 @@ router.get("/profile/full", authMiddleware, async (req, res) => {
 
 
   } catch (err) {
-    console.error("❌ /profile/full (Mongo) error:", err);
+    console.error("âŒ /profile/full (Mongo) error:", err);
     res.status(500).json({ error: "Failed to fetch full profile" });
   }
 });
 
 /* ============================================================
-   🌟 SECTION 2: COMPLETE PROFILE ROUTE (onboarding)
+   ðŸŒŸ SECTION 2: COMPLETE PROFILE ROUTE (onboarding)
 ============================================================ */
 
 /**
@@ -134,7 +135,7 @@ router.post("/profile/complete", authMiddleware, async (req, res) => {
       ageRange,
     } = req.body || {};
 
-    // 1️⃣ Update user document in MongoDB
+    // 1ï¸âƒ£ Update user document in MongoDB
     const user = await User.findOneAndUpdate(
       { id: userId },
       {
@@ -155,7 +156,7 @@ router.post("/profile/complete", authMiddleware, async (req, res) => {
 
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // 2️⃣ Auto-create posts for uploaded photos (LetsBuzz)
+    // 2ï¸âƒ£ Auto-create posts for uploaded photos (LetsBuzz)
     //    Each photo becomes a public photo post announcing the user joined.
     for (const photoUrl of photos) {
       await PostModel.create({
@@ -163,14 +164,14 @@ router.post("/profile/complete", authMiddleware, async (req, res) => {
         userId: user.id,
         type: "photo",
         mediaUrl: photoUrl,
-        text: `${user.firstName || "Someone"} just joined RomBuzz ✨ Let's Buzz!`,
+        text: `${user.firstName || "Someone"} just joined RomBuzz âœ¨ Let's Buzz!`,
         privacy: "public",
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
     }
 
-    // 3️⃣ Notify matched users about new photos / completed profile
+    // 3ï¸âƒ£ Notify matched users about new photos / completed profile
     //    Find matches where this user is user1 or user2 and status is "matched".
     const matches = await Match.find({
       status: "matched",
@@ -182,36 +183,25 @@ router.post("/profile/complete", authMiddleware, async (req, res) => {
     );
 
     for (const matchId of matchedUsers) {
-      const notif = {
-        id: shortid.generate(),
-        toId: matchId,
+      await sendNotification(matchId, {
         fromId: user.id,
         type: "new_post",
-        message: `${user.firstName || "Someone"} just shared new photos! 💫`,
+        message: `${user.firstName || "Someone"} just shared new photos!`,
         href: "/letsbuzz",
         postOwnerId: user.id,
-        createdAt: Date.now(),
-        read: false,
-      };
-
-      await Notification.create(notif);
-
-      // 🔔 Real-time push if receiver is online
-      if (io) {
-        io.to(String(matchId)).emit("notification:new_post", notif);
-      }
+      });
     }
 
-    // 4️⃣ Return sanitized updated user
+    // 4ï¸âƒ£ Return sanitized updated user
     res.json(baseSanitizeUser(user));
   } catch (err) {
-    console.error("❌ /profile/complete error:", err);
+    console.error("âŒ /profile/complete error:", err);
     res.status(500).json({ error: "Failed to complete profile" });
   }
 });
 
 /* ============================================================
-   🧩 SECTION 3: COMPLETE PROFILE FOR GOOGLE USERS
+   ðŸ§© SECTION 3: COMPLETE PROFILE FOR GOOGLE USERS
 ============================================================ */
 
 /**
@@ -239,12 +229,12 @@ router.put("/users/complete-profile", authMiddleware, async (req, res) => {
 
     res.json({ success: true, user: baseSanitizeUser(user) });
   } catch (err) {
-    console.error("❌ PUT /users/complete-profile error:", err);
+    console.error("âŒ PUT /users/complete-profile error:", err);
     res.status(500).json({ error: "Failed to complete profile" });
   }
 });
 /* ============================================================
-   📝 SECTION 4: PRIVATE NOTES (Diary-style, user-only)
+   ðŸ“ SECTION 4: PRIVATE NOTES (Diary-style, user-only)
 ============================================================ */
 
 /**
@@ -259,7 +249,7 @@ router.get("/profile/notes", authMiddleware, async (req, res) => {
 
     res.json({ notes });
   } catch (err) {
-    console.error("❌ GET /profile/notes error:", err);
+    console.error("âŒ GET /profile/notes error:", err);
     res.status(500).json({ error: "Failed to fetch private notes" });
   }
 });
@@ -284,7 +274,7 @@ router.post("/profile/notes", authMiddleware, async (req, res) => {
 
     res.json({ note });
   } catch (err) {
-    console.error("❌ POST /profile/notes error:", err);
+    console.error("âŒ POST /profile/notes error:", err);
     res.status(500).json({ error: "Failed to create note" });
   }
 });
@@ -312,7 +302,7 @@ router.put("/profile/notes/:id", authMiddleware, async (req, res) => {
 
     res.json({ note });
   } catch (err) {
-    console.error("❌ PUT /profile/notes error:", err);
+    console.error("âŒ PUT /profile/notes error:", err);
     res.status(500).json({ error: "Failed to update note" });
   }
 });
@@ -334,12 +324,14 @@ router.delete("/profile/notes/:id", authMiddleware, async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error("❌ DELETE /profile/notes error:", err);
+    console.error("âŒ DELETE /profile/notes error:", err);
     res.status(500).json({ error: "Failed to delete note" });
   }
 });
 
 
-console.log("✅ Profile routes initialized (full + complete + google)");
+console.log("âœ… Profile routes initialized (full + complete + google)");
 
 module.exports = router;
+
+

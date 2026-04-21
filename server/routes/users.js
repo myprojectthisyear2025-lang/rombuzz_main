@@ -1,19 +1,19 @@
 /**
  * ============================================================
- * 📁 File: routes/users.js
- * 🧩 Purpose: Manage user profile updates, preferences, blocking, and social stats.
+ * ðŸ“ File: routes/users.js
+ * ðŸ§© Purpose: Manage user profile updates, preferences, blocking, and social stats.
  *
  * Endpoints:
- *   GET    /api/users/me                 → Get current user info
- *   POST   /api/location                 → Update user's current location
- *   GET    /api/users/social             → Get likes / matches summary
- *   GET    /api/social-stats             → Alias for same stats
- *   GET    /api/matches                  → List match profiles
- *   PUT    /api/users/me                 → Update profile details
- *   GET    /api/users/blocks             → List blocked users
- *   POST   /api/users/blocks/:userId     → Block another user
- *   DELETE /api/users/blocks/:userId     → Unblock a user
- *   GET    /api/users/social-stats       → Retrieve likes / likedYou / matches (Mongo)
+ *   GET    /api/users/me                 â†’ Get current user info
+ *   POST   /api/location                 â†’ Update user's current location
+ *   GET    /api/users/social             â†’ Get likes / matches summary
+ *   GET    /api/social-stats             â†’ Alias for same stats
+ *   GET    /api/matches                  â†’ List match profiles
+ *   PUT    /api/users/me                 â†’ Update profile details
+ *   GET    /api/users/blocks             â†’ List blocked users
+ *   POST   /api/users/blocks/:userId     â†’ Block another user
+ *   DELETE /api/users/blocks/:userId     â†’ Unblock a user
+ *   GET    /api/users/social-stats       â†’ Retrieve likes / likedYou / matches (Mongo)
  *
  * Features:
  *   - Profile editing (bio, vibe, visibility, etc.)
@@ -24,8 +24,8 @@
  *
  * Dependencies:
  *   - mongoose User, Relationship, Match
- *   - authMiddleware.js  → JWT authentication
- *   - utils/helpers.js   → User sanitization
+ *   - authMiddleware.js  â†’ JWT authentication
+ *   - utils/helpers.js   â†’ User sanitization
  *
  * Notes:
  *   - Mounted under /api/users in index.js
@@ -42,10 +42,26 @@ const {
   THIRTY_DAYS,
 } = require("../utils/helpers");
 
-// ✅ Mongo Models
+// âœ… Mongo Models
 const User = require("../models/User");
 const Relationship = require("../models/Relationship"); // for likes/blocks
 const Match = require("../models/Match");
+
+function isExpoPushToken(token = "") {
+  return /^Expo(?:nent)?PushToken\[[^\]]+\]$/.test(String(token || "").trim());
+}
+
+function normalizePushTokenEntry(body = {}) {
+  return {
+    token: String(body.token || "").trim(),
+    platform: String(body.platform || "").trim(),
+    deviceId: String(body.deviceId || "").trim(),
+    appOwnership: String(body.appOwnership || "").trim(),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    lastSeenAt: new Date(),
+  };
+}
 
 const DISCOVER_HIDDEN_PRIVACY = new Set([
   "private",
@@ -148,11 +164,11 @@ function buildDiscoverSafeGallery(user = {}) {
 }
 
 /* ============================================================
-   👤 SECTION 1: USER INFO & LOCATION
+   ðŸ‘¤ SECTION 1: USER INFO & LOCATION
 ============================================================ */
 
 /**
- * GET /api/users/me → current logged-in user
+ * GET /api/users/me â†’ current logged-in user
  */
 router.get("/me", authMiddleware, async (req, res) => {
   try {
@@ -160,8 +176,71 @@ router.get("/me", authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json(baseSanitizeUser(user));
   } catch (err) {
-    console.error("❌ /users/me error:", err);
+    console.error("âŒ /users/me error:", err);
     res.status(500).json({ error: "Failed to fetch user" });
+  }
+});
+router.post("/me/push-token", authMiddleware, async (req, res) => {
+  try {
+    const entry = normalizePushTokenEntry(req.body || {});
+
+    if (!isExpoPushToken(entry.token)) {
+      return res.status(400).json({ error: "valid Expo push token required" });
+    }
+
+    const user = await User.findOne({ id: req.user.id });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const list = Array.isArray(user.pushTokens) ? [...user.pushTokens] : [];
+    const existingIndex = list.findIndex(
+      (item) => String(item?.token || "") === entry.token
+    );
+
+    if (existingIndex >= 0) {
+      list[existingIndex] = {
+        ...list[existingIndex].toObject?.(),
+        ...list[existingIndex],
+        ...entry,
+        createdAt: list[existingIndex]?.createdAt || entry.createdAt,
+      };
+    } else {
+      list.push(entry);
+    }
+
+    user.pushTokens = list;
+    await user.save();
+
+    res.json({
+      success: true,
+      pushTokens: (user.pushTokens || []).map((item) => ({
+        token: item.token,
+        platform: item.platform || "",
+        updatedAt: item.updatedAt || item.lastSeenAt || item.createdAt || null,
+      })),
+    });
+  } catch (err) {
+    console.error("POST /users/me/push-token error:", err);
+    res.status(500).json({ error: "Failed to save push token" });
+  }
+});
+
+router.delete("/me/push-token", authMiddleware, async (req, res) => {
+  try {
+    const token = String(req.body?.token || "").trim();
+    if (!token) return res.status(400).json({ error: "token required" });
+
+    const user = await User.findOne({ id: req.user.id });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.pushTokens = (Array.isArray(user.pushTokens) ? user.pushTokens : []).filter(
+      (item) => String(item?.token || "") !== token
+    );
+    await user.save();
+
+    res.json({ success: true, remaining: user.pushTokens.length });
+  } catch (err) {
+    console.error("DELETE /users/me/push-token error:", err);
+    res.status(500).json({ error: "Failed to remove push token" });
   }
 });
 /**
@@ -222,13 +301,13 @@ router.post("/:id/view", authMiddleware, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("❌ POST /users/:id/view error:", err);
+    console.error("âŒ POST /users/:id/view error:", err);
     res.status(500).json({ error: "Failed to record profile view" });
   }
 });
 
 /**
- * POST /api/location → update user geolocation
+ * POST /api/location â†’ update user geolocation
  */
 router.post("/location", authMiddleware, async (req, res) => {
   try {
@@ -253,18 +332,18 @@ router.post("/location", authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json({ ok: true, location: user.location });
   } catch (err) {
-    console.error("❌ /location error:", err);
+    console.error("âŒ /location error:", err);
     res.status(500).json({ error: "Failed to update location" });
   }
 });
 
 /* ============================================================
-   💞 SECTION 2: SOCIAL RELATIONSHIPS (likes, matches)
+   ðŸ’ž SECTION 2: SOCIAL RELATIONSHIPS (likes, matches)
 ============================================================ */
 
 /**
  * GET /api/users/social or /api/social-stats
- * → summary of likesGiven, likesReceived, matchesCount
+ * â†’ summary of likesGiven, likesReceived, matchesCount
  */
 router.get(["/social", "/social-stats"], authMiddleware, async (req, res) => {
   try {
@@ -288,13 +367,13 @@ router.get(["/social", "/social-stats"], authMiddleware, async (req, res) => {
 
     res.json({ likesGiven, likesReceived, matchesCount });
   } catch (err) {
-    console.error("❌ /users/social error:", err);
+    console.error("âŒ /users/social error:", err);
     res.status(500).json({ error: "Failed to fetch social stats" });
   }
 });
 
 /**
- * GET /api/matches → list full match partner profiles
+ * GET /api/matches â†’ list full match partner profiles
  */
 router.get("/matches", authMiddleware, async (req, res) => {
   try {
@@ -320,17 +399,17 @@ router.get("/matches", authMiddleware, async (req, res) => {
 
     res.json({ count: partners.length, matches: partners });
   } catch (err) {
-    console.error("❌ /matches error:", err);
+    console.error("âŒ /matches error:", err);
     res.status(500).json({ error: "Failed to fetch matches" });
   }
 });
 
 /* ============================================================
-   🧑 SECTION 3: PROFILE UPDATE / BLOCKS
+   ðŸ§‘ SECTION 3: PROFILE UPDATE / BLOCKS
 ============================================================ */
 
 /**
- * PUT /api/users/me → update profile info
+ * PUT /api/users/me â†’ update profile info
  */
 router.put("/me", authMiddleware, async (req, res) => {
   try {
@@ -429,13 +508,13 @@ router.put("/me", authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json({ user: baseSanitizeUser(user) });
   } catch (err) {
-    console.error("❌ PUT /users/me error:", err);
+    console.error("âŒ PUT /users/me error:", err);
     res.status(500).json({ error: "Failed to update profile" });
   }
 });
 
 /**
- * GET /api/users/blocks → list all users I’ve blocked
+ * GET /api/users/blocks â†’ list all users Iâ€™ve blocked
  */
 router.get("/blocks", authMiddleware, async (req, res) => {
   try {
@@ -453,7 +532,7 @@ router.get("/blocks", authMiddleware, async (req, res) => {
 
     res.json({ blocks: blocked });
   } catch (err) {
-    console.error("❌ GET /users/blocks error:", err);
+    console.error("âŒ GET /users/blocks error:", err);
     res.status(500).json({ error: "Failed to fetch blocks" });
   }
 });
@@ -521,13 +600,13 @@ router.get("/:id", authMiddleware, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("❌ GET /users/:id error:", err);
+    console.error("âŒ GET /users/:id error:", err);
     res.status(500).json({ error: "Failed to fetch user profile" });
   }
 });
 
 /**
- * POST /api/users/blocks/:userId → block another user
+ * POST /api/users/blocks/:userId â†’ block another user
  */
 router.post("/blocks/:userId", authMiddleware, async (req, res) => {
   try {
@@ -543,18 +622,18 @@ router.post("/blocks/:userId", authMiddleware, async (req, res) => {
     });
     if (!existing) {
       await Relationship.create({ from: myId, to: targetId, type: "block" });
-      console.log(`🚫 ${myId} blocked ${targetId}`);
+      console.log(`ðŸš« ${myId} blocked ${targetId}`);
     }
 
     res.json({ success: true });
   } catch (err) {
-    console.error("❌ Block user error:", err);
+    console.error("âŒ Block user error:", err);
     res.status(500).json({ error: "Failed to block user" });
   }
 });
 
 /**
- * DELETE /api/users/blocks/:userId → unblock a user
+ * DELETE /api/users/blocks/:userId â†’ unblock a user
  */
 router.delete("/blocks/:userId", authMiddleware, async (req, res) => {
   try {
@@ -567,20 +646,20 @@ router.delete("/blocks/:userId", authMiddleware, async (req, res) => {
       type: "block",
     });
 
-    console.log(`🔓 ${myId} unblocked ${targetId}`);
+    console.log(`ðŸ”“ ${myId} unblocked ${targetId}`);
     res.json({ success: true });
   } catch (err) {
-    console.error("❌ Unblock user error:", err);
+    console.error("âŒ Unblock user error:", err);
     res.status(500).json({ error: "Failed to unblock user" });
   }
 });
 
 /* ============================================================
-   ❤️ SECTION 4: SOCIAL STATS SUMMARY (likes + matches)
+   â¤ï¸ SECTION 4: SOCIAL STATS SUMMARY (likes + matches)
 ============================================================ */
 
 /**
- * GET /api/users/social-stats → advanced social overview
+ * GET /api/users/social-stats â†’ advanced social overview
  */
 router.get("/social-stats", authMiddleware, async (req, res) => {
   try {
@@ -609,7 +688,7 @@ router.get("/social-stats", authMiddleware, async (req, res) => {
       m.user1 === myId ? m.user2 : m.user1
     );
 
-      // ✅ Include profile views (today + total)
+      // âœ… Include profile views (today + total)
     // If missing for older users, default safely.
     const me = await User.findOne({ id: myId }).select("profileViews").lean();
 
@@ -628,11 +707,12 @@ router.get("/social-stats", authMiddleware, async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ /users/social-stats error:", err);
+    console.error("âŒ /users/social-stats error:", err);
     res.status(500).json({ error: "Failed to fetch social stats" });
   }
 });
 
-console.log("✅ Users routes initialized (MongoDB version)");
+console.log("âœ… Users routes initialized (MongoDB version)");
 
 module.exports = router;
+
