@@ -521,6 +521,45 @@ router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) =
     msg.pinnedAt = nextPinned ? new Date() : null;
     msg.pinnedBy = nextPinned ? String(req.user.id) : null;
 
+    let systemMessage = null;
+
+    if (nextPinned) {
+      const actorName = String(
+        req.user?.displayName ||
+          req.user?.name ||
+          [req.user?.firstName, req.user?.lastName].filter(Boolean).join(" ").trim() ||
+          req.user?.username ||
+          "Someone"
+      );
+
+      systemMessage = {
+        id: shortid.generate(),
+        from: "system",
+        to: "system",
+        text: "",
+        type: "system_pin",
+        time: new Date(),
+        createdAt: new Date(),
+        edited: false,
+        deleted: false,
+        system: true,
+        reactions: {},
+        hiddenFor: [],
+        actorId: String(req.user.id),
+        actorName,
+        pinnedTargetId: String(msg.id),
+        ephemeral: { mode: "none", viewsLeft: 0 },
+        gift: {
+          locked: false,
+          stickerId: "sticker_basic",
+          amount: 0,
+          unlockedBy: [],
+        },
+      };
+
+      room.messages.push(systemMessage);
+    }
+
     await room.save();
 
     const updatedMessage = msg.toObject ? msg.toObject() : { ...msg };
@@ -533,6 +572,7 @@ router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) =
       pinnedAt: updatedMessage.pinnedAt || null,
       pinnedBy: updatedMessage.pinnedBy || null,
       message: updatedMessage,
+      systemMessage,
     };
 
     io.to(roomId).emit("message:pin", pinPayload);

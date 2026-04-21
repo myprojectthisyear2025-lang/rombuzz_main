@@ -39,8 +39,9 @@ const messageSchema = new mongoose.Schema(
 mediaType: { type: String, enum: ["image", "video", "audio", null], default: null },
     overlayText: { type: String, default: "" },
 
-    type: { type: String, enum: ["text", "media", "meetup"], default: "text" },
+    type: { type: String, enum: ["text", "media", "meetup", "system_pin"], default: "text" },
     time: { type: Date, default: Date.now },
+    createdAt: { type: Date, default: Date.now },
 
   edited: { type: Boolean, default: false },
 deleted: { type: Boolean, default: false },
@@ -65,6 +66,9 @@ replyTo: { type: replyToSchema, default: null },
   pinned: { type: Boolean, default: false },
   pinnedAt: { type: Date, default: null },
   pinnedBy: { type: String, default: null },
+  actorId: { type: String, default: null },
+  actorName: { type: String, default: null },
+  pinnedTargetId: { type: String, default: null },
 
   },
   { _id: false }

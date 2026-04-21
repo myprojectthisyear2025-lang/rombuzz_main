@@ -38,6 +38,7 @@ const router = express.Router();
 
 const User = require("../models/User");
 const Relationship = require("../models/Relationship");
+const Match = require("../models/Match");
 const authMiddleware = require("../routes/auth-middleware");
 
 const helpers = require("../utils/helpers");
@@ -171,11 +172,15 @@ router.get("/", authMiddleware, async (req, res) => {
           - likes from me
           - blocks in either direction
     --------------------------- */
-    const [likedDocs, blockDocs] = await Promise.all([
+    const [likedDocs, blockDocs, matchDocs] = await Promise.all([
       Relationship.find({ from: self.id, type: "like" }).lean(),
       Relationship.find({
         type: "block",
         $or: [{ from: self.id }, { to: self.id }],
+      }).lean(),
+      Match.find({
+        status: "matched",
+        users: self.id,
       }).lean(),
     ]);
 
@@ -185,7 +190,17 @@ router.get("/", authMiddleware, async (req, res) => {
       d.from === self.id ? d.to : d.from
     );
 
-    const excludeIds = [...new Set([...likedIds, ...blockedIds, self.id])];
+    const matchedIds = matchDocs
+      .map((doc) =>
+        Array.isArray(doc?.users)
+          ? doc.users.find((id) => String(id) !== String(self.id))
+          : null
+      )
+      .filter(Boolean);
+
+    const excludeIds = [
+      ...new Set([...likedIds, ...blockedIds, ...matchedIds, self.id]),
+    ];
 
     /* ---------------------------
        4) Base Mongo query (no distance yet)
@@ -687,4 +702,3 @@ function computeAge(dobStr) {
 }
 
 module.exports = router;
-

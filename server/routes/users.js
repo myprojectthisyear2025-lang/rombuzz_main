@@ -47,6 +47,106 @@ const User = require("../models/User");
 const Relationship = require("../models/Relationship"); // for likes/blocks
 const Match = require("../models/Match");
 
+const DISCOVER_HIDDEN_PRIVACY = new Set([
+  "private",
+  "matches",
+  "matched-only",
+  "hidden",
+  "specific",
+]);
+
+function normalizeDiscoverImageUrl(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getDiscoverMediaUrl(entry) {
+  if (typeof entry === "string") return normalizeDiscoverImageUrl(entry);
+  return normalizeDiscoverImageUrl(entry?.url);
+}
+
+function getDiscoverMediaPrivacy(entry) {
+  return String(entry?.privacy || entry?.scope || "").toLowerCase().trim();
+}
+
+function getDiscoverMediaCaption(entry) {
+  return String(entry?.caption || "").toLowerCase().trim();
+}
+
+function isDiscoverSafeMedia(entry) {
+  const url = getDiscoverMediaUrl(entry);
+  if (!url) return false;
+
+  const privacy = getDiscoverMediaPrivacy(entry);
+  const caption = getDiscoverMediaCaption(entry);
+  const type = String(entry?.type || entry?.mediaType || "")
+    .toLowerCase()
+    .trim();
+
+  if (DISCOVER_HIDDEN_PRIVACY.has(privacy)) return false;
+  if (caption.includes("scope:private")) return false;
+  if (caption.includes("scope:matches")) return false;
+  if (caption.includes("scope:matched")) return false;
+  if (caption.includes("privacy:private")) return false;
+  if (caption.includes("privacy:matches")) return false;
+  if (caption.includes("kind:reel")) return false;
+  if (type === "video") return false;
+
+  return true;
+}
+
+function sanitizeLegacyDiscoverPhotos(photos = []) {
+  const list = Array.isArray(photos) ? photos : [];
+  const seen = new Set();
+  const out = [];
+
+  for (const item of list) {
+    const url = getDiscoverMediaUrl(item);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+
+  return out;
+}
+
+function buildDiscoverSafeGallery(user = {}) {
+  const seen = new Set();
+  const media = [];
+  const photos = [];
+
+  const pushPhotoUrl = (value) => {
+    const url = normalizeDiscoverImageUrl(value);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    photos.push(url);
+  };
+
+  if (Array.isArray(user.media)) {
+    for (const item of user.media) {
+      if (!isDiscoverSafeMedia(item)) continue;
+
+      const url = getDiscoverMediaUrl(item);
+      if (seen.has(url)) continue;
+
+      seen.add(url);
+      media.push({
+        ...item,
+        url,
+        type: "image",
+      });
+      photos.push(url);
+    }
+  }
+
+  for (const url of sanitizeLegacyDiscoverPhotos(user.photos)) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    photos.push(url);
+  }
+
+  return { media, photos };
+}
+
 /* ============================================================
    👤 SECTION 1: USER INFO & LOCATION
 ============================================================ */
@@ -367,6 +467,8 @@ router.get("/:id", authMiddleware, async (req, res) => {
     const user = await User.findOne({ id: req.params.id }).lean();
     if (!user) return res.status(404).json({ error: "User not found" });
 
+    const discoverGallery = buildDiscoverSafeGallery(user);
+
     res.json({
       user: {
         id: user.id,
@@ -410,8 +512,8 @@ router.get("/:id", authMiddleware, async (req, res) => {
         interests: user.interests,
         hobbies: user.hobbies,
 
-        media: user.media,
-        photos: user.photos,
+        media: discoverGallery.media,
+        photos: discoverGallery.photos,
         voiceIntro: user.voiceUrl,
 
         visibilityMode: user.visibilityMode,
