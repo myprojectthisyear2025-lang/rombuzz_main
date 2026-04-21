@@ -504,6 +504,56 @@ res.json({ ok: true, reactions: Object.fromEntries(msg.reactions) });
 });
 
 // ============================================================
+// 📌 PIN / UNPIN MESSAGE
+// ============================================================
+router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) => {
+  try {
+    const { roomId, msgId } = req.params;
+    const { pinned } = req.body || {};
+
+    const room = await getRoomDoc(roomId);
+    const msg = room.messages.find((m) => String(m.id) === String(msgId));
+    if (!msg) return res.status(404).json({ error: "not_found" });
+    if (msg.deleted) return res.status(400).json({ error: "cannot_pin_deleted" });
+
+    const nextPinned = !!pinned;
+    msg.pinned = nextPinned;
+    msg.pinnedAt = nextPinned ? new Date() : null;
+    msg.pinnedBy = nextPinned ? String(req.user.id) : null;
+
+    await room.save();
+
+    const updatedMessage = msg.toObject ? msg.toObject() : { ...msg };
+    const io = getIO();
+    const pinPayload = {
+      roomId,
+      msgId: String(updatedMessage.id || msgId),
+      id: String(updatedMessage.id || msgId),
+      pinned: !!updatedMessage.pinned,
+      pinnedAt: updatedMessage.pinnedAt || null,
+      pinnedBy: updatedMessage.pinnedBy || null,
+      message: updatedMessage,
+    };
+
+    io.to(roomId).emit("message:pin", pinPayload);
+    io.to(roomId).emit("chat:pin", pinPayload);
+
+    const peerId =
+      String(msg.from) === String(req.user.id) ? String(msg.to || "") : String(msg.from || "");
+    const sid = onlineUsers?.[peerId];
+    if (sid) {
+      io.to(sid).emit("message:pin", pinPayload);
+      io.to(sid).emit("chat:pin", pinPayload);
+    }
+
+    return res.json({ ok: true, message: updatedMessage });
+  } catch (err) {
+    console.error("❌ PIN message error:", err);
+    return res.status(500).json({ error: "Failed to update pin" });
+  }
+});
+
+// ============================================================
 // 🧹 DEBUG — DELETE BROKEN CHAT ROOM (no auth)
 // URL: /api/chat/debug/room/<roomId>
 // ============================================================

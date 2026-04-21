@@ -62,6 +62,9 @@ gift: {
   unlockedBy: [{ type: String, default: [] }], // userIds who unlocked (1:1 => receiver)
 },
 replyTo: { type: replyToSchema, default: null },
+  pinned: { type: Boolean, default: false },
+  pinnedAt: { type: Date, default: null },
+  pinnedBy: { type: String, default: null },
 
   },
   { _id: false }

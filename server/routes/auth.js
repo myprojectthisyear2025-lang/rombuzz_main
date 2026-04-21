@@ -51,9 +51,24 @@ const { googleClient } = require("../config/config");
 const User = require("../models/User");
 const PasswordReset = require("../models/PasswordReset");
 
+function sanitizeSignupPhotos(photos = []) {
+  const list = Array.isArray(photos) ? photos : [];
+  const seenUrls = new Set();
+  const cleanPhotos = [];
+
+  for (const photo of list) {
+    const url = String(photo || "").trim();
+    if (!url || seenUrls.has(url)) continue;
+    seenUrls.add(url);
+    cleanPhotos.push(url);
+  }
+
+  return cleanPhotos;
+}
+
 function mergeSignupPhotosIntoMedia(existingMedia = [], photos = []) {
   const mediaList = Array.isArray(existingMedia) ? [...existingMedia] : [];
-  const photoUrls = Array.isArray(photos) ? photos : [];
+  const photoUrls = sanitizeSignupPhotos(photos);
   const seenUrls = new Set(
     mediaList
       .map((item) => String(item?.url || "").trim())
@@ -126,6 +141,7 @@ router.post("/register-full", async (req, res) => {
     }
 
     const emailLower = String(email || "").trim().toLowerCase();
+    const signupPhotos = sanitizeSignupPhotos(photos);
 
     // 🧩 Try Mongo first — upgrade if already verified
     let user = await User.findOne({ email: emailLower });
@@ -146,7 +162,7 @@ if (dislikes !== undefined) user.dislikes = dislikes;
       user.visibilityMode = visibilityMode || "public";
       user.interests = interests || [];
       user.avatar = avatar || user.avatar;
-      user.photos = photos || user.photos || [];
+      user.photos = signupPhotos;
       user.media = mergeSignupPhotosIntoMedia(user.media, user.photos);
       user.phone = phone || "";
       user.voiceUrl = voiceUrl || "";
@@ -164,7 +180,6 @@ if (dislikes !== undefined) user.dislikes = dislikes;
 
     // 🔁 Fallback: no Mongo record yet → create new
     const passwordHash = password ? await bcrypt.hash(password, 10) : null;
-    const signupPhotos = Array.isArray(photos) ? photos : [];
    const newUser = {
   id: shortid.generate(),
   email: emailLower,
