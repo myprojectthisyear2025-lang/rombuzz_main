@@ -26,6 +26,7 @@ const shortid = require("shortid");
 const authMiddleware = require("../routes/auth-middleware");
 const ChatRoom = require("../models/ChatRoom");
 const MediaGift = require("../models/MediaGift");
+const User = require("../models/User");
 
 // ✅ Proper Socket.IO + state wiring
 const { getIO } = require("../socket");
@@ -82,6 +83,22 @@ function sanitizeReplyToSnapshot(input) {
         : null,
     deleted: !!input.deleted,
   };
+}
+
+function cleanFirstName(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.split(/\s+/).find(Boolean) || "";
+}
+
+async function resolveActorFirstName(userId) {
+  try {
+    const user = await User.findOne({ id: userId }).select("firstName").lean();
+    return cleanFirstName(user?.firstName) || "Someone";
+  } catch (err) {
+    console.error("resolveActorFirstName failed", err);
+    return "Someone";
+  }
 }
 
 function dedupeMessagesById(messages) {
@@ -508,12 +525,6 @@ res.json({ ok: true, reactions: Object.fromEntries(msg.reactions) });
 // ============================================================
 router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) => {
   try {
-    const getFirstName = (value) => {
-      const text = String(value || "").trim();
-      if (!text) return "";
-      return text.split(/\s+/).find(Boolean) || "";
-    };
-
     const { roomId, msgId } = req.params;
     const { pinned } = req.body || {};
 
@@ -527,12 +538,7 @@ router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) =
     msg.pinnedAt = nextPinned ? new Date() : null;
     msg.pinnedBy = nextPinned ? String(req.user.id) : null;
 
-    const actorName =
-      getFirstName(req.user?.firstName) ||
-      getFirstName(req.user?.displayName) ||
-      getFirstName(req.user?.name) ||
-      getFirstName(req.user?.username) ||
-      "Someone";
+    const actorName = await resolveActorFirstName(req.user.id);
 
     const systemMessage = {
       id: shortid.generate(),
