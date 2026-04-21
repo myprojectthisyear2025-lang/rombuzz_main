@@ -508,6 +508,12 @@ res.json({ ok: true, reactions: Object.fromEntries(msg.reactions) });
 // ============================================================
 router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) => {
   try {
+    const getFirstName = (value) => {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      return text.split(/\s+/).find(Boolean) || "";
+    };
+
     const { roomId, msgId } = req.params;
     const { pinned } = req.body || {};
 
@@ -521,14 +527,12 @@ router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) =
     msg.pinnedAt = nextPinned ? new Date() : null;
     msg.pinnedBy = nextPinned ? String(req.user.id) : null;
 
-    const actorName = String(
-      [req.user?.firstName, req.user?.lastName].filter(Boolean).join(" ").trim() ||
-      req.user?.displayName ||
-      req.user?.name ||
-      req.user?.username ||
-      req.user?.email ||
-      "Unknown user"
-    ).trim();
+    const actorName =
+      getFirstName(req.user?.firstName) ||
+      getFirstName(req.user?.displayName) ||
+      getFirstName(req.user?.name) ||
+      getFirstName(req.user?.username) ||
+      "Someone";
 
     const systemMessage = {
       id: shortid.generate(),
