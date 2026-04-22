@@ -40,6 +40,7 @@ const Relationship = require("../models/Relationship");
 const Match = require("../models/Match");
 const MatchStreak = require("../models/MatchStreak");
 const ChatRoom = require("../models/ChatRoom");
+const mongoose = require("mongoose");
 const {
   baseSanitizeUser,
   sendNotification,
@@ -58,6 +59,22 @@ function getOnlineUsers() {
   }
   return global.onlineUsers;
 }
+
+async function findUserByAnyId(userId) {
+  const raw = String(userId || "").trim();
+  if (!raw) return null;
+
+  let user = await User.findOne({ id: raw }).lean();
+  if (user) return user;
+
+  if (mongoose.Types.ObjectId.isValid(raw)) {
+    user = await User.findById(raw).lean();
+    if (user) return user;
+  }
+
+  return null;
+}
+
 const ENABLE_LIKES_MATCHES = true;
 const buzzLocks = new Set();
 
@@ -82,7 +99,7 @@ router.post("/likes", authMiddleware, async (req, res) => {
     if (existing)
       return res.status(400).json({ error: "already liked" });
 
-    // 💞 Create like
+       // 💞 Create like
     await Relationship.create({
       id: shortid.generate(),
       from,
@@ -93,8 +110,10 @@ router.post("/likes", authMiddleware, async (req, res) => {
 
     // 💞 Check mutual like → MATCH
     const mutual = await Relationship.findOne({ from: to, to: from, type: "like" });
-    const self = await User.findOne({ id: from }).lean();
-    const other = await User.findOne({ id: to }).lean();
+    const [self, other] = await Promise.all([
+      findUserByAnyId(from),
+      findUserByAnyId(to),
+    ]);
 
   if (mutual) {
   const existsMatch = await Match.findOne({ users: { $all: [from, to] } });
@@ -114,12 +133,14 @@ router.post("/likes", authMiddleware, async (req, res) => {
     ],
   });
 
-  // ===============================
+    // ===============================
   // 🔥 NEW: Unified Discover Match Logic
   // ===============================
 
-  const fromName = self?.firstName || "Someone";
-  const toName = other?.firstName || "Someone";
+  const fromName =
+    String(self?.firstName || self?.name || "").trim() || "Someone";
+  const toName =
+    String(other?.firstName || other?.name || "").trim() || "Someone";
 
   // Shared chat room id (consistent with MicroBuzz)
   const roomId = [from, to].sort().join("_");
@@ -270,7 +291,7 @@ router.post("/likes/respond", authMiddleware, async (req, res) => {
       });
     }
 
-    // Clean up likes in both directions
+      // Clean up likes in both directions
     await Relationship.deleteMany({
       $or: [
         { from: fromId, to: toId, type: "like" },
@@ -280,12 +301,14 @@ router.post("/likes/respond", authMiddleware, async (req, res) => {
 
     // Load names for pretty messages
     const [fromUser, toUser] = await Promise.all([
-      User.findOne({ id: fromId }).lean(),
-      User.findOne({ id: toId }).lean(),
+      findUserByAnyId(fromId),
+      findUserByAnyId(toId),
     ]);
 
-    const fromName = fromUser?.firstName || "Someone";
-    const toName = toUser?.firstName || "Someone";
+    const fromName =
+      String(fromUser?.firstName || fromUser?.name || "").trim() || "Someone";
+    const toName =
+      String(toUser?.firstName || toUser?.name || "").trim() || "Someone";
 
     // Shared chat room id (same style as MicroBuzz)
     const roomId = [fromId, toId].sort().join("_");
