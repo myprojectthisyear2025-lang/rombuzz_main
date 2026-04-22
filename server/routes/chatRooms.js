@@ -215,8 +215,9 @@ let giftAmount = 0;
 
 // ✅ NEW: media fields (so realtime doesn’t render black/blank)
 let mediaUrl = null;
-let mediaType = null; // "image" | "video"
+let mediaType = null; // "image" | "video" | "audio"
 let overlayText = "";
+let muted = false;
 
 
 if (text.startsWith("::RBZ::")) {
@@ -242,19 +243,20 @@ if (text.startsWith("::RBZ::")) {
       giftAmount = Number(payload?.gift?.amount || 0);
     }
 
-    // ✅ NEW: store media fields explicitly
+      // ✅ NEW: store media fields explicitly
     if (payload?.url) mediaUrl = String(payload.url);
-   if (
-  payload?.mediaType === "video" ||
-  payload?.mediaType === "image" ||
-  payload?.mediaType === "audio"
-) {
-  mediaType = payload.mediaType;
-} else if (payload?.type === "media" && payload?.url) {
-  // fallback (if mediaType missing)
-  mediaType = "image";
-}
 
+    if (
+      payload?.mediaType === "video" ||
+      payload?.mediaType === "image" ||
+      payload?.mediaType === "audio"
+    ) {
+      mediaType = payload.mediaType;
+    } else if (payload?.type === "media" && payload?.url) {
+      mediaType = "image";
+    }
+
+    muted = !!payload?.muted;
 
     if (payload?.overlayText) overlayText = String(payload.overlayText || "");
   } catch (e) {
@@ -276,6 +278,7 @@ const msg = {
   url: isRBZ ? mediaUrl : null,
   mediaType: isRBZ ? mediaType : null,
   overlayText: isRBZ ? overlayText : "",
+  muted: isRBZ ? muted : false,
 
   time: new Date(),
   edited: false,
