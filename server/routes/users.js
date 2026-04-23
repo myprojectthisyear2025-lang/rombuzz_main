@@ -413,90 +413,128 @@ router.get("/matches", authMiddleware, async (req, res) => {
  */
 router.put("/me", authMiddleware, async (req, res) => {
   try {
-     const allowed = [
-  // Identity
-  "firstName",
-  "lastName",
-  "dob",
-  "gender",
-  "genderVisibility",
-  "pronouns",
-  "orientation",
-  "orientationVisibility",
+    const allowed = [
+      // Identity
+      "firstName",
+      "lastName",
+      "dob",
+      "gender",
+      "genderVisibility",
+      "pronouns",
+      "orientation",
+      "orientationVisibility",
 
-  // Location
-  "city",
-  "country",
-  "hometown",
-  "latitude",
-  "longitude",
-  "distanceVisibility",
-  "travelMode",
-  "location",
+      // Location
+      "city",
+      "country",
+      "hometown",
+      "latitude",
+      "longitude",
+      "distanceVisibility",
+      "travelMode",
+      "location",
 
-  // About
-  "bio",
-  "voiceUrl",
-  "vibeTags",
+      // About
+      "bio",
+      "voiceUrl",
+      "vibeTags",
 
-  // Dating intentions
-  "lookingFor",
-  "relationshipStyle",
-  "interestedIn",
+      // Dating intentions
+      "lookingFor",
+      "relationshipStyle",
+      "interestedIn",
 
-  // Body
-  "height",
-  "bodyType",
-  "fitnessLevel",
+      // Body
+      "height",
+      "bodyType",
+      "fitnessLevel",
 
-  // Lifestyle
-  "smoking",
-  "drinking",
-  "workoutFrequency",
-  "diet",
-  "sleepSchedule",
+      // Lifestyle
+      "smoking",
+      "drinking",
+      "workoutFrequency",
+      "diet",
+      "sleepSchedule",
 
-  // Background
-  "educationLevel",
-  "school",
-  "jobTitle",
-  "company",
-  "languages",
+      // Background
+      "educationLevel",
+      "school",
+      "jobTitle",
+      "company",
+      "languages",
 
-  // Beliefs
-  "religion",
-  "politicalViews",
-  "zodiac",
+      // Beliefs
+      "religion",
+      "politicalViews",
+      "zodiac",
 
-  // Interests
-  "interests",
-  "hobbies",
-  "favoriteMusic",
-  "favoriteMovies",
-  "travelStyle",
-  "petsPreference",
+      // Interests
+      "interests",
+      "hobbies",
+      "favoriteMusic",
+      "favoriteMovies",
+      "travelStyle",
+      "petsPreference",
 
-  // Existing vibe
-  "likes",
-  "dislikes",
-  "favorites",
+      // Existing vibe
+      "likes",
+      "dislikes",
+      "favorites",
 
-  // Visibility & settings
-  "visibility",
-  "visibilityMode",
-  "fieldVisibility",
-  "preferences",
-  "settings",
+      // Visibility & settings
+      "visibility",
+      "visibilityMode",
+      "fieldVisibility",
+      "preferences",
+      "settings",
 
-  // Media
-  "avatar",
-  "phone",
-];
+      // Media
+      "avatar",
+      "phone",
+    ];
+
+    const toCsvString = (value) => {
+      if (Array.isArray(value)) {
+        return value
+          .map((item) => String(item ?? "").trim())
+          .filter(Boolean)
+          .join(", ");
+      }
+      if (typeof value === "string") return value;
+      if (value == null) return "";
+      return String(value);
+    };
+
+    const toStringArray = (value) => {
+      if (Array.isArray(value)) {
+        return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+      }
+      if (typeof value === "string") {
+        return value
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+      return [];
+    };
 
     const updates = {};
     for (const k of allowed) {
       if (req.body[k] !== undefined) updates[k] = req.body[k];
     }
+
+    if (updates.likes !== undefined) {
+      updates.likes = toCsvString(updates.likes);
+    }
+
+    if (updates.dislikes !== undefined) {
+      updates.dislikes = toCsvString(updates.dislikes);
+    }
+
+    if (updates.favorites !== undefined) {
+      updates.favorites = toStringArray(updates.favorites);
+    }
+
     updates.updatedAt = Date.now();
 
     const user = await User.findOneAndUpdate(
@@ -508,7 +546,7 @@ router.put("/me", authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json({ user: baseSanitizeUser(user) });
   } catch (err) {
-    console.error("âŒ PUT /users/me error:", err);
+    console.error("❌ PUT /users/me error:", err);
     res.status(500).json({ error: "Failed to update profile" });
   }
 });
