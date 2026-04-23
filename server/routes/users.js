@@ -487,10 +487,12 @@ router.put("/me", authMiddleware, async (req, res) => {
       "fieldVisibility",
       "preferences",
       "settings",
-
+      
       // Media
       "avatar",
       "phone",
+      "voiceUrl",
+      "voiceDurationSec",
     ];
 
     const toCsvString = (value) => {
@@ -631,16 +633,18 @@ router.get("/:id", authMiddleware, async (req, res) => {
         interests: user.interests,
         hobbies: user.hobbies,
 
-        media: discoverGallery.media,
+             media: discoverGallery.media,
         photos: discoverGallery.photos,
         voiceIntro: user.voiceUrl,
+        voiceUrl: user.voiceUrl,
+        voiceDurationSec: Number(user.voiceDurationSec || 0),
 
         visibilityMode: user.visibilityMode,
         fieldVisibility: user.fieldVisibility,
       },
     });
   } catch (err) {
-    console.error("âŒ GET /users/:id error:", err);
+    console.error("❌ GET /users/:id error:", err);
     res.status(500).json({ error: "Failed to fetch user profile" });
   }
 });

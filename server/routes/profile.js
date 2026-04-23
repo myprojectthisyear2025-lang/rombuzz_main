@@ -74,7 +74,7 @@ router.get("/profile/full", authMiddleware, async (req, res) => {
         ...sanitized,
 
         // âœ… FORCE INCLUDE: editable profile fields (so mobile can persist after refresh/restart)
-        firstName: user.firstName ?? sanitized.firstName ?? "",
+           firstName: user.firstName ?? sanitized.firstName ?? "",
         lastName: user.lastName ?? sanitized.lastName ?? "",
         bio: user.bio ?? sanitized.bio ?? "",
         gender: user.gender ?? sanitized.gender ?? "",
@@ -87,8 +87,11 @@ router.get("/profile/full", authMiddleware, async (req, res) => {
         dislikes: user.dislikes ?? sanitized.dislikes ?? [],
         interests: user.interests ?? sanitized.interests ?? [],
         hobbies: user.hobbies ?? sanitized.hobbies ?? [],
+        favorites: Array.isArray(user.favorites) ? user.favorites : [],
+        voiceUrl: user.voiceUrl ?? "",
+        voiceDurationSec: Number(user.voiceDurationSec || 0),
 
-        // âœ… keep your media logic (web/mobile compatibility)
+        // ✅ keep your media logic (web/mobile compatibility)
         media:
           Array.isArray(user.media) && user.media.length > 0
             ? user.media
