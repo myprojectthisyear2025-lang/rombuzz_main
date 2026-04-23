@@ -71,6 +71,96 @@ const DISCOVER_HIDDEN_PRIVACY = new Set([
   "specific",
 ]);
 
+function isUnitedStatesCountry(value = "") {
+  const country = String(value || "").trim().toLowerCase();
+
+  return (
+    country === "us" ||
+    country === "usa" ||
+    country === "u.s." ||
+    country === "u.s.a." ||
+    country === "united states" ||
+    country === "united states of america"
+  );
+}
+
+function getCoordsFromUser(user = {}) {
+  const locLat = Number(user?.location?.lat);
+  const locLng = Number(user?.location?.lng);
+
+  if (Number.isFinite(locLat) && Number.isFinite(locLng)) {
+    return { lat: locLat, lng: locLng };
+  }
+
+  const lat = Number(user?.latitude);
+  const lng = Number(user?.longitude);
+
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    return { lat, lng };
+  }
+
+  return null;
+}
+
+function getDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const dPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const dLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(dPhi / 2) * Math.sin(dPhi / 2) +
+    Math.cos(phi1) *
+      Math.cos(phi2) *
+      Math.sin(dLambda / 2) *
+      Math.sin(dLambda / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
+function buildProfileDistancePayload(viewer = {}, target = {}) {
+  const viewerCoords = getCoordsFromUser(viewer);
+  const targetCoords = getCoordsFromUser(target);
+
+  if (!viewerCoords || !targetCoords) {
+    return {
+      distanceMeters: null,
+      distanceUnit: "",
+      distanceValue: null,
+      distanceText: "",
+    };
+  }
+
+  const distanceMeters = Math.round(
+    getDistanceMeters(
+      viewerCoords.lat,
+      viewerCoords.lng,
+      targetCoords.lat,
+      targetCoords.lng
+    )
+  );
+
+  const viewerUsesMiles = isUnitedStatesCountry(viewer?.country);
+  const distanceUnit = viewerUsesMiles ? "mi" : "km";
+  const rawDistance = viewerUsesMiles
+    ? distanceMeters / 1609.34
+    : distanceMeters / 1000;
+
+  // Minimum visible distance is 1 mi / 1 km.
+  // Everything else rounds UP to the next full integer.
+  const distanceValue = Math.max(1, Math.ceil(rawDistance));
+
+  return {
+    distanceMeters,
+    distanceUnit,
+    distanceValue,
+    distanceText: `${distanceValue} ${distanceUnit} away`,
+  };
+}
+
 function normalizeDiscoverImageUrl(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -583,10 +673,16 @@ router.get("/blocks", authMiddleware, async (req, res) => {
  */
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
-    const user = await User.findOne({ id: req.params.id }).lean();
+    const [viewer, user] = await Promise.all([
+      User.findOne({ id: req.user.id }).lean(),
+      User.findOne({ id: req.params.id }).lean(),
+    ]);
+
+    if (!viewer) return res.status(404).json({ error: "Viewer not found" });
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const discoverGallery = buildDiscoverSafeGallery(user);
+    const distancePayload = buildProfileDistancePayload(viewer, user);
 
     res.json({
       user: {
@@ -633,11 +729,16 @@ router.get("/:id", authMiddleware, async (req, res) => {
         interests: user.interests,
         hobbies: user.hobbies,
 
-             media: discoverGallery.media,
+        media: discoverGallery.media,
         photos: discoverGallery.photos,
         voiceIntro: user.voiceUrl,
         voiceUrl: user.voiceUrl,
         voiceDurationSec: Number(user.voiceDurationSec || 0),
+
+        distanceMeters: distancePayload.distanceMeters,
+        distanceUnit: distancePayload.distanceUnit,
+        distanceValue: distancePayload.distanceValue,
+        distanceText: distancePayload.distanceText,
 
         visibilityMode: user.visibilityMode,
         fieldVisibility: user.fieldVisibility,
@@ -650,7 +751,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
 });
 
 /**
- * POST /api/users/blocks/:userId â†’ block another user
+ * POST /api/users/blocks/:userId → block another user
  */
 router.post("/blocks/:userId", authMiddleware, async (req, res) => {
   try {
