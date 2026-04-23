@@ -108,7 +108,7 @@ router.use("/", require("./auth/otp"));
 // =======================
 router.post("/register-full", async (req, res) => {
   try {
- const {
+  const {
   email,
   firstName,
   lastName,
@@ -133,6 +133,7 @@ router.post("/register-full", async (req, res) => {
   photos,
   phone,
   voiceUrl,
+  voiceDurationSec,
 } = req.body || {};
 
 
@@ -160,12 +161,13 @@ if (dislikes !== undefined) user.dislikes = dislikes;
       user.interestedIn = interestedIn || [];
       user.preferences = preferences || {};
       user.visibilityMode = visibilityMode || "public";
-      user.interests = interests || [];
+         user.interests = interests || [];
       user.avatar = avatar || user.avatar;
       user.photos = signupPhotos;
       user.media = mergeSignupPhotosIntoMedia(user.media, user.photos);
       user.phone = phone || "";
       user.voiceUrl = voiceUrl || "";
+      user.voiceDurationSec = Number(voiceDurationSec || 0);
       if (password) user.passwordHash = await bcrypt.hash(password, 10);
       user.isVerified = true;
       user.profileComplete = true;
@@ -205,9 +207,10 @@ if (dislikes !== undefined) user.dislikes = dislikes;
   interests,
   avatar,
   photos: signupPhotos,
-  media: mergeSignupPhotosIntoMedia([], signupPhotos),
+   media: mergeSignupPhotosIntoMedia([], signupPhotos),
   phone,
   voiceUrl,
+  voiceDurationSec: Number(voiceDurationSec || 0),
 
   isVerified: true,
   profileComplete: true,
