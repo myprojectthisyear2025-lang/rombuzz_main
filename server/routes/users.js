@@ -102,6 +102,17 @@ function getCoordsFromUser(user = {}) {
   return null;
 }
 
+function getFreshCoordsFromQuery(query = {}) {
+  const lat = Number(query?.lat);
+  const lng = Number(query?.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90) return null;
+  if (lng < -180 || lng > 180) return null;
+
+  return { lat, lng };
+}
+
 function getDistanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371e3;
   const phi1 = (lat1 * Math.PI) / 180;
@@ -121,16 +132,19 @@ function getDistanceMeters(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-function buildProfileDistancePayload(viewer = {}, target = {}) {
-  const viewerCoords = getCoordsFromUser(viewer);
+function buildProfileDistancePayload(viewer = {}, target = {}, query = {}) {
+  const viewerCoords = getFreshCoordsFromQuery(query);
   const targetCoords = getCoordsFromUser(target);
 
+  // Do not use saved viewer.location here.
+  // Saved viewer.location can be stale and caused fake-looking distances like 1277km.
   if (!viewerCoords || !targetCoords) {
     return {
       distanceMeters: null,
       distanceUnit: "",
       distanceValue: null,
       distanceText: "",
+      distanceSource: "",
     };
   }
 
@@ -152,12 +166,17 @@ function buildProfileDistancePayload(viewer = {}, target = {}) {
   // Minimum visible distance is 1 mi / 1 km.
   // Everything else rounds UP to the next full integer.
   const distanceValue = Math.max(1, Math.ceil(rawDistance));
+  const label =
+    distanceUnit === "mi"
+      ? `mile${distanceValue === 1 ? "" : "s"}`
+      : "km";
 
   return {
     distanceMeters,
     distanceUnit,
     distanceValue,
-    distanceText: `${distanceValue} ${distanceUnit} away`,
+    distanceText: `${distanceValue} ${label} away`,
+    distanceSource: "fresh_gps",
   };
 }
 
@@ -678,11 +697,11 @@ router.get("/:id", authMiddleware, async (req, res) => {
       User.findOne({ id: req.params.id }).lean(),
     ]);
 
-    if (!viewer) return res.status(404).json({ error: "Viewer not found" });
+     if (!viewer) return res.status(404).json({ error: "Viewer not found" });
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const discoverGallery = buildDiscoverSafeGallery(user);
-    const distancePayload = buildProfileDistancePayload(viewer, user);
+    const distancePayload = buildProfileDistancePayload(viewer, user, req.query);
 
     res.json({
       user: {
@@ -734,11 +753,11 @@ router.get("/:id", authMiddleware, async (req, res) => {
         voiceIntro: user.voiceUrl,
         voiceUrl: user.voiceUrl,
         voiceDurationSec: Number(user.voiceDurationSec || 0),
-
         distanceMeters: distancePayload.distanceMeters,
         distanceUnit: distancePayload.distanceUnit,
         distanceValue: distancePayload.distanceValue,
         distanceText: distancePayload.distanceText,
+        distanceSource: distancePayload.distanceSource,
 
         visibilityMode: user.visibilityMode,
         fieldVisibility: user.fieldVisibility,
