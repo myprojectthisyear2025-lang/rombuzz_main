@@ -135,37 +135,43 @@ router.get("/", authMiddleware, async (req, res) => {
       petsPreference,
     } = req.query;
 
-    /* ---------------------------
+        /* ---------------------------
        2) Determine base location
+       IMPORTANT:
+       Discover distance must use fresh GPS from the phone.
+       Do not use saved city/hometown/default coords for live distance.
     --------------------------- */
-    let baseLat = parseFloat(lat);
+    const parsedLat = Number.parseFloat(lat);
+    const parsedLng = Number.parseFloat(lng);
 
-    let baseLng = parseFloat(lng);
+    const hasFreshViewerLocation =
+      Number.isFinite(parsedLat) &&
+      Number.isFinite(parsedLng) &&
+      parsedLat >= -90 &&
+      parsedLat <= 90 &&
+      parsedLng >= -180 &&
+      parsedLng <= 180;
 
-    if (isNaN(baseLat) || isNaN(baseLng)) {
-      // use saved location if present
-      if (self.location?.lat && self.location?.lng) {
-        baseLat = self.location.lat;
-        baseLng = self.location.lng;
-        console.log("📍 Using last known location:", self.location);
-      } else {
-        // final fallback
-        baseLat = Number(process.env.DEV_DEFAULT_LAT || 41.8781);
-        baseLng = Number(process.env.DEV_DEFAULT_LNG || -87.6298);
-        console.warn("⚠️ DISCOVER fallback coords used (no GPS)");
-      }
+    const baseLat = hasFreshViewerLocation ? parsedLat : null;
+    const baseLng = hasFreshViewerLocation ? parsedLng : null;
+
+    if (!hasFreshViewerLocation) {
+      console.warn("⚠️ DISCOVER request missing fresh GPS. Distances will be hidden, not faked.");
     }
 
-    // Always update own location + lastActive
-    await User.updateOne(
-      { id: self.id },
-      {
-        $set: {
-          location: { lat: baseLat, lng: baseLng },
-          lastActive: Date.now(),
-        },
-      }
-    );
+    // Always update lastActive.
+    // Only overwrite saved location when the request has real fresh GPS.
+    const updatePayload = {
+      $set: {
+        lastActive: Date.now(),
+      },
+    };
+
+    if (hasFreshViewerLocation) {
+      updatePayload.$set.location = { lat: baseLat, lng: baseLng };
+    }
+
+    await User.updateOne({ id: self.id }, updatePayload);
 
     /* ---------------------------
        3) Preload relationships
@@ -338,9 +344,33 @@ router.get("/", authMiddleware, async (req, res) => {
     const now = Date.now();
     candidates = candidates.map((u) => {
       let distanceMeters = null;
-      if (u.location?.lat && u.location?.lng) {
+
+      const targetLocationLat = Number(u?.location?.lat);
+      const targetLocationLng = Number(u?.location?.lng);
+      const targetLegacyLat = Number(u?.latitude);
+      const targetLegacyLng = Number(u?.longitude);
+
+      const targetLat =
+        Number.isFinite(targetLocationLat) && targetLocationLat >= -90 && targetLocationLat <= 90
+          ? targetLocationLat
+          : Number.isFinite(targetLegacyLat) && targetLegacyLat >= -90 && targetLegacyLat <= 90
+          ? targetLegacyLat
+          : null;
+
+      const targetLng =
+        Number.isFinite(targetLocationLng) && targetLocationLng >= -180 && targetLocationLng <= 180
+          ? targetLocationLng
+          : Number.isFinite(targetLegacyLng) && targetLegacyLng >= -180 && targetLegacyLng <= 180
+          ? targetLegacyLng
+          : null;
+
+      if (
+        hasFreshViewerLocation &&
+        targetLat !== null &&
+        targetLng !== null
+      ) {
         distanceMeters = Math.round(
-          getDistanceMeters(baseLat, baseLng, u.location.lat, u.location.lng)
+          getDistanceMeters(baseLat, baseLng, targetLat, targetLng)
         );
       }
 
@@ -572,6 +602,8 @@ router.get("/", authMiddleware, async (req, res) => {
     /* ---------------------------
        9) Sanitize + sort
     --------------------------- */
+       const viewerUsesMiles = isUnitedStatesCountry(self?.country);
+
     const sorted = withScores
       .sort((a, b) => {
         // higher score first
@@ -589,14 +621,9 @@ router.get("/", authMiddleware, async (req, res) => {
         const hasLocation =
           typeof u.distanceMeters === "number" && u.distanceMeters >= 0;
 
-        let distanceText = "—";
-        if (hasLocation) {
-          const miles = Math.max(
-            1,
-            Math.round(u.distanceMeters / 1609.34)
-          );
-          distanceText = `${miles} mile${miles !== 1 ? "s" : ""} away`;
-        }
+        const distanceText = hasLocation
+          ? formatDiscoverDistanceText(u.distanceMeters, viewerUsesMiles)
+          : "—";
 
         return {
           id: u.id,
@@ -647,8 +674,36 @@ router.get("/", authMiddleware, async (req, res) => {
 });
 
 /* ============================================================
-   Helper: Distance calculator (Haversine, meters)
+   Helper: Distance formatting + calculator
 ============================================================ */
+function isUnitedStatesCountry(value = "") {
+  const country = String(value || "").trim().toLowerCase();
+
+  return (
+    country === "us" ||
+    country === "usa" ||
+    country === "u.s." ||
+    country === "u.s.a." ||
+    country === "united states" ||
+    country === "united states of america"
+  );
+}
+
+function formatDiscoverDistanceText(distanceMeters, viewerUsesMiles = false) {
+  const meters = Number(distanceMeters);
+
+  if (!Number.isFinite(meters) || meters < 0) return "—";
+
+  const rawDistance = viewerUsesMiles ? meters / 1609.34 : meters / 1000;
+  const distanceValue = Math.max(1, Math.ceil(rawDistance));
+
+  if (viewerUsesMiles) {
+    return `${distanceValue} mile${distanceValue === 1 ? "" : "s"} away`;
+  }
+
+  return `${distanceValue} km away`;
+}
+
 function getDistanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371e3; // metres
   const phi1 = (lat1 * Math.PI) / 180;
