@@ -104,9 +104,10 @@ router.get("/", authMiddleware, async (req, res) => {
       allowRequestedVibe = false;
     }
 
-       const {
+         const {
       lat,
       lng,
+      viewerCountry,
       range, // may be undefined – we’ll apply fallbacks
       gender,
 
@@ -599,10 +600,10 @@ router.get("/", authMiddleware, async (req, res) => {
 
     });
 
-    /* ---------------------------
+        /* ---------------------------
        9) Sanitize + sort
     --------------------------- */
-       const viewerUsesMiles = isUnitedStatesCountry(self?.country);
+    const viewerUsesMiles = isUnitedStatesCountry(viewerCountry || self?.country);
 
     const sorted = withScores
       .sort((a, b) => {
@@ -685,7 +686,8 @@ function isUnitedStatesCountry(value = "") {
     country === "u.s." ||
     country === "u.s.a." ||
     country === "united states" ||
-    country === "united states of america"
+    country === "united states of america" ||
+    country === "america"
   );
 }
 
