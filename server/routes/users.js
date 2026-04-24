@@ -82,7 +82,8 @@ function isUnitedStatesCountry(value = "") {
     country === "u.s." ||
     country === "u.s.a." ||
     country === "united states" ||
-    country === "united states of america"
+    country === "united states of america" ||
+    country === "america"
   );
 }
 
@@ -159,7 +160,9 @@ function buildProfileDistancePayload(viewer = {}, target = {}, query = {}) {
     )
   );
 
-  const viewerUsesMiles = isUnitedStatesCountry(viewer?.country);
+   const viewerUsesMiles = isUnitedStatesCountry(
+    query?.viewerCountry || viewer?.country
+  );
   const distanceUnit = viewerUsesMiles ? "mi" : "km";
   const rawDistance = viewerUsesMiles
     ? distanceMeters / 1609.34
