@@ -881,16 +881,21 @@ router.get("/:id", authMiddleware, async (req, res) => {
           ],
         }).lean();
 
-    const canSeeMatchedMedia = isSelf || !!matchedConnection;
+      const canSeeMatchedMedia = isSelf || !!matchedConnection;
     const discoverGallery = buildDiscoverSafeGallery(user);
     const viewProfileGallery = buildViewProfileGallery(user, {
       canSeeMatchedMedia,
       isSelf,
     });
-    const profileGallery = canSeeMatchedMedia ? viewProfileGallery : discoverGallery;
+
+    // ✅ ViewProfile must use real profile gallery media.
+    // discoverGallery is only for Discover cards and intentionally removes reels/videos.
+    // buildViewProfileGallery already protects private/matches-only media.
+    const profileGallery = viewProfileGallery;
     const distancePayload = buildProfileDistancePayload(viewer, user, req.query);
 
     res.json({
+      matched: canSeeMatchedMedia,
       user: {
         id: user.id,
         firstName: user.firstName,
