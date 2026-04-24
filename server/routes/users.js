@@ -272,6 +272,176 @@ function buildDiscoverSafeGallery(user = {}) {
   return { media, photos };
 }
 
+function normalizeViewProfileMediaUrl(entry) {
+  if (typeof entry === "string") return String(entry || "").trim();
+  return String(
+    entry?.url ||
+      entry?.secure_url ||
+      entry?.src ||
+      entry?.mediaUrl ||
+      entry?.fileUrl ||
+      entry?.imageUrl ||
+      entry?.videoUrl ||
+      ""
+  ).trim();
+}
+
+function getViewProfileMediaCaption(entry) {
+  return String(entry?.caption || entry?.text || entry?.description || "")
+    .toLowerCase()
+    .trim();
+}
+
+function getViewProfileMediaPrivacy(entry) {
+  return String(entry?.privacy || entry?.visibility || entry?.scope || "public")
+    .toLowerCase()
+    .trim();
+}
+
+function inferViewProfileMediaType(entry) {
+  const type = String(entry?.type || entry?.mediaType || "").toLowerCase().trim();
+  const caption = getViewProfileMediaCaption(entry);
+  const url = normalizeViewProfileMediaUrl(entry).toLowerCase();
+
+  if (caption.includes("kind:reel") || caption.includes("kind:video")) return "video";
+  if (type === "video" || type === "reel" || type.includes("video") || type.includes("reel")) {
+    return "video";
+  }
+  if (
+    url.includes("/video/upload/") ||
+    /\.(mp4|mov|m4v|webm|avi|wmv|flv|mkv|mpg|mpeg)(\?|#|$)/i.test(url)
+  ) {
+    return "video";
+  }
+
+  return "image";
+}
+
+function canShowInViewProfile(entry, canSeeMatchedMedia = false, isSelf = false) {
+  if (!entry) return false;
+  if (typeof entry === "string") return true;
+
+  const caption = getViewProfileMediaCaption(entry);
+  const privacy = getViewProfileMediaPrivacy(entry);
+
+  const isPrivate =
+    privacy === "private" ||
+    privacy === "hidden" ||
+    privacy === "specific" ||
+    caption.includes("scope:private") ||
+    caption.includes("privacy:private");
+
+  if (isPrivate) return isSelf;
+
+  const isMatchedOnly =
+    privacy === "matches" ||
+    privacy === "matched" ||
+    privacy === "matched-only" ||
+    caption.includes("scope:matches") ||
+    caption.includes("scope:matched") ||
+    caption.includes("privacy:matches");
+
+  if (isMatchedOnly) return canSeeMatchedMedia || isSelf;
+
+  return true;
+}
+
+function toCreatedAtMs(value) {
+  if (value == null || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+
+  const asNumber = Number(raw);
+  if (Number.isFinite(asNumber)) return asNumber;
+
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function buildViewProfileGallery(user = {}, options = {}) {
+  const canSeeMatchedMedia = !!options.canSeeMatchedMedia;
+  const isSelf = !!options.isSelf;
+  const seen = new Set();
+  const media = [];
+  const photos = [];
+  const reels = [];
+
+  const ownerId = String(user?.id || user?._id || "");
+
+  const pushMedia = (entry, fallbackIndex = 0, legacyPhoto = false) => {
+    const url = normalizeViewProfileMediaUrl(entry);
+    if (!url || seen.has(url)) return;
+    if (!canShowInViewProfile(entry, canSeeMatchedMedia, isSelf)) return;
+
+    const type = legacyPhoto ? "image" : inferViewProfileMediaType(entry);
+    const id =
+      typeof entry === "object" && entry
+        ? String(entry?.id || entry?._id || entry?.mediaId || `${type}-${fallbackIndex}-${url}`)
+        : `legacy-photo-${fallbackIndex}-${url}`;
+    const caption =
+      typeof entry === "object" && entry
+        ? String(entry?.caption || "")
+        : "kind:photo scope:public intent:viewprofile";
+    const privacy =
+      typeof entry === "object" && entry
+        ? String(entry?.privacy || entry?.visibility || "public")
+        : "public";
+    const createdAt = typeof entry === "object" && entry ? entry?.createdAt : 0;
+
+    const normalized = {
+      ...(typeof entry === "object" && entry ? entry : {}),
+      id,
+      mediaId: id,
+      ownerId,
+      userId: ownerId,
+      url,
+      mediaUrl: url,
+      type,
+      caption,
+      privacy,
+      createdAt,
+      fromGallery: true,
+      sourceType: "gallery",
+    };
+
+    seen.add(url);
+    media.push(normalized);
+
+    if (type === "video") {
+      reels.push(normalized);
+    } else {
+      photos.push(url);
+    }
+  };
+
+  if (Array.isArray(user.media)) {
+    user.media.forEach((item, index) => pushMedia(item, index, false));
+  }
+
+  if (Array.isArray(user.photos)) {
+    user.photos.forEach((item, index) => pushMedia(item, index, true));
+  }
+
+  media.sort((a, b) => toCreatedAtMs(b?.createdAt) - toCreatedAtMs(a?.createdAt));
+  reels.sort((a, b) => toCreatedAtMs(b?.createdAt) - toCreatedAtMs(a?.createdAt));
+
+  const sortedPhotos = media
+    .filter((item) => item.type !== "video")
+    .map((item) => item.url);
+
+  return {
+    media,
+    photos: sortedPhotos.length ? sortedPhotos : photos,
+    reels,
+  };
+}
+
 /* ============================================================
    ðŸ‘¤ SECTION 1: USER INFO & LOCATION
 ============================================================ */
@@ -697,10 +867,27 @@ router.get("/:id", authMiddleware, async (req, res) => {
       User.findOne({ id: req.params.id }).lean(),
     ]);
 
-     if (!viewer) return res.status(404).json({ error: "Viewer not found" });
+      if (!viewer) return res.status(404).json({ error: "Viewer not found" });
     if (!user) return res.status(404).json({ error: "User not found" });
 
+    const isSelf = String(viewer.id) === String(user.id);
+    const matchedConnection = isSelf
+      ? true
+      : await Match.findOne({
+          status: "matched",
+          $or: [
+            { user1: viewer.id, user2: user.id },
+            { user1: user.id, user2: viewer.id },
+          ],
+        }).lean();
+
+    const canSeeMatchedMedia = isSelf || !!matchedConnection;
     const discoverGallery = buildDiscoverSafeGallery(user);
+    const viewProfileGallery = buildViewProfileGallery(user, {
+      canSeeMatchedMedia,
+      isSelf,
+    });
+    const profileGallery = canSeeMatchedMedia ? viewProfileGallery : discoverGallery;
     const distancePayload = buildProfileDistancePayload(viewer, user, req.query);
 
     res.json({
@@ -745,11 +932,13 @@ router.get("/:id", authMiddleware, async (req, res) => {
         likes: user.likes,
         dislikes: user.dislikes,
 
-        interests: user.interests,
+            interests: user.interests,
         hobbies: user.hobbies,
 
-        media: discoverGallery.media,
-        photos: discoverGallery.photos,
+        media: profileGallery.media,
+        photos: profileGallery.photos,
+        reels: canSeeMatchedMedia ? viewProfileGallery.reels : [],
+        matched: canSeeMatchedMedia,
         voiceIntro: user.voiceUrl,
         voiceUrl: user.voiceUrl,
         voiceDurationSec: Number(user.voiceDurationSec || 0),
