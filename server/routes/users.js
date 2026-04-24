@@ -43,9 +43,11 @@ const {
 } = require("../utils/helpers");
 
 // âœ… Mongo Models
+// âœ… Mongo Models
 const User = require("../models/User");
 const Relationship = require("../models/Relationship"); // for likes/blocks
 const Match = require("../models/Match");
+const { onlineUsers } = require("../models/state");
 
 function isExpoPushToken(token = "") {
   return /^Expo(?:nent)?PushToken\[[^\]]+\]$/.test(String(token || "").trim());
@@ -947,11 +949,12 @@ router.get("/:id", authMiddleware, async (req, res) => {
         voiceIntro: user.voiceUrl,
         voiceUrl: user.voiceUrl,
         voiceDurationSec: Number(user.voiceDurationSec || 0),
-        distanceMeters: distancePayload.distanceMeters,
+             distanceMeters: distancePayload.distanceMeters,
         distanceUnit: distancePayload.distanceUnit,
         distanceValue: distancePayload.distanceValue,
         distanceText: distancePayload.distanceText,
         distanceSource: distancePayload.distanceSource,
+        isOnline: !!onlineUsers[user.id],
 
         visibilityMode: user.visibilityMode,
         fieldVisibility: user.fieldVisibility,

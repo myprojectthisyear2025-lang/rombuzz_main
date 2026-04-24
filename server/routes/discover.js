@@ -40,6 +40,7 @@ const User = require("../models/User");
 const Relationship = require("../models/Relationship");
 const Match = require("../models/Match");
 const authMiddleware = require("../routes/auth-middleware");
+const { onlineUsers } = require("../models/state");
 
 const helpers = require("../utils/helpers");
 
@@ -645,9 +646,10 @@ router.get("/", authMiddleware, async (req, res) => {
           zodiac: u.zodiac || "",
 
           loveLanguage: u.loveLanguage || "",
-          distanceMeters: hasLocation ? u.distanceMeters : null,
+                distanceMeters: hasLocation ? u.distanceMeters : null,
           distanceText,
           status: u._status || "inactive",
+          isOnline: !!onlineUsers[u.id],
 
           // extra fields used by Discover → ViewProfile preview
           media: u.media || [],
