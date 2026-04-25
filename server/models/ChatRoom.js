@@ -84,13 +84,37 @@ const chatRoomSchema = new mongoose.Schema(
     // lastReadAtByUser.get(userId) => Date
     lastReadAtByUser: { type: Map, of: Date, default: {} },
 
+    // ✅ Chat list controls per user
+    // Example:
+    // chatPrefsByUser.get(userId) => {
+    //   pinned: true,
+    //   muted: true,
+    //   alertOnline: true,
+    //   deletedForMe: true,
+    //   forceUnread: true
+    // }
+    chatPrefsByUser: {
+      type: Map,
+      of: new mongoose.Schema(
+        {
+          pinned: { type: Boolean, default: false },
+          muted: { type: Boolean, default: false },
+          alertOnline: { type: Boolean, default: false },
+          deletedForMe: { type: Boolean, default: false },
+          forceUnread: { type: Boolean, default: false },
+          updatedAt: { type: Date, default: Date.now },
+        },
+        { _id: false }
+      ),
+      default: {},
+    },
+
     messages: [messageSchema],
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
-
 
 module.exports =
   mongoose.models.ChatRoom || mongoose.model("ChatRoom", chatRoomSchema);

@@ -27,11 +27,11 @@ const authMiddleware = require("../routes/auth-middleware");
 const ChatRoom = require("../models/ChatRoom");
 const MediaGift = require("../models/MediaGift");
 const User = require("../models/User");
+const Match = require("../models/Match");
 
 // ✅ Proper Socket.IO + state wiring
 const { getIO } = require("../socket");
 const { onlineUsers } = require("../models/state");
-
 
 // =======================
 // 🧩 Utilities
@@ -135,6 +135,24 @@ async function getRoomDoc(roomId) {
       roomId,
       participants: [a, b],
       lastReadAtByUser: { [a]: epoch, [b]: epoch },
+      chatPrefsByUser: {
+        [a]: {
+          pinned: false,
+          muted: false,
+          alertOnline: false,
+          deletedForMe: false,
+          forceUnread: false,
+          updatedAt: new Date(),
+        },
+        [b]: {
+          pinned: false,
+          muted: false,
+          alertOnline: false,
+          deletedForMe: false,
+          forceUnread: false,
+          updatedAt: new Date(),
+        },
+      },
       messages: [],
     });
 
@@ -154,9 +172,64 @@ async function getRoomDoc(roomId) {
       changed = true;
     }
   }
+
+  // ✅ backfill chat list prefs for old rooms
+  if (!room.chatPrefsByUser) {
+    room.chatPrefsByUser = new Map();
+    changed = true;
+  }
+
+  for (const pid of room.participants || []) {
+    const key = String(pid);
+    if (!room.chatPrefsByUser.get(key)) {
+      room.chatPrefsByUser.set(key, {
+        pinned: false,
+        muted: false,
+        alertOnline: false,
+        deletedForMe: false,
+        forceUnread: false,
+        updatedAt: new Date(),
+      });
+      changed = true;
+    }
+  }
+
   if (changed) await room.save();
 
   return room;
+}
+
+function getMyRoomPrefs(room, userId) {
+  const me = String(userId || "");
+  const raw =
+    (room.chatPrefsByUser?.get && room.chatPrefsByUser.get(me)) ||
+    (room.chatPrefsByUser && room.chatPrefsByUser[me]) ||
+    {};
+
+  return {
+    pinned: !!raw.pinned,
+    muted: !!raw.muted,
+    alertOnline: !!raw.alertOnline,
+    deletedForMe: !!raw.deletedForMe,
+    forceUnread: !!raw.forceUnread,
+    updatedAt: raw.updatedAt || null,
+  };
+}
+
+function setMyRoomPrefs(room, userId, patch = {}) {
+  const me = String(userId || "");
+  const current = getMyRoomPrefs(room, me);
+
+  const next = {
+    ...current,
+    ...patch,
+    updatedAt: new Date(),
+  };
+
+  if (!room.chatPrefsByUser) room.chatPrefsByUser = new Map();
+  room.chatPrefsByUser.set(me, next);
+
+  return next;
 }
 
 
@@ -783,6 +856,8 @@ function legacyRoomId(userA, userB) {
 
 function countUnreadForRoom(room, me) {
   const myId = String(me);
+  const prefs = getMyRoomPrefs(room, myId);
+
   const lastRead =
     (room.lastReadAtByUser?.get && room.lastReadAtByUser.get(myId)) ||
     (room.lastReadAtByUser && room.lastReadAtByUser[myId]) ||
@@ -800,6 +875,9 @@ function countUnreadForRoom(room, me) {
     const t = new Date(m.time || 0);
     if (t > new Date(lastRead || 0)) n++;
   }
+
+  // ✅ Manual "Mark as unread" should show a badge even if there are no new messages.
+  if (n === 0 && prefs.forceUnread) return 1;
 
   return n;
 }
@@ -943,5 +1021,123 @@ router.post("/chat/rooms/:roomId/reply-suggestions", authMiddleware, async (req,
   }
 });
 
+// ============================================================
+// ⚙️ CHAT LIST PREFERENCES
+// PATCH /api/chat/rooms/:roomId/prefs
+// body: {
+//   pinned?: boolean,
+//   muted?: boolean,
+//   alertOnline?: boolean,
+//   forceUnread?: boolean,
+//   deletedForMe?: boolean
+// }
+// ============================================================
+router.patch("/chat/rooms/:roomId/prefs", authMiddleware, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const me = String(req.user.id);
+    const room = await getRoomDoc(roomId);
+
+    const participants = (room.participants || []).map((x) => String(x));
+    if (!participants.includes(me)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    const allowed = {};
+    ["pinned", "muted", "alertOnline", "forceUnread", "deletedForMe"].forEach((key) => {
+      if (typeof req.body?.[key] === "boolean") {
+        allowed[key] = req.body[key];
+      }
+    });
+
+    const prefs = setMyRoomPrefs(room, me, allowed);
+
+    // ✅ If user marks read, forceUnread must go false.
+    if (allowed.forceUnread === false) {
+      if (!room.lastReadAtByUser) room.lastReadAtByUser = new Map();
+      room.lastReadAtByUser.set(me, new Date());
+    }
+
+    // ✅ If user manually deletes/hides chat from chat list, hide existing messages for this user too.
+    if (allowed.deletedForMe === true) {
+      room.messages.forEach((m) => {
+        if (!m.hiddenFor?.includes(me)) m.hiddenFor.push(me);
+      });
+    }
+
+    await room.save();
+
+    const summary = await computeUnreadSummaryForUser(me);
+
+    const io = getIO();
+    const sid = onlineUsers?.[me];
+    if (sid) io.to(sid).emit("chat:unread:update", summary);
+    io.to(String(me)).emit("chat:unread:update", summary);
+
+    return res.json({ ok: true, prefs, summary });
+  } catch (err) {
+    console.error("❌ chat prefs error:", err);
+    return res.status(500).json({ error: "failed" });
+  }
+});
+
+
+// ============================================================
+// 🚫 UNMATCH FROM CHAT LIST
+// POST /api/chat/rooms/:roomId/unmatch
+// Removes the match immediately and hides the chat for the current user.
+// ============================================================
+router.post("/chat/rooms/:roomId/unmatch", authMiddleware, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const me = String(req.user.id);
+    const room = await getRoomDoc(roomId);
+
+    const participants = (room.participants || []).map((x) => String(x));
+    if (!participants.includes(me)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    const peerId = participants.find((x) => String(x) !== me);
+    if (!peerId) return res.status(400).json({ error: "peer_not_found" });
+
+    // ✅ Use match/unmatch logic: remove match relationship immediately.
+    await Match.deleteMany({
+      users: { $all: [me, peerId] },
+    });
+
+    // ✅ Hide conversation from current user.
+    setMyRoomPrefs(room, me, {
+      deletedForMe: true,
+      pinned: false,
+      muted: false,
+      alertOnline: false,
+      forceUnread: false,
+    });
+
+    room.messages.forEach((m) => {
+      if (!m.hiddenFor?.includes(me)) m.hiddenFor.push(me);
+    });
+
+    await room.save();
+
+    const summary = await computeUnreadSummaryForUser(me);
+
+    const io = getIO();
+    const mySid = onlineUsers?.[me];
+    if (mySid) io.to(mySid).emit("chat:unread:update", summary);
+    io.to(String(me)).emit("chat:unread:update", summary);
+
+    const peerSid = onlineUsers?.[peerId];
+    if (peerSid) {
+      io.to(peerSid).emit("match:unmatched", { from: me, peerId: me, roomId });
+    }
+
+    return res.json({ ok: true, peerId, summary });
+  } catch (err) {
+    console.error("❌ chat unmatch error:", err);
+    return res.status(500).json({ error: "failed" });
+  }
+});
 
 module.exports = router;
