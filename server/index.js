@@ -208,10 +208,12 @@ app.use('/api', require('./routes/debug'));
 app.use('/api', require('./routes/buzzPosts'));
 app.use('/api', require('./routes/buzzComments'));
 
+// 🎁 MODULAR GIFTS + BUZZCOIN SYSTEM
+app.use('/api/gifts', require('./routes/gifts'));
+
 // ðŸ’« BUZZ STREAKS
 app.use('/api', require('./routes/streak'));
 logSuccess('âœ… BuzzStreak routes initialized (match & daily check-in)');
-
 // =======================
 // ðŸ’“ HEALTH CHECK (modularized)
 // =======================

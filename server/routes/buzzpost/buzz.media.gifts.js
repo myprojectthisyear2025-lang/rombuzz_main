@@ -6,11 +6,16 @@
  * RULES:
  *  - Only matched users can gift
  *  - Gifts are OWNER-ONLY visible (insights)
- *  - Viewer may see what they personally sent (later via thread/receipt if needed)
+ *  - Viewer may see what they personally sent later via receipt/thread
  *
  * Endpoint:
  *   POST /api/media/:ownerId/gift
- *   body: { mediaId, stickerId, amount }
+ *   body: { mediaId, giftId }
+ *
+ * Upgrade:
+ *  - Uses server/config/rombuzzGifts.js as backend source of truth
+ *  - Does NOT trust frontend price/amount
+ *  - Still accepts legacy stickerId as fallback during transition
  * ============================================================
  */
 
@@ -23,27 +28,39 @@ const User = require("../../models/User");
 const Match = require("../../models/Match");
 const MediaGift = require("../../models/MediaGift");
 const { sendNotification } = require("../../utils/helpers");
+const { validateGiftPurchase } = require("../../config/rombuzzGifts");
 
-// =======================================================
-// ✅ Gift a media item (MATCH-ONLY)
-// =======================================================
 router.post("/media/:ownerId/gift", authMiddleware, async (req, res) => {
   try {
     const me = req.user.id;
     const { ownerId } = req.params;
-    const { mediaId, stickerId = "sticker_basic", amount = 0 } = req.body || {};
+    const { mediaId } = req.body || {};
+
+    const requestedGiftId = String(req.body?.giftId || req.body?.stickerId || "").trim();
+    const placement = "profile_media";
 
     if (!mediaId) return res.status(400).json({ error: "mediaId required" });
+    if (!requestedGiftId) return res.status(400).json({ error: "giftId required" });
     if (ownerId === me) return res.status(400).json({ error: "Cannot gift yourself" });
 
-    // 1) Validate owner + media exists
+    const giftCheck = validateGiftPurchase({
+      giftId: requestedGiftId,
+      placement,
+    });
+
+    if (!giftCheck.ok) {
+      return res.status(400).json({
+        error: giftCheck.code || "invalid_gift",
+        message: giftCheck.message || "Invalid gift",
+      });
+    }
+
     const owner = await User.findOne({ id: ownerId });
     if (!owner) return res.status(404).json({ error: "owner not found" });
 
     const media = (owner.media || []).find((m) => m.id === mediaId);
     if (!media) return res.status(404).json({ error: "media not found" });
 
-    // 2) Match gate
     const isMatched = await Match.findOne({
       status: "matched",
       users: { $all: [me, ownerId] },
@@ -51,18 +68,30 @@ router.post("/media/:ownerId/gift", authMiddleware, async (req, res) => {
 
     if (!isMatched) return res.status(403).json({ error: "Not matched" });
 
-    // 3) Create gift record
+    const transactionId = shortid.generate();
+    const giftId = String(giftCheck.gift.giftId);
+    const priceBC = Number(giftCheck.priceBC) || 0;
+
     const giftDoc = await MediaGift.create({
       id: shortid.generate(),
       mediaId,
-      ownerId,     // toId (owner)
+      ownerId,
       fromId: me,
-      stickerId,
-      amount: Number(amount) || 0,
+
+      giftId,
+      priceBC,
+      placement,
+      targetType: "profile_media",
+      targetId: mediaId,
+      transactionId,
+      status: "completed",
+
+      stickerId: giftId,
+      amount: 1,
+
       createdAt: Date.now(),
     });
 
-    // 4) Notify owner
     const gifter = await User.findOne({ id: me }).lean();
     await sendNotification(ownerId, {
       fromId: me,
@@ -71,9 +100,18 @@ router.post("/media/:ownerId/gift", authMiddleware, async (req, res) => {
       entity: "media",
       entityId: mediaId,
       postOwnerId: ownerId,
+      giftId,
+      transactionId,
     });
 
-    return res.json({ ok: true, gift: giftDoc });
+    return res.json({
+      ok: true,
+      gift: giftDoc,
+      giftId,
+      priceBC,
+      placement,
+      transactionId,
+    });
   } catch (err) {
     console.error("❌ POST /media/:ownerId/gift error:", err);
     return res.status(500).json({ error: "Failed to gift media" });
