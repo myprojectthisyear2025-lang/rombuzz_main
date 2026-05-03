@@ -7,6 +7,10 @@
  *  - Keeps old giftKey + amount fields for backward compatibility
  *  - Adds giftId + priceBC + placement + transaction fields for
  *    the new RomBuzz BuzzCoin-safe gift system
+ *
+ * Cleanup:
+ *  - Removed duplicate schema.index({ transactionId: 1 }) because
+ *    transactionId already declares index: true.
  * ============================================================
  */
 
@@ -61,7 +65,6 @@ const buzzPostGiftSchema = new mongoose.Schema(
 
 buzzPostGiftSchema.index({ postId: 1, ownerId: 1, fromId: 1, giftId: 1 });
 buzzPostGiftSchema.index({ postId: 1, ownerId: 1, fromId: 1, giftKey: 1 });
-buzzPostGiftSchema.index({ transactionId: 1 });
 
 module.exports =
   mongoose.models.BuzzPostGift ||

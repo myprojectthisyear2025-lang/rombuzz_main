@@ -7,6 +7,10 @@
  *  - Keeps old stickerId + amount fields for backward compatibility
  *  - Adds giftId + priceBC + placement + transaction fields for
  *    the new RomBuzz BuzzCoin-safe gift system
+ *
+ * Cleanup:
+ *  - Removed duplicate schema.index({ transactionId: 1 }) because
+ *    transactionId already declares index: true.
  * ============================================================
  */
 
@@ -60,7 +64,6 @@ const mediaGiftSchema = new mongoose.Schema(
 );
 
 mediaGiftSchema.index({ mediaId: 1, ownerId: 1, fromId: 1, giftId: 1 });
-mediaGiftSchema.index({ transactionId: 1 });
 
 module.exports =
   mongoose.models.MediaGift || mongoose.model("MediaGift", mediaGiftSchema);
