@@ -56,6 +56,13 @@ function isProduction() {
   return String(process.env.NODE_ENV || "").toLowerCase() === "production";
 }
 
+function hasValidGiftTestSecret(req) {
+  const expectedSecret = String(process.env.GIFTS_ADMIN_TEST_SECRET || "").trim();
+  const receivedSecret = String(req.headers["x-gifts-admin-secret"] || "").trim();
+
+  return Boolean(expectedSecret && receivedSecret && expectedSecret === receivedSecret);
+}
+
 function sendRouteError(res, err) {
   const status = err?.statusCode || 500;
   return res.status(status).json({
@@ -116,16 +123,16 @@ router.get("/ledger", authMiddleware, async (req, res) => {
 // =======================================================
 router.post("/wallet/dev-credit", authMiddleware, async (req, res) => {
   try {
-    if (isProduction()) {
+    if (isProduction() && !hasValidGiftTestSecret(req)) {
       return res.status(403).json({
         ok: false,
         error: "DEV_CREDIT_DISABLED",
-        message: "Dev credit is disabled in production.",
+        message: "Dev credit is disabled unless a valid admin test secret is provided.",
       });
     }
 
     const amountBC = Math.floor(Number(req.body?.amountBC) || 0);
-    const reason = String(req.body?.reason || "Local gift testing");
+    const reason = String(req.body?.reason || "Gift system test credit");
 
     const wallet = await creditBuzzCoins({
       userId: getMe(req),
