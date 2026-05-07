@@ -1,117 +1,393 @@
 /**
- * File: server/config/rombuzzGifts.js
- * Purpose: Server-side source of truth for RomBuzz gift validation and pricing.
- * Use: Import this file in gift purchase routes. Never trust gift price from the frontend.
+ * ============================================================
+ * 📁 File: config/rombuzzGifts.js
+ * 🎁 Purpose: Server-side source of truth for RomBuzz gift validation,
+ * pricing, Cloudinary image URLs, and placement rules.
+ *
+ * Used by:
+ *  - routes/gifts.js
+ *  - routes/buzzpost/buzz.post.gifts.js
+ *  - routes/buzzpost/buzz.media.gifts.js
+ *
+ * Important:
+ *  - Never trust frontend gift price.
+ *  - Frontend sends only giftId.
+ *  - Backend validates giftId, placement, priceBC, and enabled state.
+ *  - Gift names are internal only and should not be shown in the app UI.
+ * ============================================================
  */
 
-const ROMBUZZ_GIFT_CONFIG = [
-  {"giftId": "smile_spark", "priceBC": 5, "category": "sweet", "rarity": "common", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "soft_hello", "priceBC": 5, "category": "sweet", "rarity": "common", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "tiny_heart_ping", "priceBC": 8, "category": "attention", "rarity": "common", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "blush_note", "priceBC": 8, "category": "sweet", "rarity": "common", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "starry_like", "priceBC": 10, "category": "playful", "rarity": "common", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["posts", "universal"]},
-  {"giftId": "cozy_wave", "priceBC": 10, "category": "sweet", "rarity": "common", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "mini_rose", "priceBC": 12, "category": "romantic", "rarity": "common", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "sunny_smile", "priceBC": 12, "category": "sweet", "rarity": "common", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "gentle_nudge", "priceBC": 15, "category": "buzzpoke", "rarity": "common", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "kind_glow", "priceBC": 15, "category": "sweet", "rarity": "common", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "cute_comet", "priceBC": 18, "category": "playful", "rarity": "common", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "soft_star", "priceBC": 18, "category": "attention", "rarity": "common", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["posts", "universal"]},
-  {"giftId": "warm_ping", "priceBC": 20, "category": "buzzpoke", "rarity": "common", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "pocket_charm", "priceBC": 20, "category": "playful", "rarity": "common", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "happy_sparkle", "priceBC": 22, "category": "celebration", "rarity": "common", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "sweet_pebble", "priceBC": 22, "category": "sweet", "rarity": "common", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["posts", "universal"]},
-  {"giftId": "heart_confetti", "priceBC": 25, "category": "celebration", "rarity": "uncommon", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["match_celebration", "chat", "universal"]},
-  {"giftId": "soft_bloom", "priceBC": 25, "category": "romantic", "rarity": "uncommon", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "moonlit_hi", "priceBC": 28, "category": "romantic", "rarity": "uncommon", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "thought_bubble", "priceBC": 28, "category": "attention", "rarity": "uncommon", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "reel_spark", "priceBC": 30, "category": "playful", "rarity": "uncommon", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "photo_glow", "priceBC": 30, "category": "sweet", "rarity": "uncommon", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "buzz_beam", "priceBC": 35, "category": "buzzpoke", "rarity": "uncommon", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "soft_laugh", "priceBC": 35, "category": "funny", "rarity": "uncommon", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "charming_wink", "priceBC": 40, "category": "playful", "rarity": "uncommon", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "nearby_spark", "priceBC": 40, "category": "microbuzz", "rarity": "uncommon", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["microbuzz", "universal"]},
-  {"giftId": "first_match_pop", "priceBC": 45, "category": "celebration", "rarity": "uncommon", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["match_celebration", "chat", "universal"]},
-  {"giftId": "gentle_retry", "priceBC": 45, "category": "apology", "rarity": "uncommon", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "streak_flamelet", "priceBC": 50, "category": "streak", "rarity": "uncommon", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["streak", "universal"]},
-  {"giftId": "soft_apology", "priceBC": 50, "category": "apology", "rarity": "uncommon", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "rose_spark", "priceBC": 60, "category": "romantic", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "midnight_note", "priceBC": 60, "category": "romantic", "rarity": "rare", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "golden_ping", "priceBC": 65, "category": "buzzpoke", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "micro_magnet", "priceBC": 65, "category": "microbuzz", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["microbuzz", "universal"]},
-  {"giftId": "reel_ribbon", "priceBC": 70, "category": "playful", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "profile_shimmer", "priceBC": 70, "category": "attention", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "sweet_rewind", "priceBC": 75, "category": "apology", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "laugh_cloud", "priceBC": 75, "category": "funny", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["posts", "universal"]},
-  {"giftId": "match_moment", "priceBC": 80, "category": "celebration", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["match_celebration", "chat", "universal"]},
-  {"giftId": "streak_star", "priceBC": 80, "category": "streak", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["streak", "universal"]},
-  {"giftId": "velvet_rose", "priceBC": 85, "category": "romantic", "rarity": "rare", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "glow_pulse", "priceBC": 85, "category": "attention", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "tiny_fireworks", "priceBC": 90, "category": "celebration", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "daydream_badge", "priceBC": 90, "category": "sweet", "rarity": "rare", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "coffee_smile", "priceBC": 95, "category": "sweet", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "nearby_orbit", "priceBC": 95, "category": "microbuzz", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["microbuzz", "universal"]},
-  {"giftId": "golden_rose", "priceBC": 120, "category": "premium", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "soft_spotlight", "priceBC": 120, "category": "attention", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "superbuzz_trail", "priceBC": 130, "category": "buzzpoke", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "heart_ribbon_drop", "priceBC": 130, "category": "romantic", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "moonbeam_message", "priceBC": 140, "category": "romantic", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "streak_crownlet", "priceBC": 140, "category": "streak", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["streak", "universal"]},
-  {"giftId": "reconnect_bloom", "priceBC": 150, "category": "apology", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "match_glowburst", "priceBC": 150, "category": "celebration", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["match_celebration", "chat", "universal"]},
-  {"giftId": "microbuzz_signal", "priceBC": 160, "category": "microbuzz", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["microbuzz", "universal"]},
-  {"giftId": "silver_charm", "priceBC": 160, "category": "premium", "rarity": "epic", "animated": false, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "floating_lantern", "priceBC": 170, "category": "romantic", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "reel_ovation", "priceBC": 170, "category": "celebration", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "gentle_comeback", "priceBC": 180, "category": "apology", "rarity": "epic", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "spark_ring", "priceBC": 180, "category": "attention", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "butterfly_ping", "priceBC": 190, "category": "sweet", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "starlit_compliment", "priceBC": 190, "category": "romantic", "rarity": "epic", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "dreamy_applause", "priceBC": 200, "category": "celebration", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["posts", "universal"]},
-  {"giftId": "soft_meteor", "priceBC": 200, "category": "playful", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "premium_glow_note", "priceBC": 220, "category": "premium", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "nearby_firefly", "priceBC": 220, "category": "microbuzz", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["microbuzz", "universal"]},
-  {"giftId": "diamond_smile", "priceBC": 300, "category": "premium", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "rose_comet", "priceBC": 320, "category": "romantic", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "golden_superbuzz", "priceBC": 350, "category": "buzzpoke", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "seven_day_spark", "priceBC": 350, "category": "streak", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["streak", "universal"]},
-  {"giftId": "match_firefly_cascade", "priceBC": 375, "category": "celebration", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["match_celebration", "chat", "universal"]},
-  {"giftId": "aurora_note", "priceBC": 400, "category": "romantic", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "profile_aura", "priceBC": 425, "category": "premium", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "microbuzz_beacon", "priceBC": 450, "category": "microbuzz", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["microbuzz", "universal"]},
-  {"giftId": "velvet_sky", "priceBC": 475, "category": "romantic", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "rare_reconnect", "priceBC": 500, "category": "apology", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "spotlight_bloom", "priceBC": 525, "category": "attention", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "reel_constellation", "priceBC": 550, "category": "celebration", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "universal"]},
-  {"giftId": "golden_streak_path", "priceBC": 575, "category": "streak", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["streak", "universal"]},
-  {"giftId": "heart_aurora", "priceBC": 600, "category": "premium", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "soft_crown", "priceBC": 625, "category": "premium", "rarity": "legendary", "animated": false, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "supernova_smile", "priceBC": 650, "category": "celebration", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["match_celebration", "chat", "universal"]},
-  {"giftId": "secret_garden", "priceBC": 675, "category": "exclusive", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "glimmer_bridge", "priceBC": 700, "category": "romantic", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["microbuzz", "universal"]},
-  {"giftId": "platinum_ping", "priceBC": 750, "category": "buzzpoke", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "winter_warmth", "priceBC": 90, "category": "seasonal", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": true, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "spring_bloom_ping", "priceBC": 90, "category": "seasonal", "rarity": "rare", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": true, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "summer_glow", "priceBC": 95, "category": "seasonal", "rarity": "rare", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": true, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "autumn_note", "priceBC": 95, "category": "seasonal", "rarity": "rare", "animated": false, "enabled": true, "premiumOnly": false, "seasonalOnly": true, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "new_year_spark", "priceBC": 200, "category": "seasonal", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": true, "allowedPlacements": ["match_celebration", "chat", "universal"]},
-  {"giftId": "valentine_glow", "priceBC": 240, "category": "seasonal", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": true, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "birthday_bloom", "priceBC": 240, "category": "celebration", "rarity": "epic", "animated": true, "enabled": true, "premiumOnly": false, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "anniversary_light", "priceBC": 700, "category": "romantic", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["chat", "universal"]},
-  {"giftId": "exclusive_orbit", "priceBC": 800, "category": "exclusive", "rarity": "legendary", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "moon_rose_cascade", "priceBC": 1000, "category": "exclusive", "rarity": "ultra", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-  {"giftId": "aurora_heartfall", "priceBC": 1200, "category": "exclusive", "rarity": "ultra", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["match_celebration", "chat", "universal"]},
-  {"giftId": "infinity_glow", "priceBC": 1500, "category": "premium", "rarity": "ultra", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["profile_media", "universal"]},
-  {"giftId": "legendary_superbuzz", "priceBC": 1800, "category": "buzzpoke", "rarity": "ultra", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["buzzpoke", "universal"]},
-  {"giftId": "seven_sky_streak", "priceBC": 2000, "category": "streak", "rarity": "ultra", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["streak", "universal"]},
-  {"giftId": "romance_constellation", "priceBC": 2500, "category": "exclusive", "rarity": "ultra", "animated": true, "enabled": true, "premiumOnly": true, "seasonalOnly": false, "allowedPlacements": ["reels", "posts", "profile_media", "chat", "buzzpoke", "microbuzz", "match_celebration", "streak", "universal"]},
-
+const ALL_PLACEMENTS = [
+  "reels",
+  "posts",
+  "profile_media",
+  "chat",
+  "buzzpoke",
+  "microbuzz",
+  "match_celebration",
+  "streak",
+  "universal",
 ];
 
-const GIFT_MAP = new Map(ROMBUZZ_GIFT_CONFIG.map((gift) => [gift.giftId, gift]));
+const ROMBUZZ_GIFT_CONFIG = [
+  {
+    giftId: "pink_heart",
+    name: "Pink Heart",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097131/pink_heart_u0byvz.png",
+    priceBC: 5,
+    category: "romantic",
+    rarity: "common",
+    animation: "heartPop",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "heart_red",
+    name: "Red Heart",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097124/heart_red_wpi6mn.png",
+    priceBC: 8,
+    category: "romantic",
+    rarity: "common",
+    animation: "heartPop",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "tea_cup",
+    name: "Tea Cup",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097135/tea_cup_tddkrl.png",
+    priceBC: 10,
+    category: "sweet",
+    rarity: "common",
+    animation: "softFloat",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "three_buns",
+    name: "Three Buns",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097136/three_buns_secb0a.png",
+    priceBC: 12,
+    category: "sweet",
+    rarity: "common",
+    animation: "bounceIn",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "cherry_love",
+    name: "Cherry Love",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097120/cherry_love_l7q10k.png",
+    priceBC: 15,
+    category: "playful",
+    rarity: "common",
+    animation: "cherryBounce",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "love_ribbon",
+    name: "Love Ribbon",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097130/love_ribbon_auytjx.png",
+    priceBC: 18,
+    category: "romantic",
+    rarity: "common",
+    animation: "ribbonWave",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "autumn_love",
+    name: "Autumn Love",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097119/autumn_love_cx8v8h.png",
+    priceBC: 20,
+    category: "seasonal",
+    rarity: "common",
+    animation: "autumnDrift",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "red_rose",
+    name: "Red Rose",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097132/red_rose_uhu0nz.png",
+    priceBC: 25,
+    category: "romantic",
+    rarity: "common",
+    animation: "roseBloom",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "sparkling_rose",
+    name: "Sparkling Rose",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097133/sparkling_rose_hj6imz.png",
+    priceBC: 30,
+    category: "romantic",
+    rarity: "common",
+    animation: "sparkleRise",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "cuddle_love",
+    name: "Cuddle Love",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097122/cuddle_love_d0h9yv.png",
+    priceBC: 35,
+    category: "sweet",
+    rarity: "uncommon",
+    animation: "zoomPop",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "cute_birds",
+    name: "Cute Birds",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097122/cute_birds_av7c4u.png",
+    priceBC: 40,
+    category: "romantic",
+    rarity: "uncommon",
+    animation: "birdsFlutter",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "love_birds",
+    name: "Love Birds",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097127/love_birds_n3dy21.png",
+    priceBC: 45,
+    category: "romantic",
+    rarity: "uncommon",
+    animation: "birdsFlutter",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "love_candle",
+    name: "Love Candle",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097127/love_candle_mdhh0y.png",
+    priceBC: 50,
+    category: "romantic",
+    rarity: "uncommon",
+    animation: "candleFlicker",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "candle_light",
+    name: "Candle Light",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097119/candle_light_mzncuw.png",
+    priceBC: 55,
+    category: "romantic",
+    rarity: "uncommon",
+    animation: "lanternGlow",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "love_lantern",
+    name: "Love Lantern",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097130/love_lantern_hdqnio.png",
+    priceBC: 60,
+    category: "romantic",
+    rarity: "uncommon",
+    animation: "lanternGlow",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "lantern_blue",
+    name: "Blue Lantern",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097125/lantern_blue_jv8vhy.png",
+    priceBC: 65,
+    category: "romantic",
+    rarity: "uncommon",
+    animation: "glowPulse",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "love_capsule",
+    name: "Love Capsule",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097128/love_capsule_ta0dbc.png",
+    priceBC: 70,
+    category: "romantic",
+    rarity: "rare",
+    animation: "capsuleDrop",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "lock_key",
+    name: "Lock Key",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097126/lock_key_hyqsfj.png",
+    priceBC: 75,
+    category: "romantic",
+    rarity: "rare",
+    animation: "lockShake",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "flower_vase",
+    name: "Flower Vase",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097124/flower_vase_pxkt3h.png",
+    priceBC: 80,
+    category: "romantic",
+    rarity: "rare",
+    animation: "sway",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "bonsai_love",
+    name: "Bonsai Love",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097120/bonsai_love_hf11ft.png",
+    priceBC: 90,
+    category: "premium",
+    rarity: "rare",
+    animation: "bonsaiBreath",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "rombuzz_love",
+    name: "RomBuzz Love",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097133/rombuzz_love_mjkaak.png",
+    priceBC: 100,
+    category: "premium",
+    rarity: "rare",
+    animation: "glowPulse",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "velvet_kiss",
+    name: "Velvet Kiss",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097137/velvet_kiss_taofc4.png",
+    priceBC: 120,
+    category: "premium",
+    rarity: "epic",
+    animation: "kissBurst",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "love_compass",
+    name: "Love Compass",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097129/love_compass_iinnhg.png",
+    priceBC: 150,
+    category: "premium",
+    rarity: "epic",
+    animation: "compassSpin",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "star_compass",
+    name: "Star Compass",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097134/star_compass_m0fitn.png",
+    priceBC: 180,
+    category: "premium",
+    rarity: "epic",
+    animation: "twinkle",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+  {
+    giftId: "crystal_swan",
+    name: "Crystal Swan",
+    imageUrl: "https://res.cloudinary.com/drhx99m5f/image/upload/v1778097121/crystal_swan_gzjhyu.png",
+    priceBC: 250,
+    category: "premium",
+    rarity: "legendary",
+    animation: "crystalShine",
+    animated: true,
+    enabled: true,
+    premiumOnly: false,
+    seasonalOnly: false,
+    allowedPlacements: ALL_PLACEMENTS,
+  },
+];
+
+const GIFT_MAP = new Map(
+  ROMBUZZ_GIFT_CONFIG.map((gift) => [String(gift.giftId), gift])
+);
 
 function getGiftConfig(giftId) {
-  return GIFT_MAP.get(giftId) || null;
+  return GIFT_MAP.get(String(giftId || "")) || null;
 }
 
 function isGiftEnabled(giftId) {
@@ -121,20 +397,57 @@ function isGiftEnabled(giftId) {
 
 function getGiftPriceBC(giftId) {
   const gift = getGiftConfig(giftId);
-  return gift ? gift.priceBC : null;
+  return gift ? Number(gift.priceBC) : null;
 }
 
 function canUseGiftInPlacement(giftId, placement) {
   const gift = getGiftConfig(giftId);
-  return Boolean(gift && gift.enabled && Array.isArray(gift.allowedPlacements) && gift.allowedPlacements.includes(placement));
+  const place = String(placement || "universal");
+
+  return Boolean(
+    gift &&
+      gift.enabled &&
+      Array.isArray(gift.allowedPlacements) &&
+      gift.allowedPlacements.includes(place)
+  );
 }
 
 function validateGiftPurchase({ giftId, placement }) {
   const gift = getGiftConfig(giftId);
-  if (!gift) return { ok: false, code: "INVALID_GIFT", message: "Gift does not exist." };
-  if (!gift.enabled) return { ok: false, code: "GIFT_DISABLED", message: "Gift is not currently available." };
-  if (!gift.allowedPlacements.includes(placement)) return { ok: false, code: "INVALID_PLACEMENT", message: "Gift cannot be used in this placement." };
-  return { ok: true, gift, priceBC: gift.priceBC };
+  const place = String(placement || "universal");
+
+  if (!gift) {
+    return {
+      ok: false,
+      code: "INVALID_GIFT",
+      message: "Gift does not exist.",
+    };
+  }
+
+  if (!gift.enabled) {
+    return {
+      ok: false,
+      code: "GIFT_DISABLED",
+      message: "Gift is not currently available.",
+    };
+  }
+
+  if (
+    !Array.isArray(gift.allowedPlacements) ||
+    !gift.allowedPlacements.includes(place)
+  ) {
+    return {
+      ok: false,
+      code: "INVALID_PLACEMENT",
+      message: "Gift cannot be used in this placement.",
+    };
+  }
+
+  return {
+    ok: true,
+    gift,
+    priceBC: Number(gift.priceBC) || 0,
+  };
 }
 
 module.exports = {
