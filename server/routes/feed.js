@@ -53,6 +53,46 @@ function parseCaptionTags(caption) {
   return { scope, kind };
 }
 
+function isPrivateCommentVisibleToViewer(comment, viewerId, mediaOwnerId) {
+  const ownerId = String(mediaOwnerId || "");
+  const commentAuthorId = String(comment?.userId || "");
+  const me = String(viewerId || "");
+
+  if (!me) return false;
+
+  const visibleTo = Array.isArray(comment?.visibleTo)
+    ? comment.visibleTo.map(String)
+    : [ownerId, commentAuthorId];
+
+  return visibleTo.includes(me);
+}
+
+function ensurePrivateCommentVisibleTo(mediaOwnerId, commentAuthorId, existing = []) {
+  const set = new Set(Array.isArray(existing) ? existing.map(String) : []);
+
+  set.add(String(mediaOwnerId || ""));
+  set.add(String(commentAuthorId || ""));
+
+  return Array.from(set).filter(Boolean);
+}
+
+function sanitizeMediaCommentsForViewer(comments = [], viewerId, mediaOwnerId) {
+  const list = Array.isArray(comments) ? comments : [];
+
+  return list
+    .filter((comment) =>
+      isPrivateCommentVisibleToViewer(comment, viewerId, mediaOwnerId)
+    )
+    .map((comment) => ({
+      ...comment,
+      visibleTo: ensurePrivateCommentVisibleTo(
+        mediaOwnerId,
+        comment?.userId,
+        comment?.visibleTo
+      ),
+    }));
+}
+
 
 /* ============================================================
    🏠 FEED ENDPOINT — show matched users’ posts & reels
@@ -206,6 +246,12 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
           caption.includes("scope:public") ||
           caption.includes("scope:matches")
         ) {
+              const visibleComments = sanitizeMediaCommentsForViewer(
+            m.comments,
+            myId,
+            u.id
+          );
+
           feed.push({
             id: m.id,
             userId: u.id,
@@ -213,6 +259,8 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
             type: m.type === "video" ? "video" : "image",
             caption: m.caption,
             createdAt: m.createdAt || Date.now(),
+            comments: visibleComments,
+            commentsCount: visibleComments.length,
             user: baseSanitizeUser(u),
           });
         }

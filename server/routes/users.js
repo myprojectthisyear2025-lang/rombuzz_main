@@ -369,9 +369,50 @@ function toCreatedAtMs(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function isPrivateCommentVisibleToViewer(comment, viewerId, mediaOwnerId) {
+  const ownerId = String(mediaOwnerId || "");
+  const commentAuthorId = String(comment?.userId || "");
+  const me = String(viewerId || "");
+
+  if (!me) return false;
+
+  const visibleTo = Array.isArray(comment?.visibleTo)
+    ? comment.visibleTo.map(String)
+    : [ownerId, commentAuthorId];
+
+  return visibleTo.includes(me);
+}
+
+function ensurePrivateCommentVisibleTo(mediaOwnerId, commentAuthorId, existing = []) {
+  const set = new Set(Array.isArray(existing) ? existing.map(String) : []);
+
+  set.add(String(mediaOwnerId || ""));
+  set.add(String(commentAuthorId || ""));
+
+  return Array.from(set).filter(Boolean);
+}
+
+function sanitizeMediaCommentsForViewer(comments = [], viewerId, mediaOwnerId) {
+  const list = Array.isArray(comments) ? comments : [];
+
+  return list
+    .filter((comment) =>
+      isPrivateCommentVisibleToViewer(comment, viewerId, mediaOwnerId)
+    )
+    .map((comment) => ({
+      ...comment,
+      visibleTo: ensurePrivateCommentVisibleTo(
+        mediaOwnerId,
+        comment?.userId,
+        comment?.visibleTo
+      ),
+    }));
+}
+
 function buildViewProfileGallery(user = {}, options = {}) {
   const canSeeMatchedMedia = !!options.canSeeMatchedMedia;
   const isSelf = !!options.isSelf;
+  const viewerId = String(options.viewerId || "");
   const seen = new Set();
   const media = [];
   const photos = [];
@@ -399,6 +440,11 @@ function buildViewProfileGallery(user = {}, options = {}) {
         : "public";
     const createdAt = typeof entry === "object" && entry ? entry?.createdAt : 0;
 
+    const visibleComments =
+      typeof entry === "object" && entry
+        ? sanitizeMediaCommentsForViewer(entry?.comments, viewerId, ownerId)
+        : [];
+
     const normalized = {
       ...(typeof entry === "object" && entry ? entry : {}),
       id,
@@ -411,6 +457,8 @@ function buildViewProfileGallery(user = {}, options = {}) {
       caption,
       privacy,
       createdAt,
+      comments: visibleComments,
+      commentsCount: visibleComments.length,
       fromGallery: true,
       sourceType: "gallery",
     };
@@ -886,16 +934,18 @@ router.get("/:id", authMiddleware, async (req, res) => {
           ],
         }).lean();
 
-      const canSeeMatchedMedia = isSelf || !!matchedConnection;
+       const canSeeMatchedMedia = isSelf || !!matchedConnection;
     const discoverGallery = buildDiscoverSafeGallery(user);
     const viewProfileGallery = buildViewProfileGallery(user, {
       canSeeMatchedMedia,
       isSelf,
+      viewerId: viewer.id,
     });
 
     // ✅ ViewProfile must use real profile gallery media.
     // discoverGallery is only for Discover cards and intentionally removes reels/videos.
     // buildViewProfileGallery already protects private/matches-only media.
+    // Comments are also filtered here: only media owner + comment author can see each comment.
     const profileGallery = viewProfileGallery;
     const distancePayload = buildProfileDistancePayload(viewer, user, req.query);
 
