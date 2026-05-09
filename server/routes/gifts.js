@@ -229,7 +229,22 @@ router.get("/summary", authMiddleware, async (req, res) => {
       transactionLimit: req.query.limit || 500,
     });
 
-    return res.json({ ok: true, summary });
+    return res.json({
+      ok: true,
+
+      // New frontend shape:
+      viewerRole: summary.viewerRole,
+      receiverId: summary.receiverId,
+      targetType: summary.targetType,
+      targetId: summary.targetId,
+      totalCount: summary.totalCount,
+      totalBC: summary.totalBC,
+      rows: summary.rows || [],
+      transactions: summary.transactions || [],
+
+      // Backward-compatible shape in case any older screen still reads res.summary.
+      summary,
+    });
   } catch (err) {
     return sendRouteError(res, err);
   }

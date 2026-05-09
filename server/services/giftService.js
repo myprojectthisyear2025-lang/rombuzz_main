@@ -359,7 +359,8 @@ async function getGiftSummary({
     if (!grouped.has(senderId)) {
       const user = userMap.get(senderId) || {};
 
-      grouped.set(senderId, {
+         grouped.set(senderId, {
+        senderId,
         userId: senderId,
         user: {
           id: senderId,
