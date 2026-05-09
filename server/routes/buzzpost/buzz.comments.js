@@ -33,8 +33,27 @@ const PostModel = require("../../models/PostModel");
 const User = require("../../models/User");
 const { baseSanitizeUser } = require("../../utils/helpers");
 
+function isVisibleToViewer(comment, viewerId, postOwnerId) {
+  const visibleTo = Array.isArray(comment?.visibleTo)
+    ? comment.visibleTo.map(String)
+    : [String(postOwnerId), String(comment?.userId)];
+
+  return visibleTo.includes(String(viewerId));
+}
+
+function ensurePrivateVisibleTo(postOwnerId, commenterId, existing = []) {
+  const set = new Set(
+    Array.isArray(existing) ? existing.map(String) : []
+  );
+
+  set.add(String(postOwnerId));
+  set.add(String(commenterId));
+
+  return Array.from(set);
+}
+
 // =======================================================
-// ✅ Add a new comment
+// ✅ Add a new private comment
 // =======================================================
 router.post("/posts/:postId/comment", authMiddleware, async (req, res) => {
   try {
@@ -46,8 +65,12 @@ router.post("/posts/:postId/comment", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "Text required" });
     }
 
-    const post = await PostModel.findOne({ id: postId });
+     const post = await PostModel.findOne({ id: postId });
     if (!post) return res.status(404).json({ error: "Post not found" });
+
+    if (!Array.isArray(post.comments)) {
+      post.comments = [];
+    }
 
     const newComment = {
       id: shortid.generate(),
@@ -55,6 +78,10 @@ router.post("/posts/:postId/comment", authMiddleware, async (req, res) => {
       text: text.trim(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
+
+      // 🔒 PRIVATE: only post owner + comment author can see this comment
+      visibleTo: ensurePrivateVisibleTo(post.userId, myId),
+
       reactions: {},
     };
 
@@ -69,34 +96,60 @@ router.post("/posts/:postId/comment", authMiddleware, async (req, res) => {
 });
 
 // =======================================================
-// ✅ Fetch all comments for a post
+// ✅ Fetch private comments for a post
 // =======================================================
 router.get("/posts/:postId/comments", authMiddleware, async (req, res) => {
   try {
     const { postId } = req.params;
+    const myId = req.user.id;
 
     const post = await PostModel.findOne({ id: postId }).lean();
     if (!post) return res.status(404).json({ error: "Post not found" });
 
-    const userIds = [...new Set(post.comments.map((c) => c.userId))];
+    const postOwnerId = post.userId;
+    const allComments = Array.isArray(post.comments) ? post.comments : [];
+
+    // 🔒 PRIVATE:
+    // Post owner sees all comments on their post.
+    // Comment author sees only their own private comment thread.
+    // Everyone else sees nothing.
+    const visibleComments = allComments.filter((c) =>
+      isVisibleToViewer(c, myId, postOwnerId)
+    );
+
+    const userIds = [...new Set(visibleComments.map((c) => c.userId))];
 
     const authors = await User.find({ id: { $in: userIds } }).lean();
     const authorMap = new Map(
-      authors.map((u) => [u.id, baseSanitizeUser(u)])
+      authors.map((u) => [String(u.id), baseSanitizeUser(u)])
     );
 
-    const comments = post.comments.map((c) => ({
+    const comments = visibleComments.map((c) => ({
       ...c,
+      visibleTo: ensurePrivateVisibleTo(postOwnerId, c.userId, c.visibleTo),
       author:
-        authorMap.get(c.userId) || {
+        authorMap.get(String(c.userId)) || {
           id: c.userId,
           firstName: "",
           lastName: "",
           avatar: "",
         },
+      canEdit: String(c.userId) === String(myId),
+      canDelete:
+        String(c.userId) === String(myId) ||
+        String(postOwnerId) === String(myId),
+      canReply:
+        String(c.userId) === String(myId) ||
+        String(postOwnerId) === String(myId),
+      isPostOwner: String(postOwnerId) === String(myId),
     }));
 
-    res.json({ comments });
+    res.json({
+      comments,
+      commentCount:
+        String(postOwnerId) === String(myId) ? allComments.length : comments.length,
+      isOwner: String(postOwnerId) === String(myId),
+    });
   } catch (err) {
     console.error("❌ Mongo GET /posts/:postId/comments error:", err);
     res.status(500).json({ error: "Failed to fetch comments" });
@@ -125,12 +178,19 @@ router.patch(
       const comment = post.comments.find((c) => c.id === commentId);
       if (!comment) return res.status(404).json({ error: "Comment not found" });
 
-      if (comment.userId !== myId) {
+          if (String(comment.userId) !== String(myId)) {
         return res.status(403).json({ error: "Not your comment" });
       }
 
       comment.text = text.trim();
       comment.updatedAt = Date.now();
+
+      // 🔒 Preserve private visibility after edit
+      comment.visibleTo = ensurePrivateVisibleTo(
+        post.userId,
+        comment.userId,
+        comment.visibleTo
+      );
 
       await post.save();
 
