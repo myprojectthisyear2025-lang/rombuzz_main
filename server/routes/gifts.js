@@ -211,18 +211,25 @@ router.get("/transactions", authMiddleware, async (req, res) => {
 });
 
 // =======================================================
-// ✅ Gift summaries
-// Optional query: receiverId, targetType, targetId
+// ✅ Gift summaries / private gift insights
+// Privacy rules:
+//  - Author sees all gifters grouped by sender.
+//  - Gifter sees only their own sent gifts.
+//  - Other viewers see no private gift data.
+// Required query: receiverId, targetType, targetId
 // =======================================================
 router.get("/summary", authMiddleware, async (req, res) => {
   try {
-    const rows = await getGiftSummary({
+    const summary = await getGiftSummary({
+      viewerId: getMe(req),
       receiverId: req.query.receiverId,
       targetType: req.query.targetType,
       targetId: req.query.targetId,
+      includeTransactions: String(req.query.includeTransactions || "true") !== "false",
+      transactionLimit: req.query.limit || 500,
     });
 
-    return res.json({ ok: true, summary: rows });
+    return res.json({ ok: true, summary });
   } catch (err) {
     return sendRouteError(res, err);
   }

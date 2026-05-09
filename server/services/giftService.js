@@ -256,16 +256,197 @@ async function sendGift({
   };
 }
 
-async function getGiftSummary({ receiverId, targetType, targetId }) {
-  const query = {};
+async function getGiftSummary({
+  viewerId,
+  receiverId,
+  targetType,
+  targetId,
+  includeTransactions = true,
+  transactionLimit = 500,
+}) {
+  const cleanViewerId = String(viewerId || "");
+  const cleanReceiverId = String(receiverId || "");
+  const cleanTargetType = String(targetType || "").trim().toLowerCase();
+  const cleanTargetId = String(targetId || "").trim();
 
-  if (receiverId) query.receiverId = String(receiverId);
-  if (targetType) query.targetType = String(targetType);
-  if (targetId) query.targetId = String(targetId);
+  if (!cleanViewerId) {
+    throw Object.assign(new Error("viewerId required"), {
+      statusCode: 401,
+      code: "VIEWER_REQUIRED",
+    });
+  }
 
-  return GiftSummary.find(query)
-    .sort({ totalBC: -1, count: -1, updatedAt: -1 })
+  if (!cleanReceiverId) {
+    throw Object.assign(new Error("receiverId required"), {
+      statusCode: 400,
+      code: "RECEIVER_REQUIRED",
+    });
+  }
+
+  if (!cleanTargetType) {
+    throw Object.assign(new Error("targetType required"), {
+      statusCode: 400,
+      code: "TARGET_TYPE_REQUIRED",
+    });
+  }
+
+  if (!cleanTargetId) {
+    throw Object.assign(new Error("targetId required"), {
+      statusCode: 400,
+      code: "TARGET_REQUIRED",
+    });
+  }
+
+  const isOwner = cleanViewerId === cleanReceiverId;
+  const baseQuery = {
+    receiverId: cleanReceiverId,
+    targetType: cleanTargetType,
+    targetId: cleanTargetId,
+    status: "completed",
+  };
+
+  const visibleQuery = isOwner
+    ? baseQuery
+    : {
+        ...baseQuery,
+        senderId: cleanViewerId,
+      };
+
+  const safeLimit = Math.min(
+    Math.max(Number(transactionLimit) || 500, 1),
+    1000
+  );
+
+  const transactions = await GiftTransaction.find(visibleQuery)
+    .sort({ createdAt: -1 })
+    .limit(safeLimit)
     .lean();
+
+  const totalCount = transactions.length;
+  const totalBC = transactions.reduce(
+    (sum, tx) => sum + (Number(tx.priceBC) || 0),
+    0
+  );
+
+  if (!totalCount) {
+    return {
+      viewerRole: isOwner ? "owner" : "viewer",
+      receiverId: cleanReceiverId,
+      targetType: cleanTargetType,
+      targetId: cleanTargetId,
+      totalCount: 0,
+      totalBC: 0,
+      rows: [],
+      transactions: [],
+    };
+  }
+
+  const senderIds = Array.from(
+    new Set(transactions.map((tx) => String(tx.senderId || "")).filter(Boolean))
+  );
+
+  const users = await User.find({ id: { $in: senderIds } })
+    .select("id firstName lastName avatar photos")
+    .lean();
+
+  const userMap = new Map(users.map((user) => [String(user.id), user]));
+  const grouped = new Map();
+
+  for (const tx of transactions) {
+    const senderId = String(tx.senderId || "");
+    if (!senderId) continue;
+
+    if (!grouped.has(senderId)) {
+      const user = userMap.get(senderId) || {};
+
+      grouped.set(senderId, {
+        userId: senderId,
+        user: {
+          id: senderId,
+          firstName: user.firstName || "",
+          lastName: user.lastName || "",
+          avatar:
+            user.avatar ||
+            (Array.isArray(user.photos) && user.photos.length
+              ? user.photos[0]
+              : ""),
+        },
+        totalCount: 0,
+        totalBC: 0,
+        lastGiftAt: tx.createdAt || tx.updatedAt || null,
+        gifts: [],
+        recentGifts: [],
+      });
+    }
+
+    const row = grouped.get(senderId);
+    const sentAt = tx.createdAt || tx.updatedAt || null;
+
+    row.totalCount += 1;
+    row.totalBC += Number(tx.priceBC) || 0;
+
+    if (
+      sentAt &&
+      (!row.lastGiftAt || new Date(sentAt).getTime() > new Date(row.lastGiftAt).getTime())
+    ) {
+      row.lastGiftAt = sentAt;
+    }
+
+    row.recentGifts.push({
+      transactionId: tx.transactionId,
+      giftId: tx.giftId,
+      priceBC: Number(tx.priceBC) || 0,
+      sentAt,
+    });
+
+    const existingGift = row.gifts.find(
+      (gift) => String(gift.giftId) === String(tx.giftId)
+    );
+
+    if (existingGift) {
+      existingGift.count += 1;
+      existingGift.totalBC += Number(tx.priceBC) || 0;
+      if (
+        sentAt &&
+        (!existingGift.lastGiftAt ||
+          new Date(sentAt).getTime() > new Date(existingGift.lastGiftAt).getTime())
+      ) {
+        existingGift.lastGiftAt = sentAt;
+      }
+    } else {
+      row.gifts.push({
+        giftId: tx.giftId,
+        count: 1,
+        totalBC: Number(tx.priceBC) || 0,
+        lastGiftAt: sentAt,
+      });
+    }
+  }
+
+  const rows = Array.from(grouped.values())
+    .map((row) => ({
+      ...row,
+      gifts: row.gifts.sort((a, b) => {
+        return new Date(b.lastGiftAt || 0).getTime() - new Date(a.lastGiftAt || 0).getTime();
+      }),
+      recentGifts: row.recentGifts.sort((a, b) => {
+        return new Date(b.sentAt || 0).getTime() - new Date(a.sentAt || 0).getTime();
+      }),
+    }))
+    .sort((a, b) => {
+      return new Date(b.lastGiftAt || 0).getTime() - new Date(a.lastGiftAt || 0).getTime();
+    });
+
+  return {
+    viewerRole: isOwner ? "owner" : "gifter",
+    receiverId: cleanReceiverId,
+    targetType: cleanTargetType,
+    targetId: cleanTargetId,
+    totalCount,
+    totalBC,
+    rows,
+    transactions: includeTransactions ? transactions : [],
+  };
 }
 
 async function listGiftTransactions({ userId, role = "all", limit = 50 }) {
