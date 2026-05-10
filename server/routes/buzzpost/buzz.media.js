@@ -32,6 +32,7 @@ const shortid = require("shortid");
 
 const authMiddleware = require("../auth-middleware");
 const User = require("../../models/User");
+const Match = require("../../models/Match");
 const { sendNotification } = require("../../utils/helpers");
 
 function getIO() {
@@ -54,12 +55,47 @@ function emitToUsers(userIds, event, payload) {
   }
 }
 
+function getMediaKeyCandidates(media = {}) {
+  return [
+    media?.id,
+    media?._id,
+    media?.mediaId,
+    media?.postId,
+    media?.url,
+    media?.mediaUrl,
+    media?.secureUrl,
+    media?.secure_url,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+}
+
 function getMedia(owner, mediaId) {
-  return (owner?.media || []).find((m) => String(m?.id) === String(mediaId));
+  const target = String(mediaId || "").trim();
+  if (!target) return null;
+
+  return (owner?.media || []).find((m) =>
+    getMediaKeyCandidates(m).includes(target)
+  );
 }
 
 function getComment(media, commentId) {
   return (media?.comments || []).find((c) => String(c?.id) === String(commentId));
+}
+
+async function canInteractWithOwnerMedia(viewerId, ownerId) {
+  const me = String(viewerId || "");
+  const owner = String(ownerId || "");
+
+  if (!me || !owner) return false;
+  if (me === owner) return true;
+
+  const match = await Match.findOne({
+    status: "matched",
+    users: { $all: [me, owner] },
+  }).lean();
+
+  return !!match;
 }
 
 function ensurePrivateVisibleTo(ownerId, commenterId, existing = []) {
@@ -165,14 +201,23 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "mediaId & text required" });
     }
 
-    const owner = await User.findOne({ id: ownerId });
+     const owner = await User.findOne({ id: ownerId });
     if (!owner) {
       return res.status(404).json({ error: "owner not found" });
     }
 
+    const canComment = await canInteractWithOwnerMedia(me, ownerId);
+    if (!canComment) {
+      return res.status(403).json({ error: "Only matched users can comment on this media" });
+    }
+
     const media = getMedia(owner, mediaId);
     if (!media) {
-      return res.status(404).json({ error: "media not found" });
+      return res.status(404).json({
+        error: "media not found",
+        mediaId: String(mediaId),
+        ownerId: String(ownerId),
+      });
     }
 
     media.comments = media.comments || [];
@@ -258,14 +303,23 @@ router.patch("/media/:ownerId/comment/:commentId", authMiddleware, async (req, r
       return res.status(400).json({ error: "mediaId & text required" });
     }
 
-    const owner = await User.findOne({ id: ownerId });
+      const owner = await User.findOne({ id: ownerId });
     if (!owner) {
       return res.status(404).json({ error: "owner not found" });
     }
 
+     const canComment = await canInteractWithOwnerMedia(me, ownerId);
+    if (!canComment) {
+      return res.status(403).json({ error: "Only matched users can edit comments on this media" });
+    }
+
     const media = getMedia(owner, mediaId);
     if (!media) {
-      return res.status(404).json({ error: "media not found" });
+      return res.status(404).json({
+        error: "media not found",
+        mediaId: String(mediaId),
+        ownerId: String(ownerId),
+      });
     }
 
     media.comments = media.comments || [];
@@ -322,14 +376,23 @@ router.delete("/media/:ownerId/comment/:commentId", authMiddleware, async (req, 
       return res.status(400).json({ error: "mediaId required" });
     }
 
-    const owner = await User.findOne({ id: ownerId });
+       const owner = await User.findOne({ id: ownerId });
     if (!owner) {
       return res.status(404).json({ error: "owner not found" });
     }
 
+        const canComment = await canInteractWithOwnerMedia(me, ownerId);
+    if (!canComment) {
+      return res.status(403).json({ error: "Only matched users can delete comments on this media" });
+    }
+
     const media = getMedia(owner, mediaId);
     if (!media) {
-      return res.status(404).json({ error: "media not found" });
+      return res.status(404).json({
+        error: "media not found",
+        mediaId: String(mediaId),
+        ownerId: String(ownerId),
+      });
     }
 
     media.comments = media.comments || [];

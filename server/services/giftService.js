@@ -21,7 +21,7 @@ const User = require("../models/User");
 const GiftTransaction = require("../models/GiftTransaction");
 const GiftSummary = require("../models/GiftSummary");
 const { validateGiftPurchase } = require("../config/rombuzzGifts");
-const { debitBuzzCoins } = require("./buzzCoinService");
+const { debitBuzzCoins, creditBuzzCoins } = require("./buzzCoinService");
 const { sendNotification } = require("../utils/helpers");
 
 function getIO() {
@@ -185,7 +185,7 @@ async function sendGift({
     },
   });
 
-  const transaction = await GiftTransaction.create({
+   const transaction = await GiftTransaction.create({
     id: shortid.generate(),
     transactionId,
     senderId: cleanSenderId,
@@ -199,6 +199,26 @@ async function sendGift({
     appPlatform,
     appVersion,
     metadata,
+  });
+
+  // ✅ Normal received gifts become reusable in-app BuzzCoin.
+  // Paid chat media unlocks are handled separately in chatRooms.js
+  // and credit creator earnings using walletBucket: "earned".
+  await creditBuzzCoins({
+    userId: cleanReceiverId,
+    amountBC: priceBC,
+    type: "gift_receive",
+    source: "gift",
+    referenceId: transactionId,
+    reason: `Received ${cleanGiftId}`,
+    walletBucket: "balance",
+    metadata: {
+      giftId: cleanGiftId,
+      senderId: cleanSenderId,
+      placement: cleanPlacement,
+      targetType: cleanTargetType,
+      targetId: cleanTargetId,
+    },
   });
 
   const summary = await updateGiftSummary({

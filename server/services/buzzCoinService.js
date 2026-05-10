@@ -73,6 +73,20 @@ async function addLedgerEntry({
   });
 }
 
+function normalizeCreditBucket(bucket) {
+  const safe = String(bucket || "balance").trim().toLowerCase();
+
+  if (safe === "earned" || safe === "creator" || safe === "creator_earnings") {
+    return "earned";
+  }
+
+  if (safe === "pending" || safe === "payout_pending") {
+    return "pending";
+  }
+
+  return "balance";
+}
+
 async function creditBuzzCoins({
   userId,
   amountBC,
@@ -81,6 +95,7 @@ async function creditBuzzCoins({
   referenceId = "",
   reason = "",
   metadata = {},
+  walletBucket = "balance",
 }) {
   const amount = Math.floor(Number(amountBC) || 0);
   if (amount <= 0) {
@@ -92,26 +107,45 @@ async function creditBuzzCoins({
 
   const wallet = await getOrCreateWallet(userId);
 
-  if (wallet.locked) {
+   if (wallet.locked) {
     throw Object.assign(new Error(wallet.lockReason || "Wallet is locked"), {
       statusCode: 403,
       code: "WALLET_LOCKED",
     });
   }
 
-  wallet.balanceBC = (Number(wallet.balanceBC) || 0) + amount;
+  const bucket = normalizeCreditBucket(walletBucket);
+
+  if (bucket === "earned") {
+    wallet.earnedBC = (Number(wallet.earnedBC) || 0) + amount;
+  } else if (bucket === "pending") {
+    wallet.pendingBC = (Number(wallet.pendingBC) || 0) + amount;
+  } else {
+    wallet.balanceBC = (Number(wallet.balanceBC) || 0) + amount;
+  }
+
   wallet.lastTransactionAt = new Date();
   await wallet.save();
+
+  const balanceAfterBC =
+    bucket === "earned"
+      ? wallet.earnedBC
+      : bucket === "pending"
+      ? wallet.pendingBC
+      : wallet.balanceBC;
 
   await addLedgerEntry({
     userId,
     type,
     amountBC: amount,
-    balanceAfterBC: wallet.balanceBC,
+    balanceAfterBC,
     source,
     referenceId,
     reason,
-    metadata,
+    metadata: {
+      ...metadata,
+      walletBucket: bucket,
+    },
   });
 
   return getWalletSnapshot(userId);

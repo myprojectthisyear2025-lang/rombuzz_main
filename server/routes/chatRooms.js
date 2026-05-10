@@ -28,7 +28,7 @@ const ChatRoom = require("../models/ChatRoom");
 const MediaGift = require("../models/MediaGift");
 const User = require("../models/User");
 const Match = require("../models/Match");
-const { debitBuzzCoins } = require("../services/buzzCoinService");
+const { debitBuzzCoins, creditBuzzCoins } = require("../services/buzzCoinService");
 
 // ✅ Proper Socket.IO + state wiring
 const { getIO } = require("../socket");
@@ -871,6 +871,7 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
     }
 
     const transactionId = `chat_media_unlock_${shortid.generate()}`;
+    const ownerId = String(msg.from || "");
 
     const wallet = await debitBuzzCoins({
       userId: me,
@@ -883,15 +884,32 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
         roomId: String(roomId),
         msgId: String(msgId),
         mediaType: String(msg.mediaType || ""),
-        senderId: String(msg.from || ""),
+        senderId: ownerId,
         receiverId: me,
+      },
+    });
+
+      await creditBuzzCoins({
+      userId: ownerId,
+      amountBC: priceBC,
+      type: "gift_receive",
+      source: "chat_media_unlock",
+      referenceId: transactionId,
+      reason: "Earned BuzzCoin from unlocked gifted chat media",
+      walletBucket: "earned",
+      metadata: {
+        roomId: String(roomId),
+        msgId: String(msgId),
+        mediaType: String(msg.mediaType || ""),
+        senderId: ownerId,
+        buyerId: me,
       },
     });
 
     await MediaGift.create({
       id: shortid.generate(),
       mediaId: String(msg.id),
-      ownerId: String(msg.from),
+      ownerId,
       fromId: me,
 
       giftId: "chat_media_unlock",
@@ -901,6 +919,13 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
       targetId: String(msg.id),
       transactionId,
       status: "completed",
+
+      // ✅ Chat gifted-media history fields
+      roomId: String(roomId),
+      msgId: String(msgId),
+      mediaType: String(msg.mediaType || ""),
+      buyerId: me,
+      sellerId: ownerId,
 
       stickerId: String(msg?.gift?.stickerId || "sticker_basic"),
       amount: priceBC,
@@ -922,11 +947,12 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
 
     const updatedMessage = msg.toObject ? msg.toObject() : { ...msg };
 
-    const io = getIO();
+      const io = getIO();
     io?.to(roomId).emit("chat:gift:unlocked", {
       roomId,
       msgId: String(msgId),
       unlockedBy: me,
+      ownerId,
       priceBC,
       transactionId,
       message: updatedMessage,
@@ -935,6 +961,7 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
     return res.json({
       ok: true,
       locked: false,
+      ownerId,
       priceBC,
       transactionId,
       wallet,
