@@ -212,10 +212,11 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       imageUrl || photoUrl || mediaUrl || attachmentUrl || ""
     ).trim();
 
-    if (!mediaId || (!cleanText && !cleanImageUrl)) {
+      if (!mediaId || (!cleanText && !cleanImageUrl)) {
       return res.status(400).json({ error: "mediaId and text or photo required" });
     }
-     const owner = await User.findOne({ id: ownerId });
+
+    const owner = await User.findOne({ id: ownerId });
     if (!owner) {
       return res.status(404).json({ error: "owner not found" });
     }
@@ -234,7 +235,7 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       });
     }
 
-    media.comments = media.comments || [];
+     media.comments = media.comments || [];
 
     let parent = null;
     if (parentId) {
@@ -242,9 +243,13 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       if (!parent) {
         return res.status(404).json({ error: "parent comment not found" });
       }
+
+      if (!canSeePrivateComment(parent, me, ownerId)) {
+        return res.status(403).json({ error: "Not allowed to reply to this comment" });
+      }
     }
 
-         const comment = {
+    const comment = {
       id: shortid.generate(),
       userId: me,
       text: cleanText,
@@ -273,22 +278,30 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
     owner.markModified("media");
     await owner.save();
 
-    if (String(ownerId) !== String(me)) {
+      if (String(ownerId) !== String(me)) {
       const commenter = await User.findOne({ id: me }).lean();
 
-        const isReply = !!parent;
+      const isReply = !!parent;
       const actionText = cleanImageUrl && !cleanText ? "sent a photo comment" : "commented";
 
-      await sendNotification(ownerId, {
-        fromId: me,
-        type: isReply ? "media_reply" : "media_comment",
-        message: isReply
-          ? `${commenter?.firstName || "Someone"} replied to a comment on your photo 💬`
-          : `${commenter?.firstName || "Someone"} ${actionText} on your photo 💬`,
-        entity: "media",
-        entityId: mediaId,
-        postOwnerId: ownerId,
-      });y
+      try {
+        await sendNotification(ownerId, {
+          fromId: me,
+
+          // ✅ Use safe existing notification enum.
+          // Your Notification model rejected "media_comment" / "media_reply".
+          type: "comment",
+
+          message: isReply
+            ? `${commenter?.firstName || "Someone"} replied to a comment on your photo 💬`
+            : `${commenter?.firstName || "Someone"} ${actionText} on your photo 💬`,
+          entity: "media",
+          entityId: mediaId,
+          postOwnerId: ownerId,
+        });
+      } catch (notificationError) {
+        console.error("⚠️ media comment notification failed:", notificationError);
+      }
     }
 
     const notifyUsers = [me, ownerId];
