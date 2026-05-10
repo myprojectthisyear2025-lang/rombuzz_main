@@ -550,22 +550,30 @@ router.post("/premium-buzz/send", authMiddleware, async (req, res) => {
       message += `\n🔥 MatchStreak: ${currentStreak}`;
     }
 
-    await sendNotification(toId, {
+      await sendNotification(toId, {
       fromId,
-      type: "premium_buzz",
+
+      // ✅ IMPORTANT:
+      // Notification.js does not allow "premium_buzz" as a type.
+      // Use existing "buzz" type so notification page saves and displays it.
+      type: "buzz",
+
+      // ✅ Keep premium identity here.
+      via: "premium_buzz",
+      entity: "premium_buzz",
       buzzType: premiumBuzz.id,
+
       message,
       href: `/viewProfile/${fromId}`,
-      entity: "premium_buzz",
       entityId: transactionId,
       transactionId,
       priceBC: premiumBuzz.priceBC,
       streak: currentStreak,
     });
 
-    const io = getIO();
+      const io = getIO();
     const onlineUsers = getOnlineUsers();
-    const receiverSocket = onlineUsers[toId];
+    const receiverSocket = onlineUsers[String(toId)];
 
     const socketPayload = {
       transactionId,
@@ -587,18 +595,39 @@ router.post("/premium-buzz/send", authMiddleware, async (req, res) => {
       createdAt: new Date().toISOString(),
     };
 
-    if (io && receiverSocket) {
-      io.to(String(receiverSocket)).emit("premium_buzz:received", socketPayload);
-      io.to(String(receiverSocket)).emit("notification", {
-        id: transactionId,
-        fromId,
-        type: "premium_buzz",
-        buzzType: premiumBuzz.id,
-        message,
-        href: `/viewProfile/${fromId}`,
-        createdAt: socketPayload.createdAt,
-        read: false,
-      });
+    const liveNotificationPayload = {
+      id: transactionId,
+      fromId,
+
+      // ✅ Notification model only allows "buzz", not "premium_buzz".
+      type: "buzz",
+
+      // ✅ Premium marker for frontend UI/filtering.
+      via: "premium_buzz",
+      entity: "premium_buzz",
+      buzzType: premiumBuzz.id,
+
+      message,
+      href: `/viewProfile/${fromId}`,
+      entityId: transactionId,
+      transactionId,
+      priceBC: premiumBuzz.priceBC,
+      streak: currentStreak,
+      createdAt: socketPayload.createdAt,
+      read: false,
+    };
+
+    if (io) {
+      // ✅ Direct socket emit when onlineUsers has the latest socket id.
+      if (receiverSocket) {
+        io.to(String(receiverSocket)).emit("premium_buzz:received", socketPayload);
+        io.to(String(receiverSocket)).emit("notification", liveNotificationPayload);
+      }
+
+      // ✅ Reliable fallback: receiver socket joins this private room in socket.js.
+      // This fixes cases where onlineUsers[toId] is stale/missing/overwritten.
+      io.to(String(toId)).emit("premium_buzz:received", socketPayload);
+      io.to(String(toId)).emit("notification", liveNotificationPayload);
     }
 
     console.log(

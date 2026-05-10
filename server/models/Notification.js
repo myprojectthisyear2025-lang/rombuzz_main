@@ -40,14 +40,23 @@ const notificationSchema = new mongoose.Schema(
      message: { type: String, required: true },
     href: { type: String, default: "" },
 
-    // Legacy routing fields
+     // Legacy routing fields
     postId: { type: String, default: "" },
     postOwnerId: { type: String, default: "" },
     entity: { type: String, default: "" },
     entityId: { type: String, default: "" },
 
+    // ✅ Premium Buzz / source metadata
+    // Used by paid Buzz so notification page can show it as a Buzz,
+    // while still knowing it came from the premium Buzz system.
+    via: { type: String, default: "" }, // premium_buzz | discover_like | etc.
+    buzzType: { type: String, default: "" }, // cupid | midnight | rain | soul | etc.
+    transactionId: { type: String, default: "" },
+    priceBC: { type: Number, default: 0 },
+    streak: { type: Number, default: 0 },
+
     // Exact notification routing fields
-    // Used for comment/reply/gift navigation:
+    // Used for comment/reply/gift/navigation:
     // - owner opens own profile/gallery/insights flow
     // - non-owner opens LetsBuzz/detail flow
     targetType: { type: String, default: "" }, // buzz_post | gallery_media | reel | post
