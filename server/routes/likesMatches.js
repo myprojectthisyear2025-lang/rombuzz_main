@@ -41,6 +41,11 @@ const Match = require("../models/Match");
 const MatchStreak = require("../models/MatchStreak");
 const ChatRoom = require("../models/ChatRoom");
 const mongoose = require("mongoose");
+const { getPremiumBuzzType } = require("../config/premiumBuzzTypes");
+const {
+  getWalletSnapshot,
+  debitBuzzCoins,
+} = require("../services/buzzCoinService");
 const {
   baseSanitizeUser,
   sendNotification,
@@ -435,6 +440,192 @@ router.post("/buzz", authMiddleware, async (req, res) => {
     return res.status(500).json({ error: "internal_error" });
   } finally {
     buzzLocks.delete(pairKey);
+  }
+});
+
+/* ======================
+   💎 PREMIUM BUZZ BETWEEN MATCHED USERS
+====================== */
+router.post("/premium-buzz/send", authMiddleware, async (req, res) => {
+  const fromId = String(req.user.id);
+  const { to, buzzType } = req.body || {};
+  const toId = String(to || "").trim();
+
+  if (!toId) return res.status(400).json({ error: "to required" });
+
+  const typeCheck = getPremiumBuzzType(buzzType);
+  if (!typeCheck.ok) {
+    return res.status(typeCheck.statusCode || 400).json({
+      error: typeCheck.code,
+      code: typeCheck.code,
+      message: typeCheck.message,
+    });
+  }
+
+  const premiumBuzz = typeCheck.type;
+  const pairKey = [fromId, toId].sort().join("_");
+  const lockKey = `premium:${pairKey}`;
+
+  if (buzzLocks.has(lockKey)) {
+    return res.status(429).json({ error: "busy" });
+  }
+
+  buzzLocks.add(lockKey);
+
+  try {
+    const matched = await Match.findOne({ users: { $all: [fromId, toId] } });
+    if (!matched) return res.status(409).json({ error: "not_matched" });
+
+    if (await isBlocked(fromId, toId)) {
+      return res.status(403).json({ error: "blocked" });
+    }
+
+    const now = Date.now();
+    const COOLDOWN_MS = 3 * 1000;
+    global._premiumBuzzCooldown ||= {};
+
+    const cooldownKey = `${pairKey}:${premiumBuzz.id}`;
+    const last = global._premiumBuzzCooldown[cooldownKey] || 0;
+
+    if (now - last < COOLDOWN_MS) {
+      return res.status(429).json({
+        error: "cooldown",
+        retryInMs: COOLDOWN_MS - (now - last),
+      });
+    }
+
+    const transactionId = shortid.generate();
+
+    let walletSnapshot;
+    try {
+      walletSnapshot = await debitBuzzCoins({
+        userId: fromId,
+        amountBC: premiumBuzz.priceBC,
+        type: "premium_buzz_send",
+        source: "premium_buzz",
+        referenceId: transactionId,
+        reason: `Sent ${premiumBuzz.label}`,
+        metadata: {
+          to: toId,
+          buzzType: premiumBuzz.id,
+          label: premiumBuzz.label,
+          emoji: premiumBuzz.emoji,
+          priceBC: premiumBuzz.priceBC,
+        },
+      });
+    } catch (walletErr) {
+      return res.status(walletErr?.statusCode || 500).json({
+        error: walletErr?.code || "wallet_error",
+        code: walletErr?.code || "wallet_error",
+        message: walletErr?.message || "Wallet error",
+        balanceBC: walletErr?.balanceBC,
+        requiredBC: walletErr?.requiredBC || premiumBuzz.priceBC,
+        wallet: walletErr?.balanceBC !== undefined
+          ? {
+              balanceBC: Number(walletErr.balanceBC || 0),
+              spendableBalance: Number(walletErr.balanceBC || 0),
+            }
+          : undefined,
+      });
+    }
+
+    global._premiumBuzzCooldown[cooldownKey] = now;
+
+    const streakObj = await incMatchStreakOut(fromId, toId);
+    const currentStreak = Number(streakObj?.count || 0);
+
+    const sender = await User.findOne({ id: fromId }).lean();
+    const fromName =
+      String(sender?.firstName || sender?.name || "").trim() || "Someone";
+    const fromAvatar =
+      sender?.avatar ||
+      (Array.isArray(sender?.photos) && sender.photos.length ? sender.photos[0] : "") ||
+      "";
+
+    let message = `${premiumBuzz.emoji} ${fromName} sent you a ${premiumBuzz.label}`;
+    if (premiumBuzz.notificationBody) {
+      message += `\n${premiumBuzz.notificationBody}`;
+    }
+    if (currentStreak > 1) {
+      message += `\n🔥 MatchStreak: ${currentStreak}`;
+    }
+
+    await sendNotification(toId, {
+      fromId,
+      type: "premium_buzz",
+      buzzType: premiumBuzz.id,
+      message,
+      href: `/viewProfile/${fromId}`,
+      entity: "premium_buzz",
+      entityId: transactionId,
+      transactionId,
+      priceBC: premiumBuzz.priceBC,
+      streak: currentStreak,
+    });
+
+    const io = getIO();
+    const onlineUsers = getOnlineUsers();
+    const receiverSocket = onlineUsers[toId];
+
+    const socketPayload = {
+      transactionId,
+      fromId,
+      senderId: fromId,
+      senderName: fromName,
+      senderAvatar: fromAvatar,
+      toId,
+      buzzType: premiumBuzz.id,
+      buzzTypeId: premiumBuzz.id,
+      label: premiumBuzz.label,
+      emoji: premiumBuzz.emoji,
+      priceBC: premiumBuzz.priceBC,
+      animationKey: premiumBuzz.animationKey,
+      notificationBody: premiumBuzz.notificationBody,
+      overlayBody: premiumBuzz.overlayBody,
+      streak: currentStreak,
+      href: `/viewProfile/${fromId}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    if (io && receiverSocket) {
+      io.to(String(receiverSocket)).emit("premium_buzz:received", socketPayload);
+      io.to(String(receiverSocket)).emit("notification", {
+        id: transactionId,
+        fromId,
+        type: "premium_buzz",
+        buzzType: premiumBuzz.id,
+        message,
+        href: `/viewProfile/${fromId}`,
+        createdAt: socketPayload.createdAt,
+        read: false,
+      });
+    }
+
+    console.log(
+      `✅ Premium Buzz OK. ${fromId} -> ${toId}. Type ${premiumBuzz.id}. Streak ${currentStreak}`
+    );
+
+    return res.json({
+      success: true,
+      transactionId,
+      buzzType: premiumBuzz.id,
+      label: premiumBuzz.label,
+      emoji: premiumBuzz.emoji,
+      priceBC: premiumBuzz.priceBC,
+      streak: currentStreak,
+      wallet: {
+        ...walletSnapshot,
+        spendableBalance: Number(walletSnapshot?.balanceBC || 0),
+        balance: Number(walletSnapshot?.balanceBC || 0),
+        buzzCoin: Number(walletSnapshot?.balanceBC || 0),
+        buzzCoins: Number(walletSnapshot?.balanceBC || 0),
+      },
+    });
+  } catch (e) {
+    console.error("❌ Premium Buzz endpoint error:", e);
+    return res.status(500).json({ error: "internal_error" });
+  } finally {
+    buzzLocks.delete(lockKey);
   }
 });
 

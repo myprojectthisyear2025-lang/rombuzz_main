@@ -330,7 +330,7 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
           type: "comment",
 
           message: isReply
-            ? `${commenterName} replied in your media comment thread 💬`
+            ? `${commenterName} replied to your comment💬`
             : `${commenterName} ${actionText} on your photo 💬`,
 
           // Legacy/fallback fields

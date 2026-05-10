@@ -20,7 +20,7 @@ const buzzCoinLedgerSchema = new mongoose.Schema(
 
     userId: { type: String, required: true, index: true },
 
-    type: {
+     type: {
       type: String,
       required: true,
       enum: [
@@ -29,6 +29,7 @@ const buzzCoinLedgerSchema = new mongoose.Schema(
         "refund",
         "gift_send",
         "gift_receive",
+        "premium_buzz_send",
         "withdrawal_request",
         "withdrawal_cancel",
         "admin_adjustment",
