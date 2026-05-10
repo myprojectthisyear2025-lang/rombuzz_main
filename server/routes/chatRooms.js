@@ -28,6 +28,7 @@ const ChatRoom = require("../models/ChatRoom");
 const MediaGift = require("../models/MediaGift");
 const User = require("../models/User");
 const Match = require("../models/Match");
+const { debitBuzzCoins } = require("../services/buzzCoinService");
 
 // ✅ Proper Socket.IO + state wiring
 const { getIO } = require("../socket");
@@ -232,6 +233,15 @@ function setMyRoomPrefs(room, userId, patch = {}) {
   return next;
 }
 
+function normalizeGiftUnlockPrice(value) {
+  const n = Math.floor(Number(value) || 0);
+
+  // Gifted media must be paid media, but keep a sane app-side cap.
+  // You can raise this later after wallet/payout rules are finalized.
+  if (n <= 0) return 0;
+  return Math.min(n, 10000);
+}
+
 
 // ============================================================
 // 💬 GET CHAT ROOM MESSAGES
@@ -285,13 +295,13 @@ let viewsLeft = 0;
 let giftLocked = false;
 let giftStickerId = "sticker_basic";
 let giftAmount = 0;
+let giftPriceBC = 0;
 
 // ✅ NEW: media fields (so realtime doesn’t render black/blank)
 let mediaUrl = null;
 let mediaType = null; // "image" | "video" | "audio"
 let overlayText = "";
 let muted = false;
-
 
 if (text.startsWith("::RBZ::")) {
   try {
@@ -310,10 +320,18 @@ if (text.startsWith("::RBZ::")) {
       viewsLeft = 2;
     }
 
-    if (payload?.gift?.locked) {
+     if (payload?.gift?.locked) {
       giftLocked = true;
       giftStickerId = String(payload?.gift?.stickerId || "sticker_basic");
-      giftAmount = Number(payload?.gift?.amount || 0);
+
+      const rawPrice =
+        payload?.gift?.priceBC ??
+        payload?.gift?.amount ??
+        payload?.priceBC ??
+        0;
+
+      giftPriceBC = normalizeGiftUnlockPrice(rawPrice);
+      giftAmount = giftPriceBC;
     }
 
       // ✅ NEW: store media fields explicitly
@@ -363,7 +381,11 @@ const msg = {
     locked: giftLocked,
     stickerId: giftStickerId,
     amount: giftAmount,
+    priceBC: giftPriceBC,
+    currency: "BC",
     unlockedBy: [],
+    unlockedAt: null,
+    unlockTransactionId: "",
   },
   replyTo: safeReplyTo,
 };
@@ -789,58 +811,147 @@ return res.json({ ok: true, mode, viewsLeft: nextLeft, systemMessage });
 // ============================================================
 // 🎁 UNLOCK GIFT-LOCKED CHAT MEDIA
 // POST /api/chat/rooms/:roomId/:msgId/unlock
-// body: { stickerId?, amount? }
+// Server-authoritative:
+// - frontend does NOT choose unlock price here
+// - price comes from msg.gift.priceBC saved when sender created media
+// - receiver pays once, then media stays unlocked forever
 // ============================================================
 router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res) => {
   try {
     const { roomId, msgId } = req.params;
     const me = String(req.user.id);
-    const { stickerId = "sticker_basic", amount = 0 } = req.body || {};
 
     const room = await getRoomDoc(roomId);
+    const participants = (room?.participants || []).map((x) => String(x));
+
+    if (!participants.includes(me)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
     const msg = (room.messages || []).find((m) => String(m.id) === String(msgId));
     if (!msg) return res.status(404).json({ error: "not_found" });
 
-    // ✅ only receiver can unlock
-    if (String(msg.to) !== me) return res.status(403).json({ error: "forbidden" });
-
-    // already unlocked
-    if (!msg?.gift?.locked) {
-      return res.json({ ok: true, locked: false });
+    // ✅ only receiver can unlock paid media
+    if (String(msg.to) !== me) {
+      return res.status(403).json({ error: "only_receiver_can_unlock" });
     }
 
-    // record gift (reuse existing MediaGift model)
+    if (!msg?.gift?.locked) {
+      return res.json({
+        ok: true,
+        locked: false,
+        alreadyUnlocked: true,
+        message: msg,
+      });
+    }
+
+    msg.gift.unlockedBy ||= [];
+
+    if (msg.gift.unlockedBy.map(String).includes(me)) {
+      msg.gift.locked = false;
+      await room.save();
+
+      return res.json({
+        ok: true,
+        locked: false,
+        alreadyUnlocked: true,
+        message: msg,
+      });
+    }
+
+    const priceBC = normalizeGiftUnlockPrice(
+      msg?.gift?.priceBC ?? msg?.gift?.amount ?? 0
+    );
+
+    if (priceBC <= 0) {
+      return res.status(400).json({
+        error: "invalid_unlock_price",
+        message: "This gifted media does not have a valid BuzzCoin unlock price.",
+      });
+    }
+
+    const transactionId = `chat_media_unlock_${shortid.generate()}`;
+
+    const wallet = await debitBuzzCoins({
+      userId: me,
+      amountBC: priceBC,
+      type: "gift_send",
+      source: "chat_media_unlock",
+      referenceId: transactionId,
+      reason: "Unlocked gifted chat media",
+      metadata: {
+        roomId: String(roomId),
+        msgId: String(msgId),
+        mediaType: String(msg.mediaType || ""),
+        senderId: String(msg.from || ""),
+        receiverId: me,
+      },
+    });
+
     await MediaGift.create({
       id: shortid.generate(),
-      mediaId: String(msg.id),       // treat msgId as mediaId
-      ownerId: String(msg.from),     // sender receives gift
-      fromId: me,                    // receiver gifts to unlock
-      stickerId: String(stickerId),
-      amount: Number(amount) || 0,
+      mediaId: String(msg.id),
+      ownerId: String(msg.from),
+      fromId: me,
+
+      giftId: "chat_media_unlock",
+      priceBC,
+      placement: "chat",
+      targetType: "chat_media",
+      targetId: String(msg.id),
+      transactionId,
+      status: "completed",
+
+      stickerId: String(msg?.gift?.stickerId || "sticker_basic"),
+      amount: priceBC,
       createdAt: Date.now(),
     });
 
-    // unlock message for this receiver
     msg.gift.locked = false;
-    msg.gift.unlockedBy ||= [];
-    if (!msg.gift.unlockedBy.includes(me)) msg.gift.unlockedBy.push(me);
+    msg.gift.amount = priceBC;
+    msg.gift.priceBC = priceBC;
+    msg.gift.currency = "BC";
+    msg.gift.unlockedAt = new Date();
+    msg.gift.unlockTransactionId = transactionId;
+
+    if (!msg.gift.unlockedBy.map(String).includes(me)) {
+      msg.gift.unlockedBy.push(me);
+    }
 
     await room.save();
+
+    const updatedMessage = msg.toObject ? msg.toObject() : { ...msg };
 
     const io = getIO();
     io?.to(roomId).emit("chat:gift:unlocked", {
       roomId,
       msgId: String(msgId),
       unlockedBy: me,
+      priceBC,
+      transactionId,
+      message: updatedMessage,
     });
 
-    return res.json({ ok: true, locked: false });
+    return res.json({
+      ok: true,
+      locked: false,
+      priceBC,
+      transactionId,
+      wallet,
+      message: updatedMessage,
+    });
   } catch (err) {
     console.error("❌ unlock error:", err);
-    return res.status(500).json({ error: "failed" });
+
+    const status = err?.statusCode || 500;
+    return res.status(status).json({
+      error: err?.code || "failed",
+      message: err?.message || "Failed to unlock gifted media.",
+      balanceBC: err?.balanceBC,
+      requiredBC: err?.requiredBC,
+    });
   }
 });
-
 
 // ============================================================
 // ✅ UNREAD HELPERS + ENDPOINTS (server-accurate, cross-device)

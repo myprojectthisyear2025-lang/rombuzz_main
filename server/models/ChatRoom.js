@@ -59,9 +59,19 @@ hiddenFor: [{ type: String, default: [] }],
 },
 gift: {
   locked: { type: Boolean, default: false },
+
+  // ✅ Backward-compatible legacy fields
   stickerId: { type: String, default: "sticker_basic" },
   amount: { type: Number, default: 0 },
+
+  // ✅ Gifted media unlock price
+  priceBC: { type: Number, default: 0 },
+  currency: { type: String, default: "BC" },
+
+  // ✅ Unlock ownership/payment tracking
   unlockedBy: [{ type: String, default: [] }], // userIds who unlocked (1:1 => receiver)
+  unlockedAt: { type: Date, default: null },
+  unlockTransactionId: { type: String, default: "" },
 },
 replyTo: { type: replyToSchema, default: null },
   pinned: { type: Boolean, default: false },
