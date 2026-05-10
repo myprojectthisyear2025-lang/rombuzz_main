@@ -62,6 +62,23 @@ function getComment(media, commentId) {
   return (media?.comments || []).find((c) => String(c?.id) === String(commentId));
 }
 
+function ensurePrivateVisibleTo(ownerId, commenterId, existing = []) {
+  const set = new Set(Array.isArray(existing) ? existing.map(String) : []);
+
+  set.add(String(ownerId || ""));
+  set.add(String(commenterId || ""));
+
+  return Array.from(set).filter(Boolean);
+}
+
+function canSeePrivateComment(comment, viewerId, ownerId) {
+  const visibleTo = Array.isArray(comment?.visibleTo)
+    ? comment.visibleTo.map(String)
+    : ensurePrivateVisibleTo(ownerId, comment?.userId);
+
+  return visibleTo.includes(String(viewerId || ""));
+}
+
 // =======================================================
 // ✅ React / unreact to a media item (MongoDB)
 // =======================================================
@@ -168,11 +185,16 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       }
     }
 
-    const comment = {
+      const comment = {
       id: shortid.generate(),
       userId: me,
       text: cleanText,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
+
+      // 🔒 PRIVATE:
+      // Only media owner + comment author can see this comment.
+      visibleTo: ensurePrivateVisibleTo(ownerId, me),
 
       // reply support
       parentId: parent ? String(parent.id) : null,
@@ -257,8 +279,16 @@ router.patch("/media/:ownerId/comment/:commentId", authMiddleware, async (req, r
       return res.status(403).json({ error: "Not allowed to edit this comment" });
     }
 
-    comment.text = cleanText;
+     comment.text = cleanText;
     comment.editedAt = Date.now();
+    comment.updatedAt = Date.now();
+
+    // 🔒 Preserve private visibility after edit.
+    comment.visibleTo = ensurePrivateVisibleTo(
+      ownerId,
+      comment.userId,
+      comment.visibleTo
+    );
 
     owner.markModified("media");
     await owner.save();
@@ -307,6 +337,10 @@ router.delete("/media/:ownerId/comment/:commentId", authMiddleware, async (req, 
     const target = getComment(media, commentId);
     if (!target) {
       return res.status(404).json({ error: "comment not found" });
+    }
+
+      if (!canSeePrivateComment(target, me, ownerId)) {
+      return res.status(403).json({ error: "Not allowed to access this comment" });
     }
 
     const canDelete =
