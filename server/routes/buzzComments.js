@@ -128,7 +128,7 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
 
     let parentComment = null;
 
-    if (parentId) {
+      if (parentId) {
       parentComment = post.comments.find(
         (comment) => String(comment?.id || "") === String(parentId)
       );
@@ -142,6 +142,10 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
       }
     }
 
+    const parentVisibleTo = Array.isArray(parentComment?.visibleTo)
+      ? parentComment.visibleTo.map(String).filter(Boolean)
+      : [];
+
     const comment = {
       id: shortid.generate(),
       userId: myId,
@@ -150,15 +154,18 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
       photoUrl: cleanImageUrl || null,
       mediaUrl: cleanImageUrl || null,
       attachmentUrl: cleanImageUrl || null,
+      attachmentUrl: cleanImageUrl || null,
       parentId: parentComment ? String(parentComment.id) : null,
       replyToCommentId: parentComment ? String(parentComment.id) : null,
       replyToUserId: parentComment ? String(parentComment.userId) : null,
-      createdAt: Date.now(),
+          createdAt: Date.now(),
       updatedAt: Date.now(),
-      // 🔒 PRIVATE:
-      // Normal comment: owner + commenter
-      // Reply: owner + replier + original comment author
-      visibleTo: ensurePrivateVisibleTo(post.userId, myId, [], [
+      // 🔒 PRIVATE THREAD:
+      // Normal comment: post owner + commenter.
+      // Reply: inherit the parent thread participants.
+      // This keeps Tom + Kylie in the same private thread forever,
+      // even if Tom replies to his own reply.
+      visibleTo: ensurePrivateVisibleTo(post.userId, myId, parentVisibleTo, [
         parentComment?.userId,
       ]),
       reactions: {},
@@ -305,12 +312,10 @@ router.get("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => {
 
         // ✅ permissions (for your 3-dot menu)
         canEdit: String(c.userId) === String(myId),
-        canDelete:
+              canDelete:
           String(c.userId) === String(myId) ||
           String(postOwnerId) === String(myId),
-        canReply:
-          String(postOwnerId) === String(myId) ||
-          String(c.userId) === String(myId),
+        canReply: isVisibleToViewer(c, myId, postOwnerId),
 
         isPostOwner: String(postOwnerId) === String(myId),
       };
