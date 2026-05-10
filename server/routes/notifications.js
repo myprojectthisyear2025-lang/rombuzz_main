@@ -15,36 +15,74 @@ router.get("/", authMiddleware, async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    const enrich = (n) => {
-      if (n.href?.startsWith("/")) return n;
+      const enrich = (n) => {
       const out = { ...n };
+
+      const legacyPostId = String(n.postId || n.entityId || "").trim();
+      const legacyOwnerId = String(n.postOwnerId || "").trim();
+
+      // Backfill exact routing fields for older notifications.
+      // New notifications should already have these from the comment/gift routes.
+      if (!out.targetId && legacyPostId) {
+        out.targetId = legacyPostId;
+      }
+
+      if (!out.targetOwnerId && legacyOwnerId) {
+        out.targetOwnerId = legacyOwnerId;
+      }
+
+      if (!out.targetType) {
+        if (n.entity === "gallery_media" || n.entity === "media") {
+          out.targetType = "gallery_media";
+        } else if (legacyPostId) {
+          out.targetType = "buzz_post";
+        }
+      }
+
+      // Keep existing valid hrefs, but still return the enriched routing fields above.
+      if (out.href?.startsWith("/")) return out;
 
       switch (n.type) {
         case "wingman":
           out.href = "/discover";
           break;
+
         case "match":
         case "buzz":
           out.href = `/viewprofile/${n.fromId}`;
           break;
+
         case "like":
         case "gift": {
-          const postId = n.postId || n.entityId;
-          if (postId) out.href = `/letsbuzz?post=${postId}`;
-          else if (n.fromId) out.href = `/viewprofile/${n.fromId}`;
+          const postId = out.targetId || legacyPostId;
+
+          if (postId) {
+            out.href = `/letsbuzz?post=${postId}`;
+          } else if (n.fromId) {
+            out.href = `/viewprofile/${n.fromId}`;
+          }
+
           break;
         }
+
         case "comment":
         case "new_post":
         case "share": {
-          const postId = n.postId || n.entityId;
-          if (postId) out.href = `/letsbuzz?post=${postId}`;
-          else if (n.fromId) out.href = `/viewprofile/${n.fromId}`;
+          const postId = out.targetId || legacyPostId;
+
+          if (postId) {
+            out.href = `/letsbuzz?post=${postId}`;
+          } else if (n.fromId) {
+            out.href = `/viewprofile/${n.fromId}`;
+          }
+
           break;
         }
+
         case "reaction":
           if (n.fromId) out.href = `/viewprofile/${n.fromId}`;
           break;
+
         default:
           out.href = "/notifications";
       }

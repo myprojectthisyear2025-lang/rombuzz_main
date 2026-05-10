@@ -164,38 +164,75 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
       reactions: {},
     };
 
-    post.comments.push(comment);
+      post.comments.push(comment);
     post.updatedAt = Date.now();
     await post.save();
 
-    // 🔔 Notify post owner (only if commenter != owner)
-    if (String(post.userId) !== String(myId)) {
-      const user = await User.findOne({ id: myId }).lean();
-      const commenterName = user?.firstName || "Someone";
+    // 🔔 Notify the correct private-thread recipient(s)
+    // Top-level comment:
+    //   Kylie comments on Tom's post -> notify Tom.
+    //
+    // Reply:
+    //   Tom replies inside Kylie's private thread -> notify Kylie.
+    //   Kylie replies back -> notify Tom.
+    //
+    // Never notify the sender.
+    const user = await User.findOne({ id: myId }).lean();
+    const commenterName = user?.firstName || "Someone";
 
-         const link = `/letsbuzz?post=${postId}`;
+    const previewText = cleanText
+      ? `"${cleanText.slice(0, 50)}${cleanText.length > 50 ? "..." : ""}"`
+      : "a photo";
 
-        const previewText = cleanText
-        ? `"${cleanText.slice(0, 50)}${cleanText.length > 50 ? "..." : ""}"`
-        : "a photo";
+    const visibleRecipients = Array.isArray(comment.visibleTo)
+      ? comment.visibleTo.map(String).filter(Boolean)
+      : [String(post.userId), String(myId)].filter(Boolean);
+
+    const notifyRecipients = parentComment
+      ? visibleRecipients.filter((id) => String(id) !== String(myId))
+      : String(post.userId) !== String(myId)
+      ? [String(post.userId)]
+      : [];
+
+    const uniqueNotifyRecipients = [...new Set(notifyRecipients.map(String))];
+
+    for (const toId of uniqueNotifyRecipients) {
+      const isReply = !!parentComment;
 
       const notif = {
         id: shortid.generate(),
-        toId: post.userId,
+        toId,
         fromId: myId,
         type: "comment",
-        message: `${commenterName} commented on your post: ${previewText}`,
-        href: link,
+        message: isReply
+          ? `${commenterName} replied in your comment thread: ${previewText}`
+          : `${commenterName} commented on your post: ${previewText}`,
+
+        // Keep href for older frontend/web fallback.
+        // Mobile will use targetType/targetId/targetOwnerId/commentId/replyId.
+        href: `/letsbuzz?post=${postId}`,
+
+        // Legacy fields
         postId,
         postOwnerId: post.userId,
+        entity: "buzz_post",
+        entityId: postId,
+
+        // Exact routing fields
+        targetType: "buzz_post",
+        targetId: postId,
+        targetOwnerId: post.userId,
+        commentId: parentComment ? String(parentComment.id) : String(comment.id),
+        replyId: parentComment ? String(comment.id) : "",
+        routeContext: parentComment ? "private_reply" : "private_comment",
+
         createdAt: Date.now(),
       };
-
 
       // If your sendNotification helper is reliable, use it; else fallback to model
       try {
         if (sendNotification) {
-          await sendNotification(post.userId, notif);
+          await sendNotification(toId, notif);
         } else {
           await Notification.create(notif);
         }
@@ -204,14 +241,21 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
       }
 
       // 🔥 Real-time navbar update
-      if (io) io.to(String(post.userId)).emit("notification", notif);
+      if (io) io.to(String(toId)).emit("notification", notif);
     }
 
-    // 📡 Real-time comment broadcast (ONLY owner + commenter)
+    // 📡 Real-time comment broadcast to every private participant
     if (io) {
-      io.to(String(myId)).emit("comment:new", { postId, comment });
-      if (String(post.userId) !== String(myId)) {
-        io.to(String(post.userId)).emit("comment:new", { postId, comment });
+      const broadcastRecipients = [...new Set([...visibleRecipients, String(myId)])];
+
+      for (const userId of broadcastRecipients) {
+        io.to(String(userId)).emit("comment:new", {
+          postId,
+          targetType: "buzz_post",
+          targetId: postId,
+          targetOwnerId: post.userId,
+          comment,
+        });
       }
     }
 

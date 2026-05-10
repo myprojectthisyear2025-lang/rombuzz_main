@@ -257,6 +257,10 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       }
     }
 
+     const parentVisibleTo = Array.isArray(parent?.visibleTo)
+      ? parent.visibleTo.map(String).filter(Boolean)
+      : [];
+
     const comment = {
       id: shortid.generate(),
       userId: me,
@@ -268,14 +272,16 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
 
-      // 🔒 PRIVATE:
+      // 🔒 PRIVATE THREAD:
       // Normal comment: media owner + commenter
-      // Reply: media owner + replier + original comment author
-      visibleTo: ensurePrivateVisibleTo(ownerId, me, [], [
+      // Reply: inherit the parent thread participants.
+      // This keeps Tom + Kylie in the same private thread forever,
+      // even if Tom replies to his own reply.
+      visibleTo: ensurePrivateVisibleTo(ownerId, me, parentVisibleTo, [
         parent?.userId,
       ]),
 
-         // reply support
+      // reply support
       parentId: parent ? String(parent.id) : null,
       replyToCommentId: parent ? String(parent.id) : null,
       replyToUserId: parent ? String(parent.userId) : null,
@@ -284,49 +290,82 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       reactions: {},
     };
 
-    media.comments.push(comment);
+      media.comments.push(comment);
 
     owner.markModified("media");
     await owner.save();
 
-      if (String(ownerId) !== String(me)) {
-      const commenter = await User.findOne({ id: me }).lean();
+    // 🔔 Notify the correct private-thread recipient(s)
+    // Top-level comment:
+    //   Kylie comments on Tom's media -> notify Tom.
+    //
+    // Reply:
+    //   Tom replies inside Kylie's private thread -> notify Kylie.
+    //   Kylie replies back -> notify Tom.
+    //
+    // Never notify the sender.
+    const commenter = await User.findOne({ id: me }).lean();
+    const commenterName = commenter?.firstName || "Someone";
+    const isReply = !!parent;
+    const actionText = cleanImageUrl && !cleanText ? "sent a photo comment" : "commented";
 
-      const isReply = !!parent;
-      const actionText = cleanImageUrl && !cleanText ? "sent a photo comment" : "commented";
+    const visibleRecipients = Array.isArray(comment.visibleTo)
+      ? comment.visibleTo.map(String).filter(Boolean)
+      : [String(ownerId), String(me)].filter(Boolean);
 
+    const notifyRecipients = isReply
+      ? visibleRecipients.filter((id) => String(id) !== String(me))
+      : String(ownerId) !== String(me)
+      ? [String(ownerId)]
+      : [];
+
+    const uniqueNotifyRecipients = [...new Set(notifyRecipients.map(String))];
+
+    for (const toId of uniqueNotifyRecipients) {
       try {
-        await sendNotification(ownerId, {
+        await sendNotification(toId, {
           fromId: me,
 
-          // ✅ Use safe existing notification enum.
-          // Your Notification model rejected "media_comment" / "media_reply".
+          // ✅ Keep safe existing enum from Notification model.
           type: "comment",
 
           message: isReply
-            ? `${commenter?.firstName || "Someone"} replied to a comment on your photo 💬`
-            : `${commenter?.firstName || "Someone"} ${actionText} on your photo 💬`,
-          entity: "media",
+            ? `${commenterName} replied in your media comment thread 💬`
+            : `${commenterName} ${actionText} on your photo 💬`,
+
+          // Legacy/fallback fields
+          href: `/letsbuzz?post=${mediaId}`,
+          entity: "gallery_media",
           entityId: mediaId,
+          postId: mediaId,
           postOwnerId: ownerId,
+
+          // Exact routing fields
+          targetType: "gallery_media",
+          targetId: mediaId,
+          targetOwnerId: ownerId,
+          commentId: parent ? String(parent.id) : String(comment.id),
+          replyId: parent ? String(comment.id) : "",
+          routeContext: parent ? "private_reply" : "private_comment",
         });
       } catch (notificationError) {
         console.error("⚠️ media comment notification failed:", notificationError);
       }
     }
 
-    const notifyUsers = [me, ownerId];
-    if (parent?.userId && String(parent.userId) !== String(ownerId)) {
-      notifyUsers.push(String(parent.userId));
-    }
+    const notifyUsers = [...new Set([...visibleRecipients, String(me)])];
 
     emitToUsers(notifyUsers, "comment:new", {
       postId: String(mediaId),
+      mediaId: String(mediaId),
       ownerId: String(ownerId),
+      targetType: "gallery_media",
+      targetId: String(mediaId),
+      targetOwnerId: String(ownerId),
       comment,
     });
 
-     return res.json({ ok: true, comment });
+    return res.json({ ok: true, comment });
   } catch (err) {
     console.error("❌ /media/:ownerId/comment error:", err);
     return res.status(500).json({ error: "Failed to comment" });

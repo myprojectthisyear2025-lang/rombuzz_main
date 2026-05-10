@@ -37,12 +37,26 @@ const notificationSchema = new mongoose.Schema(
 
       default: "system",
     },
-    message: { type: String, required: true },
+     message: { type: String, required: true },
     href: { type: String, default: "" },
+
+    // Legacy routing fields
     postId: { type: String, default: "" },
     postOwnerId: { type: String, default: "" },
     entity: { type: String, default: "" },
     entityId: { type: String, default: "" },
+
+    // Exact notification routing fields
+    // Used for comment/reply/gift navigation:
+    // - owner opens own profile/gallery/insights flow
+    // - non-owner opens LetsBuzz/detail flow
+    targetType: { type: String, default: "" }, // buzz_post | gallery_media | reel | post
+    targetId: { type: String, default: "" }, // post id / media id / reel id
+    targetOwnerId: { type: String, default: "" }, // owner of the target content
+    commentId: { type: String, default: "" }, // top-level private thread/comment id
+    replyId: { type: String, default: "" }, // exact reply id when notification is for reply
+    routeContext: { type: String, default: "" }, // private_comment | private_reply | gift | reaction
+
     read: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },
   },
