@@ -119,6 +119,14 @@ function canSeePrivateComment(comment, viewerId, ownerId) {
   return visibleTo.includes(String(viewerId || ""));
 }
 
+function buildReactionCounts(reactions = {}) {
+  const counts = {};
+  Object.values(reactions || {}).forEach((emoji) => {
+    counts[emoji] = (counts[emoji] || 0) + 1;
+  });
+  return counts;
+}
+
 // =======================================================
 // ✅ React / unreact to a media item (MongoDB)
 // =======================================================
@@ -267,10 +275,13 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
         parent?.userId,
       ]),
 
-      // reply support
+         // reply support
       parentId: parent ? String(parent.id) : null,
       replyToCommentId: parent ? String(parent.id) : null,
       replyToUserId: parent ? String(parent.userId) : null,
+
+      // ❤️ private comment hearts
+      reactions: {},
     };
 
     media.comments.push(comment);
@@ -315,10 +326,160 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       comment,
     });
 
-    return res.json({ ok: true, comment });
+     return res.json({ ok: true, comment });
   } catch (err) {
     console.error("❌ /media/:ownerId/comment error:", err);
     return res.status(500).json({ error: "Failed to comment" });
+  }
+});
+
+// =======================================================
+// ✅ Heart / unheart a media private comment
+//    - only users who can see the private comment can react
+//    - no notification for launch
+// =======================================================
+router.post("/media/:ownerId/comment/:commentId/react", authMiddleware, async (req, res) => {
+  try {
+    const me = String(req.user.id);
+    const { ownerId, commentId } = req.params;
+    const { mediaId, emoji = "❤️" } = req.body || {};
+
+    if (!mediaId) {
+      return res.status(400).json({ error: "mediaId required" });
+    }
+
+    const owner = await User.findOne({ id: ownerId });
+    if (!owner) {
+      return res.status(404).json({ error: "owner not found" });
+    }
+
+    const canComment = await canInteractWithOwnerMedia(me, ownerId);
+    if (!canComment) {
+      return res.status(403).json({ error: "Only matched users can react to comments on this media" });
+    }
+
+    const media = getMedia(owner, mediaId);
+    if (!media) {
+      return res.status(404).json({ error: "media not found" });
+    }
+
+    media.comments = media.comments || [];
+
+    const comment = getComment(media, commentId);
+    if (!comment) {
+      return res.status(404).json({ error: "comment not found" });
+    }
+
+    if (!canSeePrivateComment(comment, me, ownerId)) {
+      return res.status(403).json({ error: "Not allowed to react to this comment" });
+    }
+
+    if (!comment.reactions || typeof comment.reactions !== "object") {
+      comment.reactions = {};
+    }
+
+    comment.reactions[me] = emoji;
+    comment.updatedAt = Date.now();
+
+    comment.visibleTo = ensurePrivateVisibleTo(
+      ownerId,
+      comment.userId,
+      comment.visibleTo,
+      [comment.replyToUserId]
+    );
+
+    owner.markModified("media");
+    await owner.save();
+
+    const reactionCounts = buildReactionCounts(comment.reactions || {});
+    const notifyUsers = ensurePrivateVisibleTo(ownerId, comment.userId, comment.visibleTo);
+
+    emitToUsers(notifyUsers, "comment:react", {
+      postId: String(mediaId),
+      ownerId: String(ownerId),
+      commentId: String(commentId),
+      emoji,
+      myReaction: emoji,
+      reactionCounts,
+      totalReactions: Object.keys(comment.reactions || {}).length,
+    });
+
+    return res.json({
+      ok: true,
+      myReaction: emoji,
+      reactionCounts,
+      totalReactions: Object.keys(comment.reactions || {}).length,
+    });
+  } catch (err) {
+    console.error("❌ POST /media/:ownerId/comment/:commentId/react error:", err);
+    return res.status(500).json({ error: "Failed to react to comment" });
+  }
+});
+
+router.delete("/media/:ownerId/comment/:commentId/react", authMiddleware, async (req, res) => {
+  try {
+    const me = String(req.user.id);
+    const { ownerId, commentId } = req.params;
+    const { mediaId } = req.body || {};
+
+    if (!mediaId) {
+      return res.status(400).json({ error: "mediaId required" });
+    }
+
+    const owner = await User.findOne({ id: ownerId });
+    if (!owner) {
+      return res.status(404).json({ error: "owner not found" });
+    }
+
+    const canComment = await canInteractWithOwnerMedia(me, ownerId);
+    if (!canComment) {
+      return res.status(403).json({ error: "Only matched users can react to comments on this media" });
+    }
+
+    const media = getMedia(owner, mediaId);
+    if (!media) {
+      return res.status(404).json({ error: "media not found" });
+    }
+
+    media.comments = media.comments || [];
+
+    const comment = getComment(media, commentId);
+    if (!comment) {
+      return res.status(404).json({ error: "comment not found" });
+    }
+
+    if (!canSeePrivateComment(comment, me, ownerId)) {
+      return res.status(403).json({ error: "Not allowed to react to this comment" });
+    }
+
+    if (comment.reactions && comment.reactions[me]) {
+      delete comment.reactions[me];
+      comment.updatedAt = Date.now();
+
+      owner.markModified("media");
+      await owner.save();
+    }
+
+    const reactionCounts = buildReactionCounts(comment.reactions || {});
+    const notifyUsers = ensurePrivateVisibleTo(ownerId, comment.userId, comment.visibleTo);
+
+    emitToUsers(notifyUsers, "comment:reactRemoved", {
+      postId: String(mediaId),
+      ownerId: String(ownerId),
+      commentId: String(commentId),
+      reactionCounts,
+      totalReactions: Object.keys(comment.reactions || {}).length,
+    });
+
+    return res.json({
+      ok: true,
+      myReaction: null,
+      reactionCounts,
+      totalReactions: Object.keys(comment.reactions || {}).length,
+    });
+  } catch (err) {
+    console.error("❌ DELETE /media/:ownerId/comment/:commentId/react error:", err);
+    return res.status(500).json({ error: "Failed to remove comment reaction" });
   }
 });
 
