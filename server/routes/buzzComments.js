@@ -70,12 +70,20 @@ function isVisibleToViewer(comment, viewerId, postOwnerId) {
   return v.includes(String(viewerId));
 }
 
-function ensurePrivateVisibleTo(postOwnerId, commenterId, existing = []) {
+function ensurePrivateVisibleTo(postOwnerId, commenterId, existing = [], extraViewerIds = []) {
   const base = Array.isArray(existing) ? existing : [];
+  const extras = Array.isArray(extraViewerIds) ? extraViewerIds : [];
+
   const set = new Set(base.map(String));
+
   set.add(String(postOwnerId));
   set.add(String(commenterId));
-  return Array.from(set);
+
+  for (const id of extras) {
+    if (id) set.add(String(id));
+  }
+
+  return Array.from(set).filter(Boolean);
 }
 
 function buildReactionCounts(reactions = {}) {
@@ -93,28 +101,66 @@ function buildReactionCounts(reactions = {}) {
 router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => {
   try {
     const { postId } = req.params;
-    const { text, parentId = null } = req.body || {};
-    const myId = req.user.id;
+    const {
+      text = "",
+      parentId = null,
+      imageUrl = null,
+      photoUrl = null,
+      mediaUrl = null,
+      attachmentUrl = null,
+    } = req.body || {};
 
-    if (!text?.trim()) {
-      return res.status(400).json({ error: "Comment text required" });
+    const myId = req.user.id;
+    const cleanText = String(text || "").trim();
+    const cleanImageUrl = String(
+      imageUrl || photoUrl || mediaUrl || attachmentUrl || ""
+    ).trim();
+
+    if (!cleanText && !cleanImageUrl) {
+      return res.status(400).json({ error: "Comment text or photo required" });
     }
 
     const post = await findPostDocAny(postId);
     if (!post) return res.status(404).json({ error: "Post not found" });
 
-    // ✅ Ensure post.comments exists
+       // ✅ Ensure post.comments exists
     if (!Array.isArray(post.comments)) post.comments = [];
+
+    let parentComment = null;
+
+    if (parentId) {
+      parentComment = post.comments.find(
+        (comment) => String(comment?.id || "") === String(parentId)
+      );
+
+      if (!parentComment) {
+        return res.status(404).json({ error: "Parent comment not found" });
+      }
+
+      if (!isVisibleToViewer(parentComment, myId, post.userId)) {
+        return res.status(403).json({ error: "Not allowed to reply to this comment" });
+      }
+    }
 
     const comment = {
       id: shortid.generate(),
       userId: myId,
-      text: text.trim(),
-      parentId,
+      text: cleanText,
+      imageUrl: cleanImageUrl || null,
+      photoUrl: cleanImageUrl || null,
+      mediaUrl: cleanImageUrl || null,
+      attachmentUrl: cleanImageUrl || null,
+      parentId: parentComment ? String(parentComment.id) : null,
+      replyToCommentId: parentComment ? String(parentComment.id) : null,
+      replyToUserId: parentComment ? String(parentComment.userId) : null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      // 🔒 PRIVATE: only owner + commenter
-      visibleTo: [String(post.userId), String(myId)],
+      // 🔒 PRIVATE:
+      // Normal comment: owner + commenter
+      // Reply: owner + replier + original comment author
+      visibleTo: ensurePrivateVisibleTo(post.userId, myId, [], [
+        parentComment?.userId,
+      ]),
       reactions: {},
     };
 
@@ -129,14 +175,16 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
 
          const link = `/letsbuzz?post=${postId}`;
 
+        const previewText = cleanText
+        ? `"${cleanText.slice(0, 50)}${cleanText.length > 50 ? "..." : ""}"`
+        : "a photo";
+
       const notif = {
         id: shortid.generate(),
         toId: post.userId,
         fromId: myId,
         type: "comment",
-        message: `${commenterName} commented on your post: "${text.slice(0, 50)}${
-          text.length > 50 ? "..." : ""
-        }"`,
+        message: `${commenterName} commented on your post: ${previewText}`,
         href: link,
         postId,
         postOwnerId: post.userId,

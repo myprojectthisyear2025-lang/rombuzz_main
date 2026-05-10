@@ -97,12 +97,16 @@ async function canInteractWithOwnerMedia(viewerId, ownerId) {
 
   return !!match;
 }
-
-function ensurePrivateVisibleTo(ownerId, commenterId, existing = []) {
+function ensurePrivateVisibleTo(ownerId, commenterId, existing = [], extraViewerIds = []) {
   const set = new Set(Array.isArray(existing) ? existing.map(String) : []);
+  const extras = Array.isArray(extraViewerIds) ? extraViewerIds : [];
 
   set.add(String(ownerId || ""));
   set.add(String(commenterId || ""));
+
+  for (const id of extras) {
+    if (id) set.add(String(id));
+  }
 
   return Array.from(set).filter(Boolean);
 }
@@ -193,14 +197,24 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
   try {
     const me = String(req.user.id);
     const { ownerId } = req.params;
-    const { mediaId, text, parentId = null } = req.body || {};
+    const {
+      mediaId,
+      text = "",
+      parentId = null,
+      imageUrl = null,
+      photoUrl = null,
+      mediaUrl = null,
+      attachmentUrl = null,
+    } = req.body || {};
 
     const cleanText = String(text || "").trim();
+    const cleanImageUrl = String(
+      imageUrl || photoUrl || mediaUrl || attachmentUrl || ""
+    ).trim();
 
-    if (!mediaId || !cleanText) {
-      return res.status(400).json({ error: "mediaId & text required" });
+    if (!mediaId || (!cleanText && !cleanImageUrl)) {
+      return res.status(400).json({ error: "mediaId and text or photo required" });
     }
-
      const owner = await User.findOne({ id: ownerId });
     if (!owner) {
       return res.status(404).json({ error: "owner not found" });
@@ -230,16 +244,23 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       }
     }
 
-      const comment = {
+         const comment = {
       id: shortid.generate(),
       userId: me,
       text: cleanText,
+      imageUrl: cleanImageUrl || null,
+      photoUrl: cleanImageUrl || null,
+      mediaUrl: cleanImageUrl || null,
+      attachmentUrl: cleanImageUrl || null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
 
       // 🔒 PRIVATE:
-      // Only media owner + comment author can see this comment.
-      visibleTo: ensurePrivateVisibleTo(ownerId, me),
+      // Normal comment: media owner + commenter
+      // Reply: media owner + replier + original comment author
+      visibleTo: ensurePrivateVisibleTo(ownerId, me, [], [
+        parent?.userId,
+      ]),
 
       // reply support
       parentId: parent ? String(parent.id) : null,
@@ -255,17 +276,19 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
     if (String(ownerId) !== String(me)) {
       const commenter = await User.findOne({ id: me }).lean();
 
-      const isReply = !!parent;
+        const isReply = !!parent;
+      const actionText = cleanImageUrl && !cleanText ? "sent a photo comment" : "commented";
+
       await sendNotification(ownerId, {
         fromId: me,
         type: isReply ? "media_reply" : "media_comment",
         message: isReply
           ? `${commenter?.firstName || "Someone"} replied to a comment on your photo 💬`
-          : `${commenter?.firstName || "Someone"} commented on your photo 💬`,
+          : `${commenter?.firstName || "Someone"} ${actionText} on your photo 💬`,
         entity: "media",
         entityId: mediaId,
         postOwnerId: ownerId,
-      });
+      });y
     }
 
     const notifyUsers = [me, ownerId];
