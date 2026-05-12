@@ -30,6 +30,7 @@ const router = express.Router();
 const authMiddleware = require("../routes/auth-middleware");
 const User = require("../models/User");
 const Match = require("../models/Match");
+const Message = require("../models/Message");
 const VideoCallSession = require("../models/VideoCallSession");
 
 const { createRtcToken } = require("../services/agoraTokenService");
@@ -185,6 +186,106 @@ function emitCallEvent(call, eventName, extra = {}) {
 
   emitToUser(call.callerId, eventName, payload);
   emitToUser(call.receiverId, eventName, payload);
+}
+
+function calculateCallDurationSeconds(call) {
+  if (!call?.acceptedAt || !call?.endedAt) return 0;
+
+  const start = new Date(call.acceptedAt).getTime();
+  const end = new Date(call.endedAt).getTime();
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round((end - start) / 1000));
+}
+
+function getCallHistoryText(status, durationSeconds = 0) {
+  const safeStatus = String(status || "");
+
+  if (safeStatus === "missed") return "Missed video call";
+  if (safeStatus === "declined") return "Video call declined";
+  if (safeStatus === "canceled") return "Video call canceled";
+
+  if (safeStatus === "ended") {
+    if (durationSeconds > 0) {
+      const minutes = Math.floor(durationSeconds / 60);
+      const seconds = durationSeconds % 60;
+
+      if (minutes > 0) {
+        return `Video call ended · ${minutes}m ${seconds}s`;
+      }
+
+      return `Video call ended · ${seconds}s`;
+    }
+
+    return "Video call ended";
+  }
+
+  return "Video call";
+}
+
+async function createCallHistoryMessage(call, status) {
+  if (!call?.id) return null;
+
+  const safeStatus = String(status || call.status || "");
+  const allowed = ["ended", "missed", "declined", "canceled"];
+
+  if (!allowed.includes(safeStatus)) return null;
+
+  const existing = await Message.findOne({
+    type: "call",
+    callId: call.id,
+    callStatus: safeStatus,
+  }).lean();
+
+  if (existing) return existing;
+
+  const endedAt = call.endedAt || call.missedAt || call.declinedAt || call.canceledAt || new Date();
+  const durationSeconds = safeStatus === "ended" ? calculateCallDurationSeconds(call) : 0;
+
+  const msg = await Message.create({
+    id: `call_${shortid.generate()}`,
+    from: call.callerId,
+    to: call.receiverId,
+    text: getCallHistoryText(safeStatus, durationSeconds),
+    type: "call",
+    url: null,
+    ephemeral: "keep",
+    callId: call.id,
+    callType: "video",
+    callStatus: safeStatus,
+    callDurationSeconds: durationSeconds,
+    callStartedAt: call.acceptedAt || call.startedAt || null,
+    callEndedAt: endedAt,
+    callEndedBy: call.endedBy || "",
+    createdAt: endedAt,
+  });
+
+  const livePayload = {
+    id: msg.id,
+    roomId: [String(msg.from), String(msg.to)].sort().join("_"),
+    from: msg.from,
+    to: msg.to,
+    time: new Date(msg.createdAt).toISOString(),
+    preview: msg.text || "Video call",
+    type: "call",
+    callId: msg.callId,
+    callType: msg.callType,
+    callStatus: msg.callStatus,
+    callDurationSeconds: msg.callDurationSeconds,
+    callStartedAt: msg.callStartedAt,
+    callEndedAt: msg.callEndedAt,
+    callEndedBy: msg.callEndedBy,
+  };
+
+  emitToUser(msg.from, "message", msg);
+  emitToUser(msg.to, "message", msg);
+  emitToUser(msg.from, "direct:message", livePayload);
+  emitToUser(msg.to, "direct:message", livePayload);
+
+  return msg;
 }
 
 function createTokenForCall(call, userId) {
@@ -415,12 +516,14 @@ router.post("/:callId/accept", authMiddleware, async (req, res) => {
       });
     }
 
-    if (call.expiresAt && new Date(call.expiresAt).getTime() < Date.now()) {
+       if (call.expiresAt && new Date(call.expiresAt).getTime() < Date.now()) {
       call.status = "missed";
       call.missedAt = new Date();
       call.endedAt = new Date();
       call.lastReason = "ring_timeout";
       await call.save();
+
+      await createCallHistoryMessage(call, "missed");
 
       emitCallEvent(call, "video-call:missed");
 
@@ -478,12 +581,14 @@ router.post("/:callId/decline", authMiddleware, async (req, res) => {
       });
     }
 
-    call.status = "declined";
+      call.status = "declined";
     call.declinedAt = new Date();
     call.endedAt = new Date();
     call.endedBy = me;
     call.lastReason = "declined";
     await call.save();
+
+    await createCallHistoryMessage(call, "declined");
 
     emitCallEvent(call, "video-call:declined");
 
@@ -524,12 +629,14 @@ router.post("/:callId/cancel", authMiddleware, async (req, res) => {
       });
     }
 
-    call.status = "canceled";
+     call.status = "canceled";
     call.canceledAt = new Date();
     call.endedAt = new Date();
     call.endedBy = me;
     call.lastReason = "canceled";
     await call.save();
+
+    await createCallHistoryMessage(call, "canceled");
 
     emitCallEvent(call, "video-call:canceled");
 
@@ -567,11 +674,13 @@ router.post("/:callId/end", authMiddleware, async (req, res) => {
       });
     }
 
-    call.status = "ended";
+     call.status = "ended";
     call.endedAt = new Date();
     call.endedBy = me;
     call.lastReason = reason || "ended";
     await call.save();
+
+    await createCallHistoryMessage(call, "ended");
 
     emitCallEvent(call, "video-call:ended");
 

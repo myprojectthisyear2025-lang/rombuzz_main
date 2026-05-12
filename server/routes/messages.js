@@ -115,7 +115,7 @@ router.get("/", authMiddleware, async (req, res) => {
       .sort({ createdAt: 1 })
       .lean();
 
-    res.json({
+     res.json({
       messages: convo.map((m) => ({
         id: m.id,
         from: m.from,
@@ -124,6 +124,16 @@ router.get("/", authMiddleware, async (req, res) => {
         type: m.type || "text",
         url: m.url || null,
         ephemeral: m.ephemeral || "keep",
+
+        // 📹 Call-history message metadata
+        callId: m.callId || "",
+        callType: m.callType || "",
+        callStatus: m.callStatus || "",
+        callDurationSeconds: Number(m.callDurationSeconds || 0),
+        callStartedAt: m.callStartedAt || null,
+        callEndedAt: m.callEndedAt || null,
+        callEndedBy: m.callEndedBy || "",
+
         createdAt: m.createdAt,
       })),
     });
