@@ -201,6 +201,9 @@ app.use('/api', require('./routes/premium'));
 app.use('/api', require('./routes/chatRooms'));
 app.use('/api', require('./routes/meet'));
 
+// 🎥 1-to-1 VIDEO CALLS
+app.use('/api/video-calls', require('./routes/videoCalls'));
+
 // ðŸ§© DEBUG ROUTES
 app.use('/api', require('./routes/debug'));
 
