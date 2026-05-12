@@ -30,7 +30,7 @@ const router = express.Router();
 const authMiddleware = require("../routes/auth-middleware");
 const User = require("../models/User");
 const Match = require("../models/Match");
-const Message = require("../models/Message");
+const ChatRoom = require("../models/ChatRoom");
 const VideoCallSession = require("../models/VideoCallSession");
 
 const { createRtcToken } = require("../services/agoraTokenService");
@@ -146,23 +146,25 @@ async function requireMatchedPair(userA, userB) {
 async function markExpiredRingingCallsForUser(userId) {
   const now = new Date();
 
-  await VideoCallSession.updateMany(
-    {
-      participants: String(userId),
-      status: "ringing",
-      expiresAt: { $lte: now },
-    },
-    {
-      $set: {
-        status: "missed",
-        missedAt: now,
-        endedAt: now,
-        lastReason: "ring_timeout",
-      },
-    }
-  );
-}
+  const expiredCalls = await VideoCallSession.find({
+    participants: String(userId),
+    status: "ringing",
+    expiresAt: { $lte: now },
+  });
 
+  if (!expiredCalls.length) return;
+
+  for (const call of expiredCalls) {
+    call.status = "missed";
+    call.missedAt = now;
+    call.endedAt = now;
+    call.lastReason = "ring_timeout";
+    await call.save();
+
+    await createCallHistoryMessage(call, "missed");
+    emitCallEvent(call, "video-call:missed");
+  }
+}
 function emitToUser(userId, eventName, payload) {
   try {
     const io = getIO();
@@ -296,6 +298,174 @@ function createTokenForCall(call, userId) {
     userId: String(userId),
     ttlSeconds: TOKEN_TTL_SECONDS,
   });
+}
+
+function getCallDurationSeconds(call) {
+  const start = new Date(call?.acceptedAt || call?.startedAt || 0).getTime();
+  const end = new Date(
+    call?.endedAt ||
+      call?.declinedAt ||
+      call?.canceledAt ||
+      call?.missedAt ||
+      0
+  ).getTime();
+
+  if (!start || !end || end <= start) return 0;
+  return Math.max(1, Math.floor((end - start) / 1000));
+}
+
+function getCallPreviewText(status, durationSeconds = 0) {
+  const s = String(status || "").toLowerCase();
+
+  if (s === "missed") return "Missed call";
+  if (s === "declined") return "Declined call";
+  if (s === "canceled") return "Canceled call";
+
+  if (s === "ended") {
+    if (!durationSeconds) return "Video call";
+    const mins = Math.floor(durationSeconds / 60);
+    const secs = durationSeconds % 60;
+    if (mins <= 0) return `Video call • ${secs}s`;
+    return `Video call • ${mins}m ${String(secs).padStart(2, "0")}s`;
+  }
+
+  return "Video call";
+}
+
+async function getOrCreateChatRoom(roomId, participants) {
+  let room = await ChatRoom.findOne({ roomId });
+  if (room) return room;
+
+  room = await ChatRoom.create({
+    roomId,
+    participants: (participants || []).map((x) => String(x)),
+    messages: [],
+  });
+
+  return room;
+}
+
+async function createCallHistoryMessage(call, forcedStatus = "") {
+  if (!call?.roomId || !call?.callerId || !call?.receiverId) return null;
+
+  const status = String(forcedStatus || call.status || "").trim().toLowerCase();
+  if (!["ended", "missed", "declined", "canceled"].includes(status)) return null;
+
+  const room = await getOrCreateChatRoom(call.roomId, [
+    call.callerId,
+    call.receiverId,
+  ]);
+
+  const existing = (room.messages || []).find(
+    (m) =>
+      String(m?.callId || "") === String(call.id) &&
+      String(m?.callStatus || "").toLowerCase() === status
+  );
+
+  if (existing) {
+    return existing.toObject ? existing.toObject() : existing;
+  }
+
+  const durationSeconds = status === "ended" ? getCallDurationSeconds(call) : 0;
+  const eventTime =
+    call.endedAt ||
+    call.declinedAt ||
+    call.canceledAt ||
+    call.missedAt ||
+    new Date();
+
+  const msg = {
+    id: `call_${shortid.generate()}`,
+    from: String(call.callerId),
+    to: String(call.receiverId),
+    text: getCallPreviewText(status, durationSeconds),
+
+    type: "call",
+    url: null,
+    mediaType: null,
+    overlayText: "",
+
+    action: null,
+    callId: String(call.id),
+    callType: String(call.callType || "video"),
+    callStatus: status,
+    callDurationSeconds: durationSeconds,
+    callStartedAt: call.acceptedAt || call.startedAt || null,
+    callEndedAt:
+      call.endedAt || call.declinedAt || call.canceledAt || call.missedAt || null,
+    callEndedBy: String(call.endedBy || ""),
+
+    time: eventTime,
+    createdAt: eventTime,
+
+    edited: false,
+    deleted: false,
+    system: false,
+    reactions: {},
+    hiddenFor: [],
+
+    ephemeral: {
+      mode: "none",
+      viewsLeft: 0,
+    },
+
+    gift: {
+      locked: false,
+      stickerId: "sticker_basic",
+      amount: 0,
+      priceBC: 0,
+      currency: "BC",
+      unlockedBy: [],
+      unlockedAt: null,
+      unlockTransactionId: "",
+    },
+
+    replyTo: null,
+    pinned: false,
+    pinnedAt: null,
+    pinnedBy: null,
+    actorId: null,
+    actorName: null,
+    pinnedTargetId: null,
+  };
+
+  room.messages.push(msg);
+  room.updatedAt = new Date();
+  await room.save();
+
+  const saved = room.messages[room.messages.length - 1];
+  const savedMsg = saved?.toObject ? saved.toObject() : saved;
+
+  const io = getIO();
+
+  // room listeners
+  io.to(call.roomId).emit("chat:message", savedMsg);
+
+  // both users directly
+  emitToUser(call.callerId, "chat:message", savedMsg);
+  emitToUser(call.receiverId, "chat:message", savedMsg);
+
+  const previewPayload = {
+    id: savedMsg.id,
+    roomId: call.roomId,
+    from: savedMsg.from,
+    to: savedMsg.to,
+    time: savedMsg.time,
+    preview: savedMsg.text || "Video call",
+    type: "call",
+    callId: savedMsg.callId,
+    callType: savedMsg.callType,
+    callStatus: savedMsg.callStatus,
+    callDurationSeconds: savedMsg.callDurationSeconds,
+    callStartedAt: savedMsg.callStartedAt,
+    callEndedAt: savedMsg.callEndedAt,
+    callEndedBy: savedMsg.callEndedBy,
+  };
+
+  emitToUser(call.callerId, "direct:message", previewPayload);
+  emitToUser(call.receiverId, "direct:message", previewPayload);
+
+  return savedMsg;
 }
 
 // ============================================================
@@ -516,7 +686,7 @@ router.post("/:callId/accept", authMiddleware, async (req, res) => {
       });
     }
 
-       if (call.expiresAt && new Date(call.expiresAt).getTime() < Date.now()) {
+        if (call.expiresAt && new Date(call.expiresAt).getTime() < Date.now()) {
       call.status = "missed";
       call.missedAt = new Date();
       call.endedAt = new Date();
@@ -524,7 +694,6 @@ router.post("/:callId/accept", authMiddleware, async (req, res) => {
       await call.save();
 
       await createCallHistoryMessage(call, "missed");
-
       emitCallEvent(call, "video-call:missed");
 
       return res.status(410).json({
@@ -581,7 +750,7 @@ router.post("/:callId/decline", authMiddleware, async (req, res) => {
       });
     }
 
-      call.status = "declined";
+     call.status = "declined";
     call.declinedAt = new Date();
     call.endedAt = new Date();
     call.endedBy = me;
@@ -589,7 +758,6 @@ router.post("/:callId/decline", authMiddleware, async (req, res) => {
     await call.save();
 
     await createCallHistoryMessage(call, "declined");
-
     emitCallEvent(call, "video-call:declined");
 
     return res.json({
@@ -629,7 +797,7 @@ router.post("/:callId/cancel", authMiddleware, async (req, res) => {
       });
     }
 
-     call.status = "canceled";
+    call.status = "canceled";
     call.canceledAt = new Date();
     call.endedAt = new Date();
     call.endedBy = me;
@@ -637,7 +805,6 @@ router.post("/:callId/cancel", authMiddleware, async (req, res) => {
     await call.save();
 
     await createCallHistoryMessage(call, "canceled");
-
     emitCallEvent(call, "video-call:canceled");
 
     return res.json({
@@ -674,14 +841,13 @@ router.post("/:callId/end", authMiddleware, async (req, res) => {
       });
     }
 
-     call.status = "ended";
+      call.status = "ended";
     call.endedAt = new Date();
     call.endedBy = me;
     call.lastReason = reason || "ended";
     await call.save();
 
     await createCallHistoryMessage(call, "ended");
-
     emitCallEvent(call, "video-call:ended");
 
     return res.json({

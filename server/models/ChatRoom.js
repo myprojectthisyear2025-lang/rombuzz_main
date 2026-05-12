@@ -34,13 +34,27 @@ const messageSchema = new mongoose.Schema(
     to: { type: String, required: true },
       text: { type: String, default: "" },
 
-    // ✅ important: store media fields so realtime + refresh behave the same
+     // ✅ important: store media fields so realtime + refresh behave the same
     url: { type: String, default: null }, // cloudinary url for media
-mediaType: { type: String, enum: ["image", "video", "audio", null], default: null },
+    mediaType: { type: String, enum: ["image", "video", "audio", null], default: null },
     overlayText: { type: String, default: "" },
 
-    type: { type: String, enum: ["text", "media", "meetup", "system_pin"], default: "text" },
+    type: { type: String, enum: ["text", "media", "meetup", "system_pin", "call"], default: "text" },
     action: { type: String, enum: ["pin", "unpin", null], default: null },
+
+    // ✅ video/audio call history metadata
+    callId: { type: String, default: "" },
+    callType: { type: String, enum: ["video", "audio", ""], default: "" },
+    callStatus: {
+      type: String,
+      enum: ["", "ringing", "accepted", "declined", "canceled", "ended", "missed", "failed"],
+      default: "",
+    },
+    callDurationSeconds: { type: Number, default: 0 },
+    callStartedAt: { type: Date, default: null },
+    callEndedAt: { type: Date, default: null },
+    callEndedBy: { type: String, default: "" },
+
     time: { type: Date, default: Date.now },
     createdAt: { type: Date, default: Date.now },
 
