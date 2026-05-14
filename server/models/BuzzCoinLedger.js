@@ -20,16 +20,28 @@ const buzzCoinLedgerSchema = new mongoose.Schema(
 
     userId: { type: String, required: true, index: true },
 
-     type: {
+       type: {
       type: String,
       required: true,
       enum: [
         "credit",
         "debit",
         "refund",
+
+        // Existing gift / wallet flows
         "gift_send",
         "gift_receive",
         "premium_buzz_send",
+
+        // Video-call BuzzCoin gifting flows
+        "video_call_gift_send",
+        "video_call_gift_receive",
+        "video_call_request_create",
+        "video_call_request_accept",
+        "video_call_request_receive",
+        "video_call_request_reject",
+
+        // Withdrawal / admin / dev flows
         "withdrawal_request",
         "withdrawal_cancel",
         "admin_adjustment",

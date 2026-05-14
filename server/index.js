@@ -204,12 +204,14 @@ app.use('/api', require('./routes/meet'));
 // 🎥 1-to-1 VIDEO CALLS
 app.use('/api/video-calls', require('./routes/videoCalls'));
 
+// 🎥🎁 VIDEO CALL BUZZCOIN GIFTS + REQUESTS
+app.use('/api/video-call-gifts', require('./routes/videoCallGifts'));
+
 // ðŸ§© DEBUG ROUTES
 app.use('/api', require('./routes/debug'));
 
 // ðŸ§© ENHANCED LETSBUZZ POSTS SYSTEM
 app.use('/api', require('./routes/buzzPosts'));
-app.use('/api', require('./routes/buzzComments'));
 
 // 🎁 MODULAR GIFTS + BUZZCOIN SYSTEM
 app.use('/api/gifts', require('./routes/gifts'));

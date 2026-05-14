@@ -418,7 +418,7 @@ router.post("/start", authMiddleware, async (req, res) => {
       const token = createTokenForCall(existing, callerId);
 
       return res.status(409).json({
-        error: "active_call_exists",
+        error: "Call is already in progress",
         call: publicCall(existing),
         token,
       });
