@@ -34,6 +34,7 @@ const ChatRoom = require("../models/ChatRoom");
 const VideoCallSession = require("../models/VideoCallSession");
 
 const { createRtcToken } = require("../services/agoraTokenService");
+const { sendIncomingVideoCallPush } = require("../services/expoPushService");
 const { isBlocked } = require("../utils/helpers");
 
 // Same socket style used by chatRooms.js
@@ -396,12 +397,12 @@ router.post("/start", authMiddleware, async (req, res) => {
       return res.status(403).json({ error: "matched_users_only" });
     }
 
-    const [caller, receiver] = await Promise.all([
+       const [caller, receiver] = await Promise.all([
       User.findOne({ id: callerId })
         .select("id firstName lastName avatar profilePic photo")
         .lean(),
       User.findOne({ id: peerId })
-        .select("id firstName lastName avatar profilePic photo")
+        .select("id firstName lastName avatar profilePic photo pushTokens")
         .lean(),
     ]);
 
@@ -446,8 +447,17 @@ router.post("/start", authMiddleware, async (req, res) => {
 
     const callerToken = createTokenForCall(call, callerId);
 
-    emitToUser(peerId, "video-call:incoming", {
+       emitToUser(peerId, "video-call:incoming", {
       call: publicCall(call),
+    });
+
+    // ✅ Off-app / locked-phone fallback.
+    // Socket handles foreground calls. Push handles background / locked / killed app.
+    sendIncomingVideoCallPush({
+      receiver,
+      call,
+    }).catch((err) => {
+      console.error("❌ incoming video call push failed:", err);
     });
 
     emitToUser(callerId, "video-call:ringing", {
