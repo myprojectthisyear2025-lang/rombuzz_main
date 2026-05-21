@@ -24,6 +24,10 @@ const express = require("express");
 const router = express.Router();
 
 const authMiddleware = require("./auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 
 const {
   sendVideoCallBuzzCoinGift,
@@ -37,6 +41,26 @@ const {
 
 function getMe(req) {
   return String(req.user?.id || "");
+}
+
+async function enforceVideoCallAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "videoCall");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
+
+async function enforceGiftsAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "gifts");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
 }
 
 function sendRouteError(res, err) {
@@ -66,6 +90,9 @@ function getClientMetadata(req) {
 // ============================================================
 router.post("/send", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceVideoCallAllowed(req, res))) return;
+    if (!(await enforceGiftsAllowed(req, res))) return;
+
     const payload = await sendVideoCallBuzzCoinGift({
       senderId: getMe(req),
       callId: req.body?.callId,
@@ -89,6 +116,9 @@ router.post("/send", authMiddleware, async (req, res) => {
 // ============================================================
 router.post("/request", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceVideoCallAllowed(req, res))) return;
+    if (!(await enforceGiftsAllowed(req, res))) return;
+
     const payload = await createVideoCallBuzzCoinRequest({
       requesterId: getMe(req),
       callId: req.body?.callId,
@@ -112,6 +142,9 @@ router.post("/request", authMiddleware, async (req, res) => {
 // ============================================================
 router.post("/requests/:requestId/accept", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceVideoCallAllowed(req, res))) return;
+    if (!(await enforceGiftsAllowed(req, res))) return;
+
     const payload = await acceptVideoCallBuzzCoinRequest({
       receiverId: getMe(req),
       requestId: req.params.requestId,

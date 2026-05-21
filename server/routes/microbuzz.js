@@ -30,6 +30,10 @@ const multer = require("multer");
 const upload = multer({ dest: "uploads/" });
 const cloudinary = require("../config/cloudinary");
 const authMiddleware = require("../routes/auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 
 // ✅ Correct shared realtime state + socket access
 const { onlineUsers } = require("../models/state");
@@ -47,13 +51,23 @@ const MicroBuzzIgnore = require("../models/MicroBuzzIgnore");
 // 🔔 Notifications helper
 const { sendNotification } = require("../utils/helpers");
 
-
+async function enforceMicroBuzzAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "microbuzz");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
 
 /* ============================================================
    📸 SELFIE UPLOAD
 ============================================================ */
 router.post("/selfie", authMiddleware, upload.single("selfie"), async (req, res) => {
   try {
+    if (!(await enforceMicroBuzzAllowed(req, res))) return;
+
     if (!req.file) return res.status(400).json({ error: "No selfie provided" });
 
     const uploadResult = await cloudinary.uploader.upload(req.file.path, {
@@ -75,6 +89,8 @@ router.post("/selfie", authMiddleware, upload.single("selfie"), async (req, res)
 ============================================================ */
 router.post("/activate", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceMicroBuzzAllowed(req, res))) return;
+
     const { lat, lng, selfieUrl } = req.body || {};
     const latNum = parseFloat(lat);
     const lngNum = parseFloat(lng);
@@ -115,6 +131,8 @@ router.post("/activate", authMiddleware, async (req, res) => {
 ============================================================ */
 router.get("/nearby", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceMicroBuzzAllowed(req, res))) return;
+
     const lat = parseFloat(req.query.lat);
     const lng = parseFloat(req.query.lng);
     const userId = req.user.id;
@@ -240,6 +258,8 @@ router.post("/deactivate", authMiddleware, async (req, res) => {
 ============================================================ */
 router.post("/buzz", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceMicroBuzzAllowed(req, res))) return;
+
     // ✅ Socket.IO instance
     const io = getIO();
 const { toId, confirm } = req.body || {};

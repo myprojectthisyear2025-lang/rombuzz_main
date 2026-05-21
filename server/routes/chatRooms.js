@@ -24,6 +24,10 @@ const express = require("express");
 const router = express.Router();
 const shortid = require("shortid");
 const authMiddleware = require("../routes/auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 const ChatRoom = require("../models/ChatRoom");
 const MediaGift = require("../models/MediaGift");
 const User = require("../models/User");
@@ -242,14 +246,33 @@ function normalizeGiftUnlockPrice(value) {
   return Math.min(n, 10000);
 }
 
+async function enforceChatAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "chat");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
 
-// ============================================================
-// 💬 GET CHAT ROOM MESSAGES
-// ============================================================
+async function enforceGiftsAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "gifts");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
+
+
 router.get("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
   try {
     const { roomId } = req.params;
     const userId = req.user.id;
+
+    if (!(await enforceChatAllowed(req, res))) return;
 
     const room = await getRoomDoc(roomId);
     if (!room) return res.status(404).json({ error: "Room not found" });
@@ -280,6 +303,8 @@ router.post("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
     const { roomId } = req.params;
     const { text, replyTo } = req.body || {};
     if (!text) return res.status(400).json({ error: "text required" });
+
+    if (!(await enforceChatAllowed(req, res))) return;
 
     const { a, b } = getPeersFromRoomId(roomId);
     if (![a, b].includes(req.user.id))
@@ -446,6 +471,8 @@ router.patch("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => {
     const { text } = req.body || {};
     if (!text) return res.status(400).json({ error: "text required" });
 
+    if (!(await enforceChatAllowed(req, res))) return;
+
     const room = await getRoomDoc(roomId);
     const msg = (room.messages || []).find((m) => String(m.id) === String(msgId));
     if (!msg) return res.status(404).json({ error: "not_found" });
@@ -503,6 +530,8 @@ router.delete("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => 
   try {
     const { roomId, msgId } = req.params;
     const { scope = "me" } = req.query;
+
+    if (!(await enforceChatAllowed(req, res))) return;
 
     const room = await getRoomDoc(roomId);
     const msgIndex = room.messages.findIndex((m) => String(m.id) === String(msgId));
@@ -564,6 +593,9 @@ router.delete("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
   try {
     const { roomId } = req.params;
     const { scope = "me" } = req.query;
+
+    if (!(await enforceChatAllowed(req, res))) return;
+
     const room = await getRoomDoc(roomId);
 
     if (!room) return res.status(404).json({ error: "not found" });
@@ -589,6 +621,8 @@ router.post("/chat/rooms/:roomId/:msgId/react", authMiddleware, async (req, res)
     const { roomId, msgId } = req.params;
     const { emoji } = req.body || {};
     if (!emoji) return res.status(400).json({ error: "emoji required" });
+
+    if (!(await enforceChatAllowed(req, res))) return;
 
     const room = await getRoomDoc(roomId);
     const msg = room.messages.find((m) => m.id === msgId);
@@ -625,6 +659,8 @@ router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) =
   try {
     const { roomId, msgId } = req.params;
     const { pinned } = req.body || {};
+
+    if (!(await enforceChatAllowed(req, res))) return;
 
     const room = await getRoomDoc(roomId);
     const msg = room.messages.find((m) => String(m.id) === String(msgId));
@@ -731,6 +767,8 @@ router.post("/chat/rooms/:roomId/:msgId/viewed", authMiddleware, async (req, res
     const { roomId, msgId } = req.params;
     const me = String(req.user.id);
 
+    if (!(await enforceChatAllowed(req, res))) return;
+
     const room = await getRoomDoc(roomId);
     const idx = (room.messages || []).findIndex((m) => String(m.id) === String(msgId));
     if (idx === -1) return res.status(404).json({ error: "not_found" });
@@ -820,6 +858,9 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
   try {
     const { roomId, msgId } = req.params;
     const me = String(req.user.id);
+
+    if (!(await enforceChatAllowed(req, res))) return;
+    if (!(await enforceGiftsAllowed(req, res))) return;
 
     const room = await getRoomDoc(roomId);
     const participants = (room?.participants || []).map((x) => String(x));
@@ -1047,6 +1088,9 @@ async function computeUnreadSummaryForUser(userId) {
 router.get("/chat/unread-summary", authMiddleware, async (req, res) => {
   try {
     const me = String(req.user.id);
+
+    if (!(await enforceChatAllowed(req, res))) return;
+
     const summary = await computeUnreadSummaryForUser(me);
     return res.json(summary);
   } catch (err) {
@@ -1065,6 +1109,8 @@ router.post("/chat/mark-read", authMiddleware, async (req, res) => {
     const me = String(req.user.id);
     const { peerId } = req.body || {};
     if (!peerId) return res.status(400).json({ error: "peerId required" });
+
+    if (!(await enforceChatAllowed(req, res))) return;
 
     const rid = buildRoomId(me, peerId);
     const ridLegacy = legacyRoomId(me, peerId);
@@ -1105,6 +1151,8 @@ router.post("/chat/mark-all-read", authMiddleware, async (req, res) => {
     const me = String(req.user.id);
     const now = new Date();
 
+    if (!(await enforceChatAllowed(req, res))) return;
+
     const rooms = await ChatRoom.find({ participants: me }).lean(false);
 
     for (const room of rooms) {
@@ -1140,6 +1188,8 @@ router.post("/chat/rooms/:roomId/reply-suggestions", authMiddleware, async (req,
     const me = String(req.user.id);
     const { mode = "natural", count = 4 } = req.body || {};
 
+    if (!(await enforceChatAllowed(req, res))) return;
+
     const room = await getRoomDoc(roomId);
     const participants = (room?.participants || []).map((x) => String(x));
 
@@ -1174,6 +1224,9 @@ router.patch("/chat/rooms/:roomId/prefs", authMiddleware, async (req, res) => {
   try {
     const { roomId } = req.params;
     const me = String(req.user.id);
+
+    if (!(await enforceChatAllowed(req, res))) return;
+
     const room = await getRoomDoc(roomId);
 
     const participants = (room.participants || []).map((x) => String(x));
@@ -1229,6 +1282,9 @@ router.post("/chat/rooms/:roomId/unmatch", authMiddleware, async (req, res) => {
   try {
     const { roomId } = req.params;
     const me = String(req.user.id);
+
+    if (!(await enforceChatAllowed(req, res))) return;
+
     const room = await getRoomDoc(roomId);
 
     const participants = (room.participants || []).map((x) => String(x));

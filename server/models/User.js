@@ -83,7 +83,7 @@ const userSchema = new mongoose.Schema(
     profileComplete: { type: Boolean, default: false },
     hasOnboarded: { type: Boolean, default: false },
     lastActive: { type: Date, default: Date.now },
-    profileViews: {
+     profileViews: {
       total: { type: Number, default: 0 },
       today: { type: Number, default: 0 },
       lastViewDate: { type: String, default: "" },
@@ -92,6 +92,32 @@ const userSchema = new mongoose.Schema(
     isPremium: { type: Boolean, default: false },
     isVerified: { type: Boolean, default: false },
     blockedUsers: { type: [String], default: [] },
+
+    // ✅ Moderation controls used by reporting/admin system
+    moderation: {
+      status: {
+        type: String,
+        enum: ["clear", "warned", "suspended", "banned"],
+        default: "clear",
+      },
+      warningsCount: { type: Number, default: 0 },
+      lastWarningAt: { type: Date, default: null },
+      suspendedAt: { type: Date, default: null },
+      suspendedUntil: { type: Date, default: null },
+      bannedAt: { type: Date, default: null },
+      lastActionAt: { type: Date, default: null },
+      lastActionBy: { type: String, default: "" },
+      lastActionReason: { type: String, default: "" },
+      restrictions: {
+        chat: { type: Boolean, default: false },
+        videoCall: { type: Boolean, default: false },
+        gifts: { type: Boolean, default: false },
+        discover: { type: Boolean, default: false },
+        posting: { type: Boolean, default: false },
+        microbuzz: { type: Boolean, default: false },
+      },
+    },
+
     verificationCode: { type: String, default: "" },
     codeExpiresAt: { type: Date, default: null },
   },

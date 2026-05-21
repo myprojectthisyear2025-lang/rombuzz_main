@@ -32,15 +32,31 @@ const router = express.Router();
 const shortid = require("shortid");
 const { db } = require("../models/db.lowdb");
 const authMiddleware = require("./auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 const { baseSanitizeUser } = require("../utils/helpers");
 const PostModel = require("../models/PostModel"); // Mongo posts
 const User = require("../models/User");           // Mongo users (for user card on each post)
+
+async function enforcePostingAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "posting");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
 
 // =======================
 // ✅ Create a new post (MongoDB)
 // =======================
 router.post("/", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforcePostingAllowed(req, res))) return;
+
     const { text, mediaUrl, type } = req.body || {};
 
     // 🧩 Determine post type dynamically
@@ -326,6 +342,8 @@ router.get("/:postId/comments", authMiddleware, async (req, res) => {
 // ✅ Edit own comment
 router.patch("/:postId/comments/:commentId", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforcePostingAllowed(req, res))) return;
+
     const { postId, commentId } = req.params;
     const { text } = req.body || {};
     const myId = req.user.id;

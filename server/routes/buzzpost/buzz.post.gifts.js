@@ -26,6 +26,10 @@ const router = express.Router();
 const shortid = require("shortid");
 
 const authMiddleware = require("../auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../../utils/moderation");
 const Match = require("../../models/Match");
 const User = require("../../models/User");
 const PostModel = require("../../models/PostModel");
@@ -40,6 +44,16 @@ function getIO() {
 function getOnlineUsers() {
   global.onlineUsers ||= {};
   return global.onlineUsers;
+}
+
+async function enforceGiftsAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "gifts");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
 }
 
 async function assertMatched(a, b) {
@@ -60,6 +74,8 @@ router.post("/buzz/posts/:postId/gifts", authMiddleware, async (req, res) => {
   try {
     const me = String(req.user.id);
     const { postId } = req.params;
+
+    if (!(await enforceGiftsAllowed(req, res))) return;
 
     const requestedGiftId = String(req.body?.giftId || req.body?.giftKey || "").trim();
     const placement = normalizePostGiftPlacement(req.body?.placement);

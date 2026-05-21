@@ -29,7 +29,21 @@ const shortid = require("shortid");
 const { v2: cloudinary } = require("cloudinary");
 const upload = require("../config/multer");
 const authMiddleware = require("../routes/auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 const User = require("../models/User");
+
+async function enforcePostingAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "posting");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
 
 /* ============================================================
    🧩 1️⃣ AVATAR UPLOAD (Frontend URL)
@@ -128,6 +142,8 @@ router.post("/upload-avatar-facecrop", authMiddleware, upload.single("avatar"), 
 ============================================================ */
 router.post("/upload-media-file", authMiddleware, upload.single("file"), async (req, res) => {
   try {
+    if (!(await enforcePostingAllowed(req, res))) return;
+
     if (!req.file)
       return res.status(400).json({ error: "No file uploaded" });
 
@@ -171,6 +187,8 @@ router.post("/upload-media-file", authMiddleware, upload.single("file"), async (
 ============================================================ */
 router.post("/upload-media", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforcePostingAllowed(req, res))) return;
+
     const { fileUrl, type, caption } = req.body || {};
     if (!fileUrl)
       return res.status(400).json({ error: "fileUrl is required" });

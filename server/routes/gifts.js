@@ -28,6 +28,10 @@ const router = express.Router();
 const shortid = require("shortid");
 
 const authMiddleware = require("./auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 const User = require("../models/User");
 const GiftWithdrawalRequest = require("../models/GiftWithdrawalRequest");
 
@@ -50,6 +54,16 @@ const {
 
 function getMe(req) {
   return String(req.user?.id || "");
+}
+
+async function enforceGiftsAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "gifts");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
 }
 
 function isProduction() {
@@ -123,6 +137,8 @@ router.get("/ledger", authMiddleware, async (req, res) => {
 // =======================================================
 router.post("/wallet/dev-credit", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceGiftsAllowed(req, res))) return;
+
     if (isProduction() && !hasValidGiftTestSecret(req)) {
       return res.status(403).json({
         ok: false,
@@ -157,6 +173,8 @@ router.post("/wallet/dev-credit", authMiddleware, async (req, res) => {
 // =======================================================
 router.post("/send", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceGiftsAllowed(req, res))) return;
+
     const result = await sendGift({
       senderId: getMe(req),
       receiverId: req.body?.receiverId,
@@ -181,6 +199,8 @@ router.post("/send", authMiddleware, async (req, res) => {
 // =======================================================
 router.post("/validate", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceGiftsAllowed(req, res))) return;
+
     const result = validateGiftPurchase({
       giftId: req.body?.giftId,
       placement: req.body?.placement,
@@ -256,6 +276,8 @@ router.get("/summary", authMiddleware, async (req, res) => {
 // =======================================================
 router.post("/withdrawals/request", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceGiftsAllowed(req, res))) return;
+
     const me = getMe(req);
     const amountBC = Math.floor(Number(req.body?.amountBC) || 0);
 

@@ -22,13 +22,29 @@
 const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../../utils/moderation");
 const PostModel = require("../../models/PostModel");
+
+async function enforcePostingAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "posting");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
 
 // =======================================================
 // ✅ Edit a post (text or privacy)
 // =======================================================
 router.patch("/posts/:postId", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforcePostingAllowed(req, res))) return;
+
     const { postId } = req.params;
     const { text, privacy } = req.body || {};
     const myId = req.user.id;

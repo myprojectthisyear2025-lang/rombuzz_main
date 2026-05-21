@@ -28,6 +28,10 @@ const shortid = require("shortid");
 const router = express.Router();
 
 const authMiddleware = require("../routes/auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 const User = require("../models/User");
 const Match = require("../models/Match");
 const ChatRoom = require("../models/ChatRoom");
@@ -130,6 +134,16 @@ function ensureParticipant(call, userId) {
     const err = new Error("forbidden");
     err.statusCode = 403;
     throw err;
+  }
+}
+
+async function enforceVideoCallAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "videoCall");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
   }
 }
 
@@ -378,6 +392,8 @@ router.post("/start", authMiddleware, async (req, res) => {
     const callerId = String(req.user.id);
     const peerId = String(req.body?.peerId || req.body?.to || "").trim();
 
+    if (!(await enforceVideoCallAllowed(req, res))) return;
+
     if (!peerId) {
       return res.status(400).json({ error: "peerId required" });
     }
@@ -486,6 +502,8 @@ router.get("/active", authMiddleware, async (req, res) => {
   try {
     const me = String(req.user.id);
 
+    if (!(await enforceVideoCallAllowed(req, res))) return;
+
     await markExpiredRingingCallsForUser(me);
 
     const call = await VideoCallSession.findOne({
@@ -518,6 +536,8 @@ router.get("/:callId", authMiddleware, async (req, res) => {
     const me = String(req.user.id);
     const callId = String(req.params.callId || "");
 
+    if (!(await enforceVideoCallAllowed(req, res))) return;
+
     const call = await VideoCallSession.findOne({ id: callId });
     if (!call) return res.status(404).json({ error: "call_not_found" });
 
@@ -543,6 +563,8 @@ router.post("/:callId/token", authMiddleware, async (req, res) => {
   try {
     const me = String(req.user.id);
     const callId = String(req.params.callId || "");
+
+    if (!(await enforceVideoCallAllowed(req, res))) return;
 
     const call = await VideoCallSession.findOne({ id: callId });
     if (!call) return res.status(404).json({ error: "call_not_found" });
@@ -579,6 +601,8 @@ router.post("/:callId/accept", authMiddleware, async (req, res) => {
   try {
     const me = String(req.user.id);
     const callId = String(req.params.callId || "");
+
+    if (!(await enforceVideoCallAllowed(req, res))) return;
 
     const call = await VideoCallSession.findOne({ id: callId });
     if (!call) return res.status(404).json({ error: "call_not_found" });

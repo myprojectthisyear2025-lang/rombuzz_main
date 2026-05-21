@@ -31,12 +31,27 @@ const router = express.Router();
 const shortid = require("shortid");
 
 const authMiddleware = require("../auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../../utils/moderation");
 const User = require("../../models/User");
 const Match = require("../../models/Match");
 const { sendNotification } = require("../../utils/helpers");
 
+async function enforcePostingAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "posting");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
+
 function getIO() {
   const io = global.io;
+  if (io && typeof io.to === "function") return io;
   if (io && typeof io.to === "function") return io;
   return null;
 }
@@ -203,6 +218,8 @@ router.post("/media/:ownerId/react", authMiddleware, async (req, res) => {
 // =======================================================
 router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforcePostingAllowed(req, res))) return;
+
     const me = String(req.user.id);
     const { ownerId } = req.params;
     const {
@@ -529,6 +546,8 @@ router.delete("/media/:ownerId/comment/:commentId/react", authMiddleware, async 
 // =======================================================
 router.patch("/media/:ownerId/comment/:commentId", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforcePostingAllowed(req, res))) return;
+
     const me = String(req.user.id);
     const { ownerId, commentId } = req.params;
     const { mediaId, text } = req.body || {};

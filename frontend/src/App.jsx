@@ -42,6 +42,8 @@ import DeleteAccount from "./pages/settings/DeleteAccount";
 import Preferences from "./pages/settings/Preferences";
 import Signup from "./pages/Signup"; // ⬅️ Add this import near the top
 import Upgrade from "./pages/Upgrade";
+import AdminReports from "./pages/admin/AdminReports";
+import AdminReportDetail from "./pages/admin/AdminReportDetail";
 
 /*const API_BASE = "https://rombuzz-api.onrender.com/api";
 
@@ -265,6 +267,24 @@ useEffect(() => {
   element={
     <ProtectedRoute>
       <ViewProfile />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/admin/reports"
+  element={
+    <ProtectedRoute>
+      <AdminReports />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/admin/reports/:reportId"
+  element={
+    <ProtectedRoute>
+      <AdminReportDetail />
     </ProtectedRoute>
   }
 />

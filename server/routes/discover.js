@@ -40,6 +40,10 @@ const User = require("../models/User");
 const Relationship = require("../models/Relationship");
 const Match = require("../models/Match");
 const authMiddleware = require("../routes/auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 const { onlineUsers } = require("../models/state");
 
 const helpers = require("../utils/helpers");
@@ -76,11 +80,23 @@ const canUseRestricted =
         );
       };
 
+async function enforceDiscoverAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "discover");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
+
 /* ============================================================
    GET /api/discover
 ============================================================ */
 router.get("/", authMiddleware, async (req, res) => {
   try {
+    if (!(await enforceDiscoverAllowed(req, res))) return;
+
     /* ---------------------------
        1) Load current user
     --------------------------- */
@@ -210,12 +226,13 @@ router.get("/", authMiddleware, async (req, res) => {
       ...new Set([...likedIds, ...blockedIds, ...matchedIds, self.id]),
     ];
 
-    /* ---------------------------
+      /* ---------------------------
        4) Base Mongo query (no distance yet)
     --------------------------- */
       const baseQuery = {
       id: { $nin: excludeIds },
       visibility: { $ne: "invisible" },
+      "moderation.restrictions.discover": { $ne: true },
     };
 
     // Simple filters we can push into Mongo query

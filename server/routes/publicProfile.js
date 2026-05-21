@@ -146,6 +146,10 @@ function buildMatchedProfileMedia(target, viewerId, isMatched, isSelf) {
     });
 }
 
+function isDiscoverRestrictedUser(user = {}) {
+  return !!user?.moderation?.restrictions?.discover;
+}
+
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const viewerId = req.user.id;
@@ -183,6 +187,10 @@ const likedMe = await Relationship.exists({ from: targetId, to: viewerId, type: 
 
     // 4️⃣ Limited preview (not self or matched)
     if (viewerId !== targetId && !matched) {
+      if (isDiscoverRestrictedUser(target)) {
+        return res.status(404).json({ error: "User not available" });
+      }
+
       const preview = {
         id: target.id,
         firstName: target.firstName,

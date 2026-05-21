@@ -3,6 +3,10 @@ const router = express.Router();
 const shortid = require("shortid");
 const authMiddleware = require("../routes/auth-middleware");
 const { isBlocked, sendChatMessagePush } = require("../utils/helpers");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 const Message = require("../models/Message");
 const User = require("../models/User");
 const Match = require("../models/Match");
@@ -12,6 +16,12 @@ router.post("/", authMiddleware, async (req, res) => {
   try {
     const { to, text, type, url, ephemeral } = req.body || {};
     const from = req.user.id;
+
+    try {
+      await ensureFeatureAllowed(from, "chat");
+    } catch (err) {
+      return sendFeatureRestrictionError(res, err);
+    }
 
     if (!to) return res.status(400).json({ error: "recipient required" });
     if (!text && !url) {
@@ -90,6 +100,12 @@ router.get("/", authMiddleware, async (req, res) => {
   try {
     const { user1, user2 } = req.query;
     const self = req.user.id;
+
+    try {
+      await ensureFeatureAllowed(self, "chat");
+    } catch (err) {
+      return sendFeatureRestrictionError(res, err);
+    }
 
     if (!user1 || !user2) {
       return res.status(400).json({ error: "user1 & user2 required" });

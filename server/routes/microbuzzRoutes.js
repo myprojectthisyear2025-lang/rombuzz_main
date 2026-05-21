@@ -35,24 +35,20 @@ const express = require("express");
 const fs = require("fs");
 const multer = require("multer");
 const cloudinary = require("cloudinary").v2;
-const jwt = require("jsonwebtoken");
+const authMiddleware = require("../routes/auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 const MicroBuzzPresence = require("../models/MicroBuzzPresence");
 
-// =======================
-// 🔐 AUTH MIDDLEWARE
-// =======================
-const JWT_SECRET = process.env.JWT_SECRET || "rom_seed_dev_change_me";
-function authMiddleware(req, res, next) {
-  const h = req.headers.authorization;
-  if (!h || !h.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Missing token" });
-  }
+async function enforceMicroBuzzAllowed(req, res) {
   try {
-    const token = h.split(" ")[1];
-    req.user = jwt.verify(token, JWT_SECRET);
-    next();
-  } catch {
-    return res.status(401).json({ error: "Invalid token" });
+    await ensureFeatureAllowed(req.user.id, "microbuzz");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
   }
 }
 
@@ -67,11 +63,13 @@ const upload = multer({ dest: "uploads/" });
 function initMicroBuzzRoutes(io, onlineUsers) {
   const router = express.Router();
 
-  /* ======================
+    /* ======================
      📸 UPLOAD SELFIE
   ====================== */
   router.post("/selfie", authMiddleware, upload.single("selfie"), async (req, res) => {
     try {
+      if (!(await enforceMicroBuzzAllowed(req, res))) return;
+
       if (!req.file) return res.status(400).json({ error: "No selfie uploaded" });
 
       const result = await cloudinary.uploader.upload(req.file.path, {
@@ -100,11 +98,13 @@ function initMicroBuzzRoutes(io, onlineUsers) {
     }
   });
 
-  /* ======================
+   /* ======================
      ⚡ ACTIVATE PRESENCE
   ====================== */
   router.post("/activate", authMiddleware, express.json(), async (req, res) => {
     try {
+      if (!(await enforceMicroBuzzAllowed(req, res))) return;
+
       const { lat, lng, selfieUrl } = req.body;
       if (!lat || !lng || !selfieUrl)
         return res.status(400).json({ error: "Missing location or selfie" });
@@ -163,6 +163,8 @@ function initMicroBuzzRoutes(io, onlineUsers) {
   ====================== */
   router.get("/nearby", authMiddleware, async (req, res) => {
     try {
+      if (!(await enforceMicroBuzzAllowed(req, res))) return;
+
       const { lat, lng, radius = 0.2 } = req.query;
       const selfId = req.user.id;
 
@@ -205,10 +207,12 @@ function initMicroBuzzRoutes(io, onlineUsers) {
     }
   });
 
-  /* ======================
+   /* ======================
      🧪 DEBUG ENDPOINT
   ====================== */
   router.get("/selfies", authMiddleware, async (req, res) => {
+    if (!(await enforceMicroBuzzAllowed(req, res))) return;
+
     const all = await MicroBuzzPresence.find({}, "userId selfieUrl -_id").lean();
     res.json(all);
   });

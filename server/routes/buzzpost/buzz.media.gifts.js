@@ -24,17 +24,33 @@ const router = express.Router();
 const shortid = require("shortid");
 
 const authMiddleware = require("../auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../../utils/moderation");
 const User = require("../../models/User");
 const Match = require("../../models/Match");
 const MediaGift = require("../../models/MediaGift");
 const { sendNotification } = require("../../utils/helpers");
 const { validateGiftPurchase } = require("../../config/rombuzzGifts");
 
+async function enforceGiftsAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "gifts");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
+
 router.post("/media/:ownerId/gift", authMiddleware, async (req, res) => {
   try {
     const me = req.user.id;
     const { ownerId } = req.params;
     const { mediaId } = req.body || {};
+
+    if (!(await enforceGiftsAllowed(req, res))) return;
 
     const requestedGiftId = String(req.body?.giftId || req.body?.stickerId || "").trim();
     const placement = "profile_media";

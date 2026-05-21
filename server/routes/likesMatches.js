@@ -33,6 +33,10 @@
 const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../routes/auth-middleware");
+const {
+  ensureFeatureAllowed,
+  sendFeatureRestrictionError,
+} = require("../utils/moderation");
 const shortid = require("shortid");
 
 const User = require("../models/User");
@@ -65,6 +69,20 @@ function getOnlineUsers() {
   return global.onlineUsers;
 }
 
+async function enforceDiscoverAllowed(req, res) {
+  try {
+    await ensureFeatureAllowed(req.user.id, "discover");
+    return true;
+  } catch (err) {
+    sendFeatureRestrictionError(res, err);
+    return false;
+  }
+}
+
+function isDiscoverRestrictedUser(user = {}) {
+  return !!user?.moderation?.restrictions?.discover;
+}
+
 async function findUserByAnyId(userId) {
   const raw = String(userId || "").trim();
   if (!raw) return null;
@@ -91,9 +109,21 @@ router.post("/likes", authMiddleware, async (req, res) => {
     return res.status(403).json({ error: "likes disabled" });
 
   try {
+    if (!(await enforceDiscoverAllowed(req, res))) return;
+
     const { to } = req.body;
     if (!to) return res.status(400).json({ error: "to required" });
     const from = req.user.id;
+
+    const targetUser = await findUserByAnyId(to);
+    if (!targetUser) return res.status(404).json({ error: "target_not_found" });
+
+    if (isDiscoverRestrictedUser(targetUser)) {
+      return res.status(403).json({
+        error: "target_unavailable",
+        message: "This user is not available in Discover right now.",
+      });
+    }
 
     // ⭐ FIXED: make async
     if (await isBlocked(from, to))
@@ -114,11 +144,11 @@ router.post("/likes", authMiddleware, async (req, res) => {
     });
 
     // 💞 Check mutual like → MATCH
-    const mutual = await Relationship.findOne({ from: to, to: from, type: "like" });
-    const [self, other] = await Promise.all([
+      const mutual = await Relationship.findOne({ from: to, to: from, type: "like" });
+    const [self] = await Promise.all([
       findUserByAnyId(from),
-      findUserByAnyId(to),
     ]);
+    const other = targetUser;
 
   if (mutual) {
   const existsMatch = await Match.findOne({ users: { $all: [from, to] } });
@@ -286,6 +316,20 @@ router.post("/likes/respond", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "invalid_action" });
     }
 
+    if (!(await enforceDiscoverAllowed(req, res))) return;
+
+    const requesterUser = await findUserByAnyId(fromId);
+    if (!requesterUser) {
+      return res.status(404).json({ error: "requester_not_found" });
+    }
+
+    if (isDiscoverRestrictedUser(requesterUser)) {
+      return res.status(403).json({
+        error: "requester_unavailable",
+        message: "This user is not available in Discover right now.",
+      });
+    }
+
     // ✅ ACCEPT → create match, clean likes, notify both
     const existsMatch = await Match.findOne({ users: { $all: [fromId, toId] } });
     if (!existsMatch) {
@@ -304,11 +348,11 @@ router.post("/likes/respond", authMiddleware, async (req, res) => {
       ],
     });
 
-    // Load names for pretty messages
-    const [fromUser, toUser] = await Promise.all([
-      findUserByAnyId(fromId),
+      // Load names for pretty messages
+    const [toUser] = await Promise.all([
       findUserByAnyId(toId),
     ]);
+    const fromUser = requesterUser;
 
     const fromName =
       String(fromUser?.firstName || fromUser?.name || "").trim() || "Someone";
