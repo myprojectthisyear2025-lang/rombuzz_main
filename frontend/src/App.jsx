@@ -44,6 +44,8 @@ import Signup from "./pages/Signup"; // ⬅️ Add this import near the top
 import Upgrade from "./pages/Upgrade";
 import AdminReports from "./pages/admin/AdminReports";
 import AdminReportDetail from "./pages/admin/AdminReportDetail";
+import AdminSupport from "./pages/admin/AdminSupport";
+import AdminSupportDetail from "./pages/admin/AdminSupportDetail";
 
 /*const API_BASE = "https://rombuzz-api.onrender.com/api";
 
@@ -285,6 +287,24 @@ useEffect(() => {
   element={
     <ProtectedRoute>
       <AdminReportDetail />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/admin/support"
+  element={
+    <ProtectedRoute>
+      <AdminSupport />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/admin/support/:ticketId"
+  element={
+    <ProtectedRoute>
+      <AdminSupportDetail />
     </ProtectedRoute>
   }
 />
