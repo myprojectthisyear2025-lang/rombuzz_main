@@ -193,9 +193,12 @@ app.use('/api/messages', require('./routes/messages'));
 app.use('/api', require('./routes/likesMatches'));
 app.use('/api', require('./routes/safety'));
 
-// ðŸ§  AI WINGMAN & PREMIUM
+// ðŸ§  AI WINGMAN & PREMIUM
 app.use('/api', require('./routes/aiWingman'));
 app.use('/api', require('./routes/premium'));
+
+// 💘 CUPID SUPPORT
+app.use('/api/cupid-support', require('./routes/cupidSupport'));
 
 // ðŸ’¬ CHAT ROOMS & SAFE MEET
 app.use('/api', require('./routes/chatRooms'));

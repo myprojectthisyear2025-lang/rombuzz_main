@@ -131,7 +131,7 @@ module.exports = async function authMiddleware(req, res, next) {
       const until = getSuspensionUntil(user);
 
       return res.status(403).json({
-        error: "ACCOUNT_SUSPENDED",
+        error: "ACCOUNT SUSPENDED",
         message: until
           ? `This account is suspended until ${until.toISOString()}.`
           : "This account is suspended.",
