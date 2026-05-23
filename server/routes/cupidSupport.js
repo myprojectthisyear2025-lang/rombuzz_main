@@ -4,12 +4,15 @@
  * 🧩 Purpose: Cupid Support chat + support ticket backend.
  *
  * Endpoints:
+ *   POST  /api/cupid-support/chat
  *   POST  /api/cupid-support/tickets
  *   GET   /api/cupid-support/admin/tickets
  *   GET   /api/cupid-support/admin/tickets/:ticketId
  *   PATCH /api/cupid-support/admin/tickets/:ticketId
  *
  * Notes:
+ *   - Chat answers from ai/cupidKnowledge.js using local matching.
+ *   - If Cupid cannot answer, frontend should show ticket creation.
  *   - Ticket creation is user-protected.
  *   - Admin endpoints require ADMIN_EMAIL match.
  *   - Emails are sent through Resend if RESEND_API_KEY exists.
@@ -23,6 +26,10 @@ const { Resend } = require("resend");
 const authMiddleware = require("./auth-middleware");
 const User = require("../models/User");
 const SupportTicket = require("../models/SupportTicket");
+const {
+  findBestCupidAnswer,
+  getDefaultSuggestions,
+} = require("../ai/cupidSupportBrain");
 
 const router = express.Router();
 
@@ -36,6 +43,15 @@ const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 function cleanText(value, max = 1000) {
   return String(value || "").trim().slice(0, max);
+}
+
+function escapeHtml(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function normalizeTicketStatus(value) {
@@ -124,30 +140,40 @@ async function sendSupportTicketEmail(ticket) {
   }
 
   try {
+    const safeTicketId = escapeHtml(ticket.id);
+    const safeStatus = escapeHtml(ticket.status);
+    const safePriority = escapeHtml(ticket.priority);
+    const safeUserName = escapeHtml(ticket.userName || "Unknown");
+    const safeUserId = escapeHtml(ticket.userId || "Unknown");
+    const safeUserEmail = escapeHtml(ticket.userEmail || "Unknown");
+    const safeScreen = escapeHtml(ticket.screen || "Unknown");
+    const safeSubject = escapeHtml(ticket.subject);
+    const safeMessage = escapeHtml(ticket.message);
+
     const subject = `[RomBuzz Support] ${ticket.subject}`;
 
     const html = `
       <div style="font-family: Arial, sans-serif; line-height: 1.5;">
         <h2>New RomBuzz Cupid Support Ticket</h2>
 
-        <p><strong>Ticket ID:</strong> ${ticket.id}</p>
-        <p><strong>Status:</strong> ${ticket.status}</p>
-        <p><strong>Priority:</strong> ${ticket.priority}</p>
+        <p><strong>Ticket ID:</strong> ${safeTicketId}</p>
+        <p><strong>Status:</strong> ${safeStatus}</p>
+        <p><strong>Priority:</strong> ${safePriority}</p>
 
         <hr />
 
-        <p><strong>User:</strong> ${ticket.userName || "Unknown"}</p>
-        <p><strong>User ID:</strong> ${ticket.userId || "Unknown"}</p>
-        <p><strong>User Email:</strong> ${ticket.userEmail || "Unknown"}</p>
-        <p><strong>Screen:</strong> ${ticket.screen || "Unknown"}</p>
+        <p><strong>User:</strong> ${safeUserName}</p>
+        <p><strong>User ID:</strong> ${safeUserId}</p>
+        <p><strong>User Email:</strong> ${safeUserEmail}</p>
+        <p><strong>Screen:</strong> ${safeScreen}</p>
 
         <hr />
 
         <p><strong>Subject:</strong></p>
-        <p>${ticket.subject}</p>
+        <p>${safeSubject}</p>
 
         <p><strong>Message:</strong></p>
-        <p style="white-space: pre-wrap;">${ticket.message}</p>
+        <p style="white-space: pre-wrap;">${safeMessage}</p>
 
         <hr />
 
@@ -158,7 +184,7 @@ async function sendSupportTicketEmail(ticket) {
 
         <p>
           You can manually reply to the user at:
-          <a href="mailto:${ticket.userEmail}">${ticket.userEmail}</a>
+          <a href="mailto:${safeUserEmail}">${safeUserEmail}</a>
         </p>
       </div>
     `;
@@ -180,6 +206,51 @@ async function sendSupportTicketEmail(ticket) {
     };
   }
 }
+
+/**
+ * POST /api/cupid-support/chat
+ * Cupid answers using fed RomBuzz knowledge.
+ *
+ * Body:
+ * {
+ *   message: "How do I report someone?",
+ *   screen: "settings_help"
+ * }
+ */
+router.post("/chat", authMiddleware, async (req, res) => {
+  try {
+    const message = cleanText(req.body?.message, 800);
+    const screen = cleanText(req.body?.screen, 120);
+
+    if (!message) {
+      return res.status(400).json({
+        error: "message is required",
+      });
+    }
+
+    const result = findBestCupidAnswer(message);
+
+    return res.json({
+      success: true,
+      answered: result.answered,
+      reply: result.reply,
+      showTicketButton: result.showTicketButton,
+      confidence: result.confidence,
+      matchedTopic: result.matchedTopic,
+      suggestions: result.suggestions || getDefaultSuggestions(),
+      screen,
+    });
+  } catch (err) {
+    console.error("❌ POST /cupid-support/chat error:", err);
+    return res.status(500).json({
+      error: "Cupid Support failed to answer",
+      answered: false,
+      reply:
+        "I could not answer that right now. Please create a Cupid Support ticket and RomBuzz admin will help.",
+      showTicketButton: true,
+    });
+  }
+});
 
 /**
  * POST /api/cupid-support/tickets
