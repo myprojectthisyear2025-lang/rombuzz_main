@@ -36,6 +36,23 @@ const {
   completeSession,
 } = require("../services/meetMiddleService");
 
+/**
+ * GET /api/meet-middle/health
+ *
+ * Public route used only to confirm the new Meet in the Middle
+ * route is mounted correctly on Render.
+ */
+router.get("/health", (req, res) => {
+  return res.json({
+    success: true,
+    feature: "meet-middle",
+    provider: "geoapify",
+    storage: "mongodb",
+    status: "ok",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 function sendMeetError(res, err) {
   const statusCode = Number(err?.statusCode || 500);
 
