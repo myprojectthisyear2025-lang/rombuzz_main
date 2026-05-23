@@ -204,6 +204,9 @@ app.use('/api/cupid-support', require('./routes/cupidSupport'));
 app.use('/api', require('./routes/chatRooms'));
 app.use('/api', require('./routes/meet'));
 
+// 📍 MEET IN THE MIDDLE — NEW CLEAN MONGODB VERSION
+app.use('/api/meet-middle', require('./routes/meetMiddle'));
+
 // 🎥 1-to-1 VIDEO CALLS
 app.use('/api/video-calls', require('./routes/videoCalls'));
 
