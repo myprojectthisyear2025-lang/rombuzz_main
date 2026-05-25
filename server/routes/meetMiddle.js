@@ -80,8 +80,10 @@ router.get("/provider-health", (req, res) => {
  * Temporary Render-safe provider smoke test.
  * Calls Geoapify through backend using fixed public test coordinates.
  * Does not expose the API key.
+ *
+ * Protected so random public traffic cannot burn Geoapify quota.
  */
-router.get("/provider-smoke", async (req, res) => {
+router.get("/provider-smoke", authMiddleware, async (req, res) => {
   try {
     const midpoint = {
       lat: 32.8998,
