@@ -39,6 +39,10 @@ const {
   searchMeetPlacesWithRadiusExpansion,
 } = require("./geoapifyService");
 
+const {
+  enforceMeetMiddleRequestCooldown,
+} = require("./meetMiddleRateLimitService");
+
 const DEFAULT_SESSION_TTL_MINUTES = 45;
 
 function makePairKey(a, b) {
@@ -228,6 +232,11 @@ async function createMeetRequest({ fromId, toId }) {
     findUserOrThrow(peerId, "peer"),
     assertUsersAreMatched(requesterId, peerId),
   ]);
+
+  await enforceMeetMiddleRequestCooldown({
+    fromId: requesterId,
+    toId: peerId,
+  });
 
   let session = await getActiveSessionForPair(requesterId, peerId);
 

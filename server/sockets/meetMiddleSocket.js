@@ -112,6 +112,8 @@ function socketError(socket, eventName, err, extra = {}) {
     success: false,
     error: err?.code || "MEET_MIDDLE_SOCKET_ERROR",
     message: err?.message || "Meet in the Middle socket action failed",
+    retryInMs: Number(err?.retryInMs || 0),
+    sessionId: err?.sessionId || null,
     ...extra,
   });
 }
