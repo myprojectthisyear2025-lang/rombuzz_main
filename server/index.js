@@ -229,6 +229,7 @@ logSuccess('âœ… BuzzStreak routes initialized (match & daily check-in)');
 // ðŸ’“ HEALTH CHECK (modularized)
 // =======================
 app.use("/api", require("./modules/health"));
+
 // =====================================================
 // ðŸ¤– BACKGROUND MODULES
 // =====================================================
@@ -236,8 +237,14 @@ const { startAiWingmanTask } = require('./modules/aiWingmanTask');
 startAiWingmanTask();
 
 // ðŸ’ž Meet-in-Middle Sockets
+// Legacy Meet socket stays for now so old app code does not break.
 const { registerMeetSockets } = require('./sockets/meetSocket');
 registerMeetSockets(io);
+
+// 📍 Meet in the Middle — NEW CLEAN SOCKETS
+// Uses meetMiddle:* events only, so it does not conflict with old meet:* events.
+const { registerMeetMiddleSockets } = require('./sockets/meetMiddleSocket');
+registerMeetMiddleSockets(io);
 
 // ðŸ§¾ System Startup Summary
 const { logStartupSummary } = require('./modules/system');
