@@ -260,9 +260,9 @@ function getGeoapifyHealthStatus() {
     provider: "geoapify",
     configured: !!apiKey,
     hasApiKey: !!apiKey,
-    apiKeyPreview: apiKey
+    /*apiKeyPreview: apiKey
       ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`
-      : null,
+      : null,*/
     baseUrl,
     meetMiddle: {
       cacheTtlSeconds: Number(process.env.MEET_MIDDLE_CACHE_TTL_SECONDS || 600),

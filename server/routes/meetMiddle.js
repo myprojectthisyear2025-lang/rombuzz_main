@@ -38,6 +38,7 @@ const {
 
 const {
   getGeoapifyHealthStatus,
+  searchPlacesAroundPoint,
 } = require("../services/geoapifyService");
 
 /**
@@ -71,6 +72,41 @@ router.get("/provider-health", (req, res) => {
     geoapify: getGeoapifyHealthStatus(),
     timestamp: new Date().toISOString(),
   });
+});
+
+/**
+ * GET /api/meet-middle/provider-smoke
+ *
+ * Temporary Render-safe provider smoke test.
+ * Calls Geoapify through backend using fixed public test coordinates.
+ * Does not expose the API key.
+ */
+router.get("/provider-smoke", async (req, res) => {
+  try {
+    const midpoint = {
+      lat: 32.8998,
+      lng: -97.0403,
+    };
+
+    const places = await searchPlacesAroundPoint({
+      midpoint,
+      radiusMeters: 2000,
+      limit: 5,
+    });
+
+    return res.json({
+      success: true,
+      feature: "meet-middle",
+      provider: "geoapify",
+      midpoint,
+      radiusMeters: 2000,
+      count: places.length,
+      places,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    return sendMeetError(res, err);
+  }
 });
 
 function sendMeetError(res, err) {
