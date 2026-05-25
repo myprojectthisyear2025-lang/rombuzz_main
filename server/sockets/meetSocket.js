@@ -4,7 +4,7 @@
  * ⚡ Purpose: Manage realtime Meet-in-Middle & presence events
  *             through Socket.IO (location sharing, buzz popups,
  *             meet requests, and live status updates).
- *
+ * OLDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD version — see meetMiddleSocket.js for new clean MongoDB version.
  * Events:
  *   user:register / register         → Track active socket users
  *   meet:request / accept / decline  → Coordinate meet flow

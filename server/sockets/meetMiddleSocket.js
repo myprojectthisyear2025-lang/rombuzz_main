@@ -2,7 +2,7 @@
  * ============================================================
  * 📁 File: sockets/meetMiddleSocket.js
  * ⚡ Purpose: Clean realtime Socket.IO layer for RomBuzz
- *             Meet in the Middle.
+ *             Meet in the Middle. NEWWWWWWW
  *
  * Event namespace:
  *   meetMiddle:*
@@ -33,6 +33,10 @@ const {
   cancelSession,
   completeSession,
 } = require("../services/meetMiddleService");
+
+const {
+  createMeetMiddleSystemMessage,
+} = require("../services/meetMiddleChatService");
 
 function getOnlineUsers() {
   if (!global.onlineUsers) {
@@ -357,16 +361,49 @@ function registerMeetMiddleSockets(io) {
           throw err;
         }
 
-        const session = await acceptSelectedPlace({
+            const session = await acceptSelectedPlace({
           sessionId,
           userId,
         });
+
+        const otherUserId = getOtherUserId(session, userId);
+
+        let chatMessage = null;
+
+        if (otherUserId) {
+          try {
+            const chatResult = await createMeetMiddleSystemMessage({
+              fromId: userId,
+              toId: otherUserId,
+              session,
+            });
+
+            chatMessage = chatResult.message;
+
+            io.to(chatResult.roomId).emit("chat:message", chatResult.message);
+
+            session.users.forEach((id) => {
+              emitToUser(io, id, "direct:message", {
+                id: chatResult.message.id,
+                roomId: chatResult.roomId,
+                from: chatResult.message.from,
+                to: chatResult.message.to,
+                time: chatResult.message.time,
+                preview: String(chatResult.message.text || "").slice(0, 120),
+                type: chatResult.message.type || "meetup",
+              });
+            });
+          } catch (chatErr) {
+            console.error("❌ meetMiddle chat message create error:", chatErr);
+          }
+        }
 
         const payload = {
           success: true,
           session,
           place: session.selectedPlace,
           acceptedBy: userId,
+          chatMessage,
           createdAt: new Date().toISOString(),
         };
 
