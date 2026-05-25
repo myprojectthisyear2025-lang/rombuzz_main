@@ -36,6 +36,10 @@ const {
   completeSession,
 } = require("../services/meetMiddleService");
 
+const {
+  getGeoapifyHealthStatus,
+} = require("../services/geoapifyService");
+
 /**
  * GET /api/meet-middle/health
  *
@@ -49,6 +53,22 @@ router.get("/health", (req, res) => {
     provider: "geoapify",
     storage: "mongodb",
     status: "ok",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /api/meet-middle/provider-health
+ *
+ * Public Render-safe provider check.
+ * Does not expose the real Geoapify API key.
+ */
+router.get("/provider-health", (req, res) => {
+  return res.json({
+    success: true,
+    feature: "meet-middle",
+    storage: "mongodb",
+    geoapify: getGeoapifyHealthStatus(),
     timestamp: new Date().toISOString(),
   });
 });

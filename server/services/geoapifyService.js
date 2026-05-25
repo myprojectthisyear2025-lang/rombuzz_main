@@ -250,8 +250,34 @@ async function searchMeetPlacesWithRadiusExpansion({
   };
 }
 
+function getGeoapifyHealthStatus() {
+  const apiKey = String(process.env.GEOAPIFY_API_KEY || "").trim();
+  const baseUrl = String(
+    process.env.GEOAPIFY_BASE_URL || DEFAULT_GEOAPIFY_BASE_URL
+  ).replace(/\/+$/, "");
+
+  return {
+    provider: "geoapify",
+    configured: !!apiKey,
+    hasApiKey: !!apiKey,
+    apiKeyPreview: apiKey
+      ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`
+      : null,
+    baseUrl,
+    meetMiddle: {
+      cacheTtlSeconds: Number(process.env.MEET_MIDDLE_CACHE_TTL_SECONDS || 600),
+      defaultRadiusMeters: Number(process.env.MEET_MIDDLE_DEFAULT_RADIUS_METERS || 2000),
+      maxRadiusMeters: Number(process.env.MEET_MIDDLE_MAX_RADIUS_METERS || 32000),
+      maxResults: Number(process.env.MEET_MIDDLE_MAX_RESULTS || 20),
+      requestCooldownSeconds: Number(process.env.MEET_MIDDLE_REQUEST_COOLDOWN_SECONDS || 30),
+      sessionTtlMinutes: Number(process.env.MEET_MIDDLE_SESSION_TTL_MINUTES || 45),
+    },
+  };
+}
+
 module.exports = {
   DEFAULT_MEET_CATEGORIES,
+  getGeoapifyHealthStatus,
   searchPlacesAroundPoint,
   searchMeetPlacesWithRadiusExpansion,
 };
