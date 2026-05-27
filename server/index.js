@@ -200,9 +200,8 @@ app.use('/api', require('./routes/premium'));
 // 💘 CUPID SUPPORT
 app.use('/api/cupid-support', require('./routes/cupidSupport'));
 
-// ðŸ’¬ CHAT ROOMS & SAFE MEET
+// ðŸ’¬ CHAT ROOMS
 app.use('/api', require('./routes/chatRooms'));
-app.use('/api', require('./routes/meet'));
 
 // 📍 MEET IN THE MIDDLE — NEW CLEAN MONGODB VERSION
 app.use('/api/meet-middle', require('./routes/meetMiddle'));
@@ -236,10 +235,14 @@ app.use("/api", require("./modules/health"));
 const { startAiWingmanTask } = require('./modules/aiWingmanTask');
 startAiWingmanTask();
 
-// ðŸ’ž Meet-in-Middle Sockets
-// Legacy Meet socket stays for now so old app code does not break.
-const { registerMeetSockets } = require('./sockets/meetSocket');
-registerMeetSockets(io);
+// ðŸ’ž Legacy Meet-in-Middle Sockets
+// Optional only. The new mobile Meet in the Middle feature uses meetMiddle:* below.
+try {
+  const { registerMeetSockets } = require('./sockets/meetSocket');
+  registerMeetSockets(io);
+} catch (err) {
+  console.warn('⚠️ Legacy meetSocket skipped:', err?.message || err);
+}
 
 // 📍 Meet in the Middle — NEW CLEAN SOCKETS
 // Uses meetMiddle:* events only, so it does not conflict with old meet:* events.
