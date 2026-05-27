@@ -26,6 +26,8 @@ const User = require("../models/User");
 const {
   createMeetRequest,
   declineMeetRequest,
+  acceptMeetRequest,
+  expireMeetRequest,
   shareLocationAndBuildSuggestions,
   selectPlace,
   acceptSelectedPlace,
@@ -37,6 +39,11 @@ const {
 const {
   createMeetMiddleSystemMessage,
 } = require("../services/meetMiddleChatService");
+
+const {
+  createMeetRequestChatBubble,
+  updateMeetRequestChatBubble,
+} = require("../services/meetMiddleRequestChatService");
 
 function getOnlineUsers() {
   if (!global.onlineUsers) {
@@ -100,6 +107,93 @@ async function getPublicUserById(userId) {
   return getPublicUser(user || { id: userId });
 }
 
+function emitChatMessageToPair(io, roomId, message, users = []) {
+  if (!io || !roomId || !message?.id) return;
+
+  io.to(roomId).emit("chat:message", message);
+
+  users.map(String).filter(Boolean).forEach((id) => {
+    emitToUser(io, id, "direct:message", {
+      id: message.id,
+      roomId,
+      from: message.from,
+      to: message.to,
+      time: message.time,
+      preview: String(message.text || "").slice(0, 120),
+      type: message.type || "meet_middle_request",
+    });
+  });
+}
+
+function emitMeetRequestBubbleUpdate(io, roomId, message, users = []) {
+  if (!io || !roomId || !message?.id) return;
+
+  const payload = {
+    roomId,
+    message,
+    sessionId: message?.meetMiddleRequest?.sessionId || null,
+    status: message?.meetMiddleRequest?.status || null,
+    updatedAt: new Date().toISOString(),
+  };
+
+  io.to(roomId).emit("chat:meetMiddle:update", payload);
+
+  users.map(String).filter(Boolean).forEach((id) => {
+    emitToUser(io, id, "chat:meetMiddle:update", payload);
+    emitToUser(io, id, "direct:message", {
+      id: message.id,
+      roomId,
+      from: message.from,
+      to: message.to,
+      time: message.time,
+      preview: String(message.text || "").slice(0, 120),
+      type: message.type || "meet_middle_request",
+    });
+  });
+}
+
+function scheduleMeetRequestExpiry(io, session) {
+  const sessionId = String(session?.sessionId || "").trim();
+  const expiresAtMs = session?.expiresAt ? new Date(session.expiresAt).getTime() : 0;
+
+  if (!sessionId || !Number.isFinite(expiresAtMs)) return;
+
+  const delayMs = Math.max(0, expiresAtMs - Date.now());
+
+  setTimeout(async () => {
+    try {
+      const expiredSession = await expireMeetRequest({ sessionId });
+
+      if (!expiredSession || expiredSession.status !== "expired") return;
+
+      const updateResult = await updateMeetRequestChatBubble({
+        sessionId,
+        status: "expired",
+        actorId: "",
+      });
+
+      if (updateResult?.message && updateResult?.roomId) {
+        emitMeetRequestBubbleUpdate(
+          io,
+          updateResult.roomId,
+          updateResult.message,
+          expiredSession.users || []
+        );
+      }
+
+      (expiredSession.users || []).forEach((id) => {
+        emitToUser(io, id, "meetMiddle:expired", {
+          success: true,
+          session: expiredSession,
+          createdAt: new Date().toISOString(),
+        });
+      });
+    } catch (err) {
+      console.error("❌ meetMiddle request expiry failed:", err);
+    }
+  }, delayMs + 250);
+}
+
 function socketError(socket, eventName, err, extra = {}) {
   const statusCode = Number(err?.statusCode || 500);
 
@@ -158,19 +252,46 @@ function registerMeetMiddleSockets(io) {
           throw err;
         }
 
-        const result = await createMeetRequest({
+             const result = await createMeetRequest({
           fromId,
           toId,
         });
 
         const sender = await getPublicUserById(fromId);
+        const receiver = await getPublicUserById(toId);
+
+        let chatBubble = null;
+
+        try {
+          const bubbleResult = await createMeetRequestChatBubble({
+            fromId,
+            toId,
+            fromUser: sender,
+            toUser: receiver,
+            session: result.session,
+          });
+
+          chatBubble = bubbleResult.message;
+
+          emitChatMessageToPair(
+            io,
+            bubbleResult.roomId,
+            bubbleResult.message,
+            result.session?.users || [fromId, toId]
+          );
+        } catch (chatErr) {
+          console.error("❌ meetMiddle request chat bubble create error:", chatErr);
+        }
+
+        scheduleMeetRequestExpiry(io, result.session);
 
         const payload = {
           success: true,
           reused: !!result.reused,
           session: result.session,
           from: sender,
-          to: toId,
+          to: receiver,
+          chatMessage: chatBubble,
           createdAt: new Date().toISOString(),
         };
 
@@ -180,6 +301,8 @@ function registerMeetMiddleSockets(io) {
           success: true,
           session: result.session,
           from: sender,
+          to: receiver,
+          chatMessage: chatBubble,
           message: `${sender.name || "Someone"} wants to meet halfway 💞`,
           createdAt: payload.createdAt,
         });
@@ -258,6 +381,62 @@ function registerMeetMiddleSockets(io) {
       }
     });
 
+       /**
+     * Client emits:
+     * socket.emit("meetMiddle:accept", { sessionId })
+     *
+     * Receiver accepts the initial Meet in the Middle request.
+     * After this, location sharing can start.
+     */
+    socket.on("meetMiddle:accept", async ({ sessionId } = {}) => {
+      const eventName = "meetMiddle:accept";
+
+      try {
+        const userId = String(socket.userId || "").trim();
+
+        if (!userId) {
+          const err = new Error("Socket user is not registered");
+          err.code = "SOCKET_USER_NOT_REGISTERED";
+          err.statusCode = 401;
+          throw err;
+        }
+
+        const session = await acceptMeetRequest({
+          sessionId,
+          userId,
+        });
+
+        const updateResult = await updateMeetRequestChatBubble({
+          sessionId: session.sessionId,
+          status: "accepted",
+          actorId: userId,
+        });
+
+        if (updateResult?.message && updateResult?.roomId) {
+          emitMeetRequestBubbleUpdate(
+            io,
+            updateResult.roomId,
+            updateResult.message,
+            session.users || []
+          );
+        }
+
+        const payload = {
+          success: true,
+          session,
+          acceptedBy: userId,
+          chatMessage: updateResult?.message || null,
+          createdAt: new Date().toISOString(),
+        };
+
+        session.users.forEach((id) => {
+          emitToUser(io, id, "meetMiddle:accepted", payload);
+        });
+      } catch (err) {
+        socketError(socket, eventName, err);
+      }
+    });
+
     /**
      * Client emits:
      * socket.emit("meetMiddle:decline", { sessionId, reason })
@@ -283,11 +462,27 @@ function registerMeetMiddleSockets(io) {
 
         const otherUserId = getOtherUserId(session, userId);
 
+        const updateResult = await updateMeetRequestChatBubble({
+          sessionId: session.sessionId,
+          status: "rejected",
+          actorId: userId,
+        });
+
+        if (updateResult?.message && updateResult?.roomId) {
+          emitMeetRequestBubbleUpdate(
+            io,
+            updateResult.roomId,
+            updateResult.message,
+            session.users || []
+          );
+        }
+
         const payload = {
           success: true,
           session,
           declinedBy: userId,
           reason: session.declineReason || "",
+          chatMessage: updateResult?.message || null,
           createdAt: new Date().toISOString(),
         };
 
@@ -318,7 +513,7 @@ function registerMeetMiddleSockets(io) {
           throw err;
         }
 
-        const session = await selectPlace({
+             const session = await selectPlace({
           sessionId,
           userId,
           place,
@@ -471,15 +666,31 @@ function registerMeetMiddleSockets(io) {
           throw err;
         }
 
-        const session = await cancelSession({
+            const session = await cancelSession({
           sessionId,
           userId,
         });
+
+        const updateResult = await updateMeetRequestChatBubble({
+          sessionId: session.sessionId,
+          status: "cancelled",
+          actorId: userId,
+        });
+
+        if (updateResult?.message && updateResult?.roomId) {
+          emitMeetRequestBubbleUpdate(
+            io,
+            updateResult.roomId,
+            updateResult.message,
+            session.users || []
+          );
+        }
 
         const payload = {
           success: true,
           session,
           cancelledBy: userId,
+          chatMessage: updateResult?.message || null,
           createdAt: new Date().toISOString(),
         };
 

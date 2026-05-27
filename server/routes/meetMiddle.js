@@ -25,10 +25,13 @@ const router = express.Router();
 
 const authMiddleware = require("./auth-middleware");
 
+const User = require("../models/User");
+
 const {
   createMeetRequest,
   declineMeetRequest,
   acceptMeetRequest,
+  expireMeetRequest,
   shareLocationAndBuildSuggestions,
   selectPlace,
   acceptSelectedPlace,
@@ -36,6 +39,11 @@ const {
   cancelSession,
   completeSession,
 } = require("../services/meetMiddleService");
+
+const {
+  createMeetRequestChatBubble,
+  updateMeetRequestChatBubble,
+} = require("../services/meetMiddleRequestChatService");
 
 const {
   getGeoapifyHealthStatus,
@@ -126,6 +134,151 @@ function sendMeetError(res, err) {
   });
 }
 
+function getRouteIo(req) {
+  return req?.app?.get?.("io") || global.io || null;
+}
+
+function getOnlineUsers() {
+  if (!global.onlineUsers) {
+    global.onlineUsers = {};
+  }
+
+  return global.onlineUsers;
+}
+
+function emitToUser(io, userId, eventName, payload) {
+  const safeUserId = String(userId || "").trim();
+  if (!safeUserId || !io) return;
+
+  const onlineUsers = getOnlineUsers();
+  const socketId = onlineUsers[safeUserId];
+
+  if (socketId) {
+    io.to(String(socketId)).emit(eventName, payload);
+  }
+
+  io.to(safeUserId).emit(eventName, payload);
+}
+
+function emitChatMessageToPair(io, roomId, message, users = []) {
+  if (!io || !roomId || !message?.id) return;
+
+  io.to(roomId).emit("chat:message", message);
+
+  users.map(String).filter(Boolean).forEach((id) => {
+    emitToUser(io, id, "direct:message", {
+      id: message.id,
+      roomId,
+      from: message.from,
+      to: message.to,
+      time: message.time,
+      preview: String(message.text || "").slice(0, 120),
+      type: message.type || "meet_middle_request",
+    });
+  });
+}
+
+function emitMeetRequestBubbleUpdate(io, roomId, message, users = []) {
+  if (!io || !roomId || !message?.id) return;
+
+  const payload = {
+    roomId,
+    message,
+    sessionId: message?.meetMiddleRequest?.sessionId || null,
+    status: message?.meetMiddleRequest?.status || null,
+    updatedAt: new Date().toISOString(),
+  };
+
+  io.to(roomId).emit("chat:meetMiddle:update", payload);
+
+  users.map(String).filter(Boolean).forEach((id) => {
+    emitToUser(io, id, "chat:meetMiddle:update", payload);
+    emitToUser(io, id, "direct:message", {
+      id: message.id,
+      roomId,
+      from: message.from,
+      to: message.to,
+      time: message.time,
+      preview: String(message.text || "").slice(0, 120),
+      type: message.type || "meet_middle_request",
+    });
+  });
+}
+
+function getPublicUser(user = {}) {
+  return {
+    id: String(user.id || ""),
+    firstName: user.firstName || "",
+    lastName: user.lastName || "",
+    name:
+      String(user.firstName || user.name || "").trim() ||
+      "Someone",
+    avatar:
+      user.avatar ||
+      (Array.isArray(user.photos) && user.photos.length ? user.photos[0] : "") ||
+      "",
+  };
+}
+
+async function getPublicUserById(userId) {
+  const user = await User.findOne(
+    { id: String(userId) },
+    {
+      id: 1,
+      firstName: 1,
+      lastName: 1,
+      name: 1,
+      avatar: 1,
+      photos: 1,
+    }
+  ).lean();
+
+  return getPublicUser(user || { id: userId });
+}
+
+function scheduleMeetRequestExpiryFromRoute(req, session) {
+  const io = getRouteIo(req);
+  const sessionId = String(session?.sessionId || "").trim();
+  const expiresAtMs = session?.expiresAt ? new Date(session.expiresAt).getTime() : 0;
+
+  if (!sessionId || !Number.isFinite(expiresAtMs)) return;
+
+  const delayMs = Math.max(0, expiresAtMs - Date.now());
+
+  setTimeout(async () => {
+    try {
+      const expiredSession = await expireMeetRequest({ sessionId });
+
+      if (!expiredSession || expiredSession.status !== "expired") return;
+
+      const updateResult = await updateMeetRequestChatBubble({
+        sessionId,
+        status: "expired",
+        actorId: "",
+      });
+
+      if (updateResult?.message && updateResult?.roomId) {
+        emitMeetRequestBubbleUpdate(
+          io,
+          updateResult.roomId,
+          updateResult.message,
+          expiredSession.users || []
+        );
+      }
+
+      (expiredSession.users || []).forEach((id) => {
+        emitToUser(io, id, "meetMiddle:expired", {
+          success: true,
+          session: expiredSession,
+          createdAt: new Date().toISOString(),
+        });
+      });
+    } catch (err) {
+      console.error("❌ MeetMiddle route request expiry failed:", err);
+    }
+  }, delayMs + 250);
+}
+
 /**
  * POST /api/meet-middle/request
  *
@@ -147,15 +300,55 @@ router.post("/request", authMiddleware, async (req, res) => {
       });
     }
 
-    const result = await createMeetRequest({
+     const result = await createMeetRequest({
       fromId,
       toId,
+    });
+
+    const io = getRouteIo(req);
+    const sender = await getPublicUserById(fromId);
+    const receiver = await getPublicUserById(toId);
+
+    let chatBubble = null;
+
+    try {
+      const bubbleResult = await createMeetRequestChatBubble({
+        fromId,
+        toId,
+        fromUser: sender,
+        toUser: receiver,
+        session: result.session,
+      });
+
+      chatBubble = bubbleResult.message;
+
+      emitChatMessageToPair(
+        io,
+        bubbleResult.roomId,
+        bubbleResult.message,
+        result.session?.users || [fromId, toId]
+      );
+    } catch (chatErr) {
+      console.error("❌ MeetMiddle HTTP request chat bubble create error:", chatErr);
+    }
+
+    scheduleMeetRequestExpiryFromRoute(req, result.session);
+
+    emitToUser(io, toId, "meetMiddle:request:received", {
+      success: true,
+      session: result.session,
+      from: sender,
+      to: receiver,
+      chatMessage: chatBubble,
+      message: `${sender.name || "Someone"} wants to meet halfway 💞`,
+      createdAt: new Date().toISOString(),
     });
 
     return res.json({
       success: true,
       reused: !!result.reused,
       session: result.session,
+      chatMessage: chatBubble,
     });
   } catch (err) {
     return sendMeetError(res, err);
@@ -215,16 +408,43 @@ router.post("/:sessionId/location", authMiddleware, async (req, res) => {
  */
 router.post("/:sessionId/decline", authMiddleware, async (req, res) => {
   try {
-    const session = await declineMeetRequest({
+     const session = await declineMeetRequest({
       sessionId: String(req.params.sessionId || "").trim(),
       userId: String(req.user.id),
       reason: req.body?.reason || "",
     });
 
-    return res.json({
+    const io = getRouteIo(req);
+
+    const updateResult = await updateMeetRequestChatBubble({
+      sessionId: session.sessionId,
+      status: "rejected",
+      actorId: String(req.user.id),
+    });
+
+    if (updateResult?.message && updateResult?.roomId) {
+      emitMeetRequestBubbleUpdate(
+        io,
+        updateResult.roomId,
+        updateResult.message,
+        session.users || []
+      );
+    }
+
+    const payload = {
       success: true,
       session,
+      declinedBy: String(req.user.id),
+      reason: session.declineReason || "",
+      chatMessage: updateResult?.message || null,
+      createdAt: new Date().toISOString(),
+    };
+
+    session.users.forEach((id) => {
+      emitToUser(io, id, "meetMiddle:declined", payload);
     });
+
+    return res.json(payload);
   } catch (err) {
     return sendMeetError(res, err);
   }
@@ -243,10 +463,36 @@ router.post("/:sessionId/accept", authMiddleware, async (req, res) => {
       userId: String(req.user.id),
     });
 
-    return res.json({
+    const io = getRouteIo(req);
+
+    const updateResult = await updateMeetRequestChatBubble({
+      sessionId: session.sessionId,
+      status: "accepted",
+      actorId: String(req.user.id),
+    });
+
+    if (updateResult?.message && updateResult?.roomId) {
+      emitMeetRequestBubbleUpdate(
+        io,
+        updateResult.roomId,
+        updateResult.message,
+        session.users || []
+      );
+    }
+
+    const payload = {
       success: true,
       session,
+      acceptedBy: String(req.user.id),
+      chatMessage: updateResult?.message || null,
+      createdAt: new Date().toISOString(),
+    };
+
+    session.users.forEach((id) => {
+      emitToUser(io, id, "meetMiddle:accepted", payload);
     });
+
+    return res.json(payload);
   } catch (err) {
     return sendMeetError(res, err);
   }
@@ -330,20 +576,45 @@ router.post("/:sessionId/place/reject", authMiddleware, async (req, res) => {
  */
 router.post("/:sessionId/cancel", authMiddleware, async (req, res) => {
   try {
-    const session = await cancelSession({
+     const session = await cancelSession({
       sessionId: String(req.params.sessionId || "").trim(),
       userId: String(req.user.id),
     });
 
-    return res.json({
+    const io = getRouteIo(req);
+
+    const updateResult = await updateMeetRequestChatBubble({
+      sessionId: session.sessionId,
+      status: "cancelled",
+      actorId: String(req.user.id),
+    });
+
+    if (updateResult?.message && updateResult?.roomId) {
+      emitMeetRequestBubbleUpdate(
+        io,
+        updateResult.roomId,
+        updateResult.message,
+        session.users || []
+      );
+    }
+
+    const payload = {
       success: true,
       session,
+      cancelledBy: String(req.user.id),
+      chatMessage: updateResult?.message || null,
+      createdAt: new Date().toISOString(),
+    };
+
+    session.users.forEach((id) => {
+      emitToUser(io, id, "meetMiddle:cancelled", payload);
     });
+
+    return res.json(payload);
   } catch (err) {
     return sendMeetError(res, err);
   }
 });
-
 /**
  * POST /api/meet-middle/:sessionId/complete
  */
