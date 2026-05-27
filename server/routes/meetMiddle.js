@@ -28,6 +28,7 @@ const authMiddleware = require("./auth-middleware");
 const {
   createMeetRequest,
   declineMeetRequest,
+  acceptMeetRequest,
   shareLocationAndBuildSuggestions,
   selectPlace,
   acceptSelectedPlace,
@@ -218,6 +219,28 @@ router.post("/:sessionId/decline", authMiddleware, async (req, res) => {
       sessionId: String(req.params.sessionId || "").trim(),
       userId: String(req.user.id),
       reason: req.body?.reason || "",
+    });
+
+    return res.json({
+      success: true,
+      session,
+    });
+  } catch (err) {
+    return sendMeetError(res, err);
+  }
+});
+
+/**
+ * POST /api/meet-middle/:sessionId/accept
+ *
+ * Receiver accepts the initial Meet in the Middle request.
+ * Location sharing starts after this, not before.
+ */
+router.post("/:sessionId/accept", authMiddleware, async (req, res) => {
+  try {
+    const session = await acceptMeetRequest({
+      sessionId: String(req.params.sessionId || "").trim(),
+      userId: String(req.user.id),
     });
 
     return res.json({

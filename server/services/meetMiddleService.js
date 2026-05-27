@@ -44,6 +44,7 @@ const {
 } = require("./meetMiddleRateLimitService");
 
 const DEFAULT_SESSION_TTL_MINUTES = 45;
+const DEFAULT_REQUEST_TTL_SECONDS = 60;
 
 function makePairKey(a, b) {
   const userA = String(a || "").trim();
@@ -71,6 +72,13 @@ function getSessionExpiryDate() {
   const safeTtl = Number.isFinite(ttlMinutes) && ttlMinutes > 0 ? ttlMinutes : DEFAULT_SESSION_TTL_MINUTES;
 
   return new Date(Date.now() + safeTtl * 60 * 1000);
+}
+
+function getRequestExpiryDate() {
+  const ttlSeconds = Number(process.env.MEET_MIDDLE_REQUEST_TTL_SECONDS || DEFAULT_REQUEST_TTL_SECONDS);
+  const safeTtl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : DEFAULT_REQUEST_TTL_SECONDS;
+
+  return new Date(Date.now() + safeTtl * 1000);
 }
 
 function serializePlace(place = {}) {
@@ -245,7 +253,7 @@ async function createMeetRequest({ fromId, toId }) {
     session.peerId = peerId;
     session.status = "requested";
     session.lastActivityAt = new Date();
-    session.expiresAt = getSessionExpiryDate();
+    session.expiresAt = getRequestExpiryDate();
     await session.save();
 
     return {
@@ -263,7 +271,7 @@ async function createMeetRequest({ fromId, toId }) {
     status: "requested",
     coordsByUser: {},
     places: [],
-    expiresAt: getSessionExpiryDate(),
+    expiresAt: getRequestExpiryDate(),
     lastActivityAt: new Date(),
   });
 
@@ -288,6 +296,71 @@ async function declineMeetRequest({ sessionId, userId, reason = "" }) {
   session.status = "declined";
   session.declineReason = String(reason || "").slice(0, 200);
   session.lastActivityAt = new Date();
+  await session.save();
+
+  return serializeSession(session);
+}
+
+async function acceptMeetRequest({ sessionId, userId }) {
+  const session = await MeetMiddleSession.findOne({ sessionId });
+
+  if (!session) {
+    const err = new Error("Meet session not found");
+    err.code = "SESSION_NOT_FOUND";
+    err.statusCode = 404;
+    throw err;
+  }
+
+  await assertSessionParticipant(session, userId);
+
+  if (session.status !== "requested") {
+    const err = new Error("This meet request is no longer pending");
+    err.code = "REQUEST_NOT_PENDING";
+    err.statusCode = 409;
+    throw err;
+  }
+
+  if (session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now()) {
+    session.status = "expired";
+    session.lastActivityAt = new Date();
+    await session.save();
+
+    const err = new Error("This meet request expired");
+    err.code = "REQUEST_EXPIRED";
+    err.statusCode = 409;
+    throw err;
+  }
+
+  if (String(session.requestedBy) === String(userId)) {
+    const err = new Error("The other user must accept the meet request");
+    err.code = "REQUESTER_CANNOT_ACCEPT";
+    err.statusCode = 409;
+    throw err;
+  }
+
+  session.status = "accepted";
+  session.lastActivityAt = new Date();
+  session.expiresAt = getSessionExpiryDate();
+
+  await session.save();
+
+  return serializeSession(session);
+}
+
+async function expireMeetRequest({ sessionId }) {
+  const session = await MeetMiddleSession.findOne({ sessionId });
+
+  if (!session) {
+    return null;
+  }
+
+  if (session.status !== "requested") {
+    return serializeSession(session);
+  }
+
+  session.status = "expired";
+  session.lastActivityAt = new Date();
+
   await session.save();
 
   return serializeSession(session);
@@ -524,6 +597,8 @@ module.exports = {
   getActiveSessionForPair,
   createMeetRequest,
   declineMeetRequest,
+  acceptMeetRequest,
+  expireMeetRequest,
   shareLocationAndBuildSuggestions,
   selectPlace,
   acceptSelectedPlace,
