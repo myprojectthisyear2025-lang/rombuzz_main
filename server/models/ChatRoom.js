@@ -36,11 +36,44 @@ const messageSchema = new mongoose.Schema(
 
      // ✅ important: store media fields so realtime + refresh behave the same
     url: { type: String, default: null }, // cloudinary url for media
-    mediaType: { type: String, enum: ["image", "video", "audio", null], default: null },
+       mediaType: { type: String, enum: ["image", "video", "audio", null], default: null },
     overlayText: { type: String, default: "" },
 
-    type: { type: String, enum: ["text", "media", "meetup", "system_pin", "call"], default: "text" },
+    type: {
+      type: String,
+      enum: [
+        "text",
+        "media",
+        "meetup",
+        "meet_middle_request",
+        "system_pin",
+        "call",
+      ],
+      default: "text",
+    },
     action: { type: String, enum: ["pin", "unpin", null], default: null },
+
+    // ✅ Meet in the Middle request bubble metadata
+    meetMiddleRequest: {
+      type: {
+        type: String,
+        default: "",
+      },
+      sessionId: { type: String, default: "" },
+      status: {
+        type: String,
+        enum: ["", "pending", "accepted", "rejected", "declined", "cancelled", "canceled", "expired"],
+        default: "",
+      },
+      fromUserId: { type: String, default: "" },
+      toUserId: { type: String, default: "" },
+      fromName: { type: String, default: "" },
+      toName: { type: String, default: "" },
+      fromAvatar: { type: String, default: "" },
+      toAvatar: { type: String, default: "" },
+      createdAt: { type: Date, default: null },
+      expiresAt: { type: Date, default: null },
+    },
 
     // ✅ video/audio call history metadata
     callId: { type: String, default: "" },
