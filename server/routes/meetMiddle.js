@@ -32,6 +32,7 @@ const {
   declineMeetRequest,
   acceptMeetRequest,
   expireMeetRequest,
+  getMeetSessionById,
   shareLocationAndBuildSuggestions,
   selectPlace,
   acceptSelectedPlace,
@@ -355,7 +356,7 @@ router.post("/request", authMiddleware, async (req, res) => {
       createdAt: new Date().toISOString(),
     });
 
-     return res.json({
+      return res.json({
       success: true,
       ready: !!result.ready,
       session: result.session,
@@ -372,6 +373,30 @@ router.post("/request", authMiddleware, async (req, res) => {
         result.session?.approximateParticipants ||
         [],
       places: result.places || [],
+    });
+  } catch (err) {
+    return sendMeetError(res, err);
+  }
+});
+
+/**
+ * GET /api/meet-middle/:sessionId
+ *
+ * Protected resume route.
+ * Returns the latest privacy-safe session snapshot for a participant.
+ * This route does not expose exact user GPS.
+ */
+router.get("/:sessionId", authMiddleware, async (req, res) => {
+  try {
+    const session = await getMeetSessionById({
+      sessionId: String(req.params.sessionId || "").trim(),
+      userId: String(req.user.id),
+    });
+
+    return res.json({
+      success: true,
+      viewerId: String(req.user.id),
+      session,
     });
   } catch (err) {
     return sendMeetError(res, err);

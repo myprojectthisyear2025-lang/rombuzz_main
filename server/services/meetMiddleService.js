@@ -312,6 +312,42 @@ async function getActiveSessionForPair(userId, peerId) {
   return session;
 }
 
+async function getMeetSessionById({ sessionId, userId }) {
+  const cleanSessionId = String(sessionId || "").trim();
+
+  if (!cleanSessionId) {
+    const err = new Error("Session id is required");
+    err.code = "SESSION_ID_REQUIRED";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const session = await MeetMiddleSession.findOne({
+    sessionId: cleanSessionId,
+  });
+
+  if (!session) {
+    const err = new Error("Meet session not found");
+    err.code = "SESSION_NOT_FOUND";
+    err.statusCode = 404;
+    throw err;
+  }
+
+  await assertSessionParticipant(session, userId);
+
+  if (
+    session.expiresAt &&
+    new Date(session.expiresAt).getTime() <= Date.now() &&
+    !["confirmed", "completed", "cancelled", "declined", "expired"].includes(session.status)
+  ) {
+    session.status = "expired";
+    session.lastActivityAt = new Date();
+    await session.save();
+  }
+
+  return serializeSession(session);
+}
+
 async function createMeetRequest({ fromId, toId }) {
   const requesterId = String(fromId || "").trim();
   const peerId = String(toId || "").trim();
@@ -687,6 +723,7 @@ module.exports = {
   buildMidpointPlace,
   assertUsersAreMatched,
   getActiveSessionForPair,
+  getMeetSessionById,
   createMeetRequest,
   declineMeetRequest,
   acceptMeetRequest,
