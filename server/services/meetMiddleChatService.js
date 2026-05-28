@@ -89,7 +89,7 @@ function buildMeetupMessagePayload({ fromId, toId, session }) {
     reactions: {},
     hiddenFor: [],
     ephemeral: { mode: "none" },
-    meetMiddle: {
+       meetMiddle: {
       sessionId: String(session?.sessionId || ""),
       place: {
         id: String(place?.id || ""),
@@ -98,6 +98,10 @@ function buildMeetupMessagePayload({ fromId, toId, session }) {
         address: place?.address || null,
         coords: place?.coords || null,
         provider: place?.provider || "geoapify",
+        isMidpoint:
+          place?.isMidpoint === true ||
+          place?.provider === "rombuzz_midpoint" ||
+          String(place?.id || "").startsWith("midpoint:"),
       },
     },
   };

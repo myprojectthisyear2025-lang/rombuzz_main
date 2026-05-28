@@ -46,6 +46,10 @@ const {
 } = require("../services/meetMiddleRequestChatService");
 
 const {
+  createMeetMiddleSystemMessage,
+} = require("../services/meetMiddleChatService");
+
+const {
   getGeoapifyHealthStatus,
   searchPlacesAroundPoint,
 } = require("../services/geoapifyService");
@@ -111,8 +115,8 @@ router.get("/provider-smoke", authMiddleware, async (req, res) => {
       provider: "geoapify",
       midpoint,
       radiusMeters: 2000,
-      count: places.length,
       places,
+      count: Array.isArray(places) ? places.length : 0,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
@@ -144,6 +148,13 @@ function getOnlineUsers() {
   }
 
   return global.onlineUsers;
+}
+
+function getOtherUserId(session, userId) {
+  const safeUserId = String(userId || "").trim();
+  const users = Array.isArray(session?.users) ? session.users.map(String) : [];
+
+  return users.find((id) => id !== safeUserId) || null;
 }
 
 function emitToUser(io, userId, eventName, payload) {
@@ -344,11 +355,23 @@ router.post("/request", authMiddleware, async (req, res) => {
       createdAt: new Date().toISOString(),
     });
 
-    return res.json({
+     return res.json({
       success: true,
-      reused: !!result.reused,
+      ready: !!result.ready,
       session: result.session,
-      chatMessage: chatBubble,
+      midpoint: result.midpoint,
+      smartMidpoint: result.smartMidpoint,
+      midpointPlace: result.midpointPlace || result.session?.midpointPlace || null,
+      radiusUsedMeters: result.radiusUsedMeters,
+      radiusUsedMiles: result.radiusUsedMiles || result.session?.radiusUsedMiles || null,
+      radiusStepsTriedMeters: result.radiusStepsTriedMeters || [],
+      canExpandMore: !!result.canExpandMore,
+      placesSearchExhausted: !!result.placesSearchExhausted,
+      approximateParticipants:
+        result.approximateParticipants ||
+        result.session?.approximateParticipants ||
+        [],
+      places: result.places || [],
     });
   } catch (err) {
     return sendMeetError(res, err);
@@ -518,16 +541,34 @@ router.post("/:sessionId/accept", authMiddleware, async (req, res) => {
  */
 router.post("/:sessionId/place/select", authMiddleware, async (req, res) => {
   try {
+    const userId = String(req.user.id);
+
     const session = await selectPlace({
       sessionId: String(req.params.sessionId || "").trim(),
-      userId: String(req.user.id),
+      userId,
       place: req.body?.place,
     });
 
-    return res.json({
+    const io = getRouteIo(req);
+    const otherUserId = getOtherUserId(session, userId);
+    const selector = await getPublicUserById(userId);
+
+    const payload = {
       success: true,
       session,
-    });
+      selectedBy: selector,
+      place: session.selectedPlace,
+      message: `${selector.name || "Someone"} wants to meet at ${session.selectedPlace?.name || "this place"} 💞`,
+      createdAt: new Date().toISOString(),
+    };
+
+    emitToUser(io, userId, "meetMiddle:place:selected", payload);
+
+    if (otherUserId) {
+      emitToUser(io, otherUserId, "meetMiddle:place:confirmation-needed", payload);
+    }
+
+    return res.json(payload);
   } catch (err) {
     return sendMeetError(res, err);
   }
@@ -538,15 +579,62 @@ router.post("/:sessionId/place/select", authMiddleware, async (req, res) => {
  */
 router.post("/:sessionId/place/accept", authMiddleware, async (req, res) => {
   try {
+    const userId = String(req.user.id);
+
     const session = await acceptSelectedPlace({
       sessionId: String(req.params.sessionId || "").trim(),
-      userId: String(req.user.id),
+      userId,
     });
 
-    return res.json({
+    const io = getRouteIo(req);
+    const otherUserId = getOtherUserId(session, userId);
+
+    let chatMessage = null;
+
+    if (otherUserId) {
+      try {
+        const chatResult = await createMeetMiddleSystemMessage({
+          fromId: userId,
+          toId: otherUserId,
+          session,
+        });
+
+        chatMessage = chatResult.message;
+
+        if (chatResult?.roomId && chatResult?.message) {
+          io?.to(chatResult.roomId).emit("chat:message", chatResult.message);
+
+          session.users.forEach((id) => {
+            emitToUser(io, id, "direct:message", {
+              id: chatResult.message.id,
+              roomId: chatResult.roomId,
+              from: chatResult.message.from,
+              to: chatResult.message.to,
+              time: chatResult.message.time,
+              preview: String(chatResult.message.text || "").slice(0, 120),
+              type: chatResult.message.type || "meetup",
+            });
+          });
+        }
+      } catch (chatErr) {
+        console.error("❌ MeetMiddle HTTP confirmed chat message create error:", chatErr);
+      }
+    }
+
+    const payload = {
       success: true,
       session,
+      place: session.selectedPlace,
+      acceptedBy: userId,
+      chatMessage,
+      createdAt: new Date().toISOString(),
+    };
+
+    session.users.forEach((id) => {
+      emitToUser(io, id, "meetMiddle:final-confirmed", payload);
     });
+
+    return res.json(payload);
   } catch (err) {
     return sendMeetError(res, err);
   }
@@ -557,15 +645,27 @@ router.post("/:sessionId/place/accept", authMiddleware, async (req, res) => {
  */
 router.post("/:sessionId/place/reject", authMiddleware, async (req, res) => {
   try {
+    const userId = String(req.user.id);
+
     const session = await rejectSelectedPlace({
       sessionId: String(req.params.sessionId || "").trim(),
-      userId: String(req.user.id),
+      userId,
     });
 
-    return res.json({
+    const io = getRouteIo(req);
+
+    const payload = {
       success: true,
       session,
+      rejectedBy: userId,
+      createdAt: new Date().toISOString(),
+    };
+
+    session.users.forEach((id) => {
+      emitToUser(io, id, "meetMiddle:place:rejected", payload);
     });
+
+    return res.json(payload);
   } catch (err) {
     return sendMeetError(res, err);
   }

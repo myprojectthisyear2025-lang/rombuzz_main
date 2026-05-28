@@ -362,13 +362,22 @@ function registerMeetMiddleSockets(io) {
           return;
         }
 
-        const readyPayload = {
+           const readyPayload = {
           success: true,
           ready: true,
           session,
           midpoint: result.midpoint,
           smartMidpoint: result.smartMidpoint,
+          midpointPlace: result.midpointPlace || session?.midpointPlace || null,
           radiusUsedMeters: result.radiusUsedMeters,
+          radiusUsedMiles: result.radiusUsedMiles || session?.radiusUsedMiles || null,
+          radiusStepsTriedMeters: result.radiusStepsTriedMeters || [],
+          canExpandMore: !!result.canExpandMore,
+          placesSearchExhausted: !!result.placesSearchExhausted,
+          approximateParticipants:
+            result.approximateParticipants ||
+            session?.approximateParticipants ||
+            [],
           places: result.places,
           createdAt: new Date().toISOString(),
         };

@@ -130,6 +130,25 @@ function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+/**
+ * Returns a privacy-safe approximate coordinate for UI display.
+ *
+ * Important:
+ * - Use this only for map/avatar display.
+ * - Do NOT use this for midpoint math.
+ * - Exact GPS should stay only inside MeetMiddleSession.coordsByUser.
+ */
+function privacyApproxCoords(coords = {}, precision = 2) {
+  const point = assertValidCoords(coords, "privacy coordinate");
+  const safePrecision = Math.max(1, Math.min(3, Number(precision) || 2));
+
+  return {
+    lat: Number(point.lat.toFixed(safePrecision)),
+    lng: Number(point.lng.toFixed(safePrecision)),
+    approximate: true,
+  };
+}
+
 module.exports = {
   EARTH_RADIUS_METERS,
   toRadians,
@@ -144,4 +163,5 @@ module.exports = {
   distanceMeters,
   metersToMiles,
   clampNumber,
+  privacyApproxCoords,
 };

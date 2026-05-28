@@ -33,6 +33,9 @@ const MeetMiddleSession = require("../models/MeetMiddleSession");
 const {
   assertValidCoords,
   calculateMidpoint,
+  distanceMeters,
+  metersToMiles,
+  privacyApproxCoords,
 } = require("../utils/geo");
 
 const {
@@ -85,6 +88,7 @@ function serializePlace(place = {}) {
   if (!place || typeof place !== "object") return null;
 
   const coords = assertValidCoords(place.coords || {}, "place.coords");
+  const provider = String(place.provider || "geoapify");
 
   return {
     id: String(place.id || `${coords.lat},${coords.lng}`),
@@ -101,7 +105,82 @@ function serializePlace(place = {}) {
       place.distance === null || place.distance === undefined
         ? null
         : Number(place.distance),
-    provider: String(place.provider || "geoapify"),
+    provider,
+    isMidpoint:
+      place.isMidpoint === true ||
+      provider === "rombuzz_midpoint" ||
+      String(place.id || "").startsWith("midpoint:"),
+  };
+}
+
+function hasValidStoredCoords(coords = {}) {
+  return (
+    coords &&
+    Number.isFinite(Number(coords.lat)) &&
+    Number.isFinite(Number(coords.lng))
+  );
+}
+
+function normalizeStoredCoordsMap(rawCoords) {
+  const coordsByUser = {};
+
+  if (rawCoords instanceof Map) {
+    for (const [key, value] of rawCoords.entries()) {
+      if (hasValidStoredCoords(value)) {
+        coordsByUser[String(key)] = value;
+      }
+    }
+  } else if (rawCoords && typeof rawCoords === "object") {
+    Object.entries(rawCoords).forEach(([key, value]) => {
+      if (hasValidStoredCoords(value)) {
+        coordsByUser[String(key)] = value;
+      }
+    });
+  }
+
+  return coordsByUser;
+}
+
+function buildApproxParticipants(session = {}, coordsByUser = {}) {
+  const users = Array.isArray(session.users) ? session.users.map(String) : [];
+
+  return users.map((id) => {
+    const coords = coordsByUser[id];
+
+    if (!hasValidStoredCoords(coords)) {
+      return {
+        userId: id,
+        hasSharedLocation: false,
+        approxCoords: null,
+        sharedAt: null,
+      };
+    }
+
+    return {
+      userId: id,
+      hasSharedLocation: true,
+      approxCoords: privacyApproxCoords(coords),
+      sharedAt: coords.sharedAt || null,
+    };
+  });
+}
+
+function buildMidpointPlace(midpoint = null) {
+  if (!hasValidStoredCoords(midpoint)) return null;
+
+  const coords = assertValidCoords(midpoint, "midpoint");
+
+  return {
+    id: `midpoint:${coords.lat},${coords.lng}`,
+    name: "Meet at the exact midpoint",
+    category: "Midpoint",
+    address: "Calculated halfway point",
+    coords,
+    rating: null,
+    image: null,
+    distance: 0,
+    provider: "rombuzz_midpoint",
+    isMidpoint: true,
   };
 }
 
@@ -112,16 +191,9 @@ function serializeSession(sessionDoc) {
     ? sessionDoc.toObject()
     : sessionDoc;
 
-  const coordsByUser = {};
-  const rawCoords = session.coordsByUser;
-
-  if (rawCoords instanceof Map) {
-    for (const [key, value] of rawCoords.entries()) {
-      coordsByUser[key] = value;
-    }
-  } else if (rawCoords && typeof rawCoords === "object") {
-    Object.assign(coordsByUser, rawCoords);
-  }
+  const exactCoordsByUser = normalizeStoredCoordsMap(session.coordsByUser);
+  const approximateParticipants = buildApproxParticipants(session, exactCoordsByUser);
+  const midpointPlace = buildMidpointPlace(session.midpoint || null);
 
   return {
     sessionId: session.sessionId,
@@ -130,10 +202,20 @@ function serializeSession(sessionDoc) {
     requestedBy: session.requestedBy,
     peerId: session.peerId,
     status: session.status,
-    coordsByUser,
+
+    // IMPORTANT:
+    // Do NOT return coordsByUser here.
+    // Exact GPS stays server-side only inside MeetMiddleSession.coordsByUser.
+    approximateParticipants,
+    locationSharedBy: approximateParticipants
+      .filter((p) => p.hasSharedLocation)
+      .map((p) => p.userId),
+
     midpoint: session.midpoint || null,
     smartMidpoint: session.smartMidpoint || null,
+    midpointPlace,
     radiusUsedMeters: session.radiusUsedMeters || null,
+    radiusUsedMiles: session.radiusUsedMeters ? metersToMiles(session.radiusUsedMeters) : null,
     places: Array.isArray(session.places) ? session.places : [],
     selectedPlace: session.selectedPlace || null,
     selectedBy: session.selectedBy || null,
@@ -413,7 +495,8 @@ async function shareLocationAndBuildSuggestions({ sessionId, userId, coords }) {
     };
   }
 
-  const midpoint = calculateMidpoint(firstCoords, secondCoords);
+   const midpoint = calculateMidpoint(firstCoords, secondCoords);
+  const midpointPlace = buildMidpointPlace(midpoint);
 
   const suggestions = await searchMeetPlacesWithRadiusExpansion({
     midpoint,
@@ -428,13 +511,21 @@ async function shareLocationAndBuildSuggestions({ sessionId, userId, coords }) {
 
   await session.save();
 
+  const safeSession = serializeSession(session);
+
   return {
     ready: true,
-    session: serializeSession(session),
+    session: safeSession,
     midpoint,
     smartMidpoint: midpoint,
+    midpointPlace,
     radiusUsedMeters: suggestions.radiusUsedMeters,
+    radiusUsedMiles: metersToMiles(suggestions.radiusUsedMeters),
+    radiusStepsTriedMeters: suggestions.radiusStepsTriedMeters || [],
+    canExpandMore: !!suggestions.canExpandMore,
+    placesSearchExhausted: !!suggestions.placesSearchExhausted,
     places: suggestions.places,
+    approximateParticipants: safeSession.approximateParticipants,
   };
 }
 
@@ -593,6 +684,7 @@ async function completeSession({ sessionId, userId }) {
 module.exports = {
   makePairKey,
   serializeSession,
+  buildMidpointPlace,
   assertUsersAreMatched,
   getActiveSessionForPair,
   createMeetRequest,

@@ -206,16 +206,22 @@ async function searchMeetPlacesWithRadiusExpansion({
 }) {
   const safeMidpoint = assertValidCoords(midpoint, "midpoint");
 
-  const defaultRadius = Number(
-    process.env.MEET_MIDDLE_DEFAULT_RADIUS_METERS || 2000
-  );
+  // Product rule:
+  // 1 mile → 2 miles → 5 miles → 10 miles.
+  // If still empty, frontend can ask users whether to expand later.
+  const defaultRadiusSteps = [
+    1609,  // 1 mile
+    3219,  // 2 miles
+    8047,  // 5 miles
+    16093, // 10 miles
+  ];
 
-  const maxRadius = Number(process.env.MEET_MIDDLE_MAX_RADIUS_METERS || 32000);
+  const maxRadius = Number(process.env.MEET_MIDDLE_MAX_RADIUS_METERS || 16093);
 
   const radiusSteps =
     Array.isArray(radiusesMeters) && radiusesMeters.length
       ? radiusesMeters
-      : [defaultRadius, 8000, 16000, maxRadius];
+      : defaultRadiusSteps;
 
   const cleanRadiusSteps = [...new Set(
     radiusSteps
@@ -224,9 +230,12 @@ async function searchMeetPlacesWithRadiusExpansion({
   )].sort((a, b) => a - b);
 
   let lastPlaces = [];
-  let lastRadiusUsed = cleanRadiusSteps[0] || defaultRadius;
+  let lastRadiusUsed = cleanRadiusSteps[0] || defaultRadiusSteps[0];
+  const radiusStepsTriedMeters = [];
 
   for (const radius of cleanRadiusSteps) {
+    radiusStepsTriedMeters.push(radius);
+
     const places = await searchPlacesAroundPoint({
       midpoint: safeMidpoint,
       radiusMeters: radius,
@@ -242,10 +251,18 @@ async function searchMeetPlacesWithRadiusExpansion({
     }
   }
 
+  const largestConfiguredRadius =
+    cleanRadiusSteps.length > 0
+      ? cleanRadiusSteps[cleanRadiusSteps.length - 1]
+      : defaultRadiusSteps[defaultRadiusSteps.length - 1];
+
   return {
     provider: "geoapify",
     midpoint: safeMidpoint,
     radiusUsedMeters: lastRadiusUsed,
+    radiusStepsTriedMeters,
+    canExpandMore: lastPlaces.length === 0 && lastRadiusUsed >= largestConfiguredRadius,
+    placesSearchExhausted: lastPlaces.length === 0,
     places: lastPlaces,
   };
 }
