@@ -47,7 +47,9 @@ const {
 } = require("../services/meetMiddleRequestChatService");
 
 const {
+  MEET_MIDDLE_STATUSES,
   createMeetMiddleSystemMessage,
+  createOrUpdateMeetMiddleMilestoneMessage,
 } = require("../services/meetMiddleChatService");
 
 const {
@@ -213,6 +215,34 @@ function emitMeetRequestBubbleUpdate(io, roomId, message, users = []) {
       time: message.time,
       preview: String(message.text || "").slice(0, 120),
       type: message.type || "meet_middle_request",
+    });
+  });
+}
+
+function emitMeetMiddleMilestoneUpdate(io, roomId, message, users = []) {
+  if (!io || !roomId || !message?.id) return;
+
+  const payload = {
+    roomId,
+    message,
+    sessionId: message?.meetMiddle?.sessionId || null,
+    status: message?.meetMiddle?.status || null,
+    updatedAt: new Date().toISOString(),
+  };
+
+  io.to(roomId).emit("chat:message", message);
+  io.to(roomId).emit("chat:meetMiddle:update", payload);
+
+  users.map(String).filter(Boolean).forEach((id) => {
+    emitToUser(io, id, "chat:meetMiddle:update", payload);
+    emitToUser(io, id, "direct:message", {
+      id: message.id,
+      roomId,
+      from: message.from,
+      to: message.to,
+      time: message.time,
+      preview: String(message.text || "").slice(0, 120),
+      type: message.type || "meetup",
     });
   });
 }
@@ -578,11 +608,39 @@ router.post("/:sessionId/place/select", authMiddleware, async (req, res) => {
     const otherUserId = getOtherUserId(session, userId);
     const selector = await getPublicUserById(userId);
 
+    let chatMessage = null;
+
+    if (otherUserId) {
+      try {
+        const chatResult = await createOrUpdateMeetMiddleMilestoneMessage({
+          fromId: userId,
+          toId: otherUserId,
+          session,
+          status: MEET_MIDDLE_STATUSES.PLACE_PROPOSED,
+          actorId: userId,
+        });
+
+        chatMessage = chatResult?.message || null;
+
+        if (chatResult?.roomId && chatResult?.message) {
+          emitMeetMiddleMilestoneUpdate(
+            io,
+            chatResult.roomId,
+            chatResult.message,
+            session.users || []
+          );
+        }
+      } catch (chatErr) {
+        console.error("❌ MeetMiddle HTTP place proposal chat message error:", chatErr);
+      }
+    }
+
     const payload = {
       success: true,
       session,
       selectedBy: selector,
       place: session.selectedPlace,
+      chatMessage,
       message: `${selector.name || "Someone"} wants to meet at ${session.selectedPlace?.name || "this place"} 💞`,
       createdAt: new Date().toISOString(),
     };
@@ -614,7 +672,7 @@ router.post("/:sessionId/place/accept", authMiddleware, async (req, res) => {
     const io = getRouteIo(req);
     const otherUserId = getOtherUserId(session, userId);
 
-    let chatMessage = null;
+      let chatMessage = null;
 
     if (otherUserId) {
       try {
@@ -624,22 +682,15 @@ router.post("/:sessionId/place/accept", authMiddleware, async (req, res) => {
           session,
         });
 
-        chatMessage = chatResult.message;
+        chatMessage = chatResult?.message || null;
 
         if (chatResult?.roomId && chatResult?.message) {
-          io?.to(chatResult.roomId).emit("chat:message", chatResult.message);
-
-          session.users.forEach((id) => {
-            emitToUser(io, id, "direct:message", {
-              id: chatResult.message.id,
-              roomId: chatResult.roomId,
-              from: chatResult.message.from,
-              to: chatResult.message.to,
-              time: chatResult.message.time,
-              preview: String(chatResult.message.text || "").slice(0, 120),
-              type: chatResult.message.type || "meetup",
-            });
-          });
+          emitMeetMiddleMilestoneUpdate(
+            io,
+            chatResult.roomId,
+            chatResult.message,
+            session.users || []
+          );
         }
       } catch (chatErr) {
         console.error("❌ MeetMiddle HTTP confirmed chat message create error:", chatErr);
@@ -678,11 +729,40 @@ router.post("/:sessionId/place/reject", authMiddleware, async (req, res) => {
     });
 
     const io = getRouteIo(req);
+    const otherUserId = getOtherUserId(session, userId);
+
+    let chatMessage = null;
+
+    if (otherUserId) {
+      try {
+        const chatResult = await createOrUpdateMeetMiddleMilestoneMessage({
+          fromId: userId,
+          toId: otherUserId,
+          session,
+          status: MEET_MIDDLE_STATUSES.PLACE_REJECTED,
+          actorId: userId,
+        });
+
+        chatMessage = chatResult?.message || null;
+
+        if (chatResult?.roomId && chatResult?.message) {
+          emitMeetMiddleMilestoneUpdate(
+            io,
+            chatResult.roomId,
+            chatResult.message,
+            session.users || []
+          );
+        }
+      } catch (chatErr) {
+        console.error("❌ MeetMiddle HTTP place rejected chat message error:", chatErr);
+      }
+    }
 
     const payload = {
       success: true,
       session,
       rejectedBy: userId,
+      chatMessage,
       createdAt: new Date().toISOString(),
     };
 

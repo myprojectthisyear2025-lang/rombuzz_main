@@ -53,7 +53,7 @@ const messageSchema = new mongoose.Schema(
     },
     action: { type: String, enum: ["pin", "unpin", null], default: null },
 
-    // ✅ Meet in the Middle request bubble metadata
+     // ✅ Meet in the Middle request bubble metadata
     meetMiddleRequest: {
       type: {
         type: String,
@@ -73,6 +73,44 @@ const messageSchema = new mongoose.Schema(
       toAvatar: { type: String, default: "" },
       createdAt: { type: Date, default: null },
       expiresAt: { type: Date, default: null },
+    },
+
+    // ✅ Meet in the Middle milestone/card metadata
+    // Used for proposal, pick-another, and final confirmed chat cards.
+    meetMiddle: {
+      type: {
+        type: String,
+        default: "",
+      },
+      sessionId: { type: String, default: "" },
+      status: {
+        type: String,
+        enum: [
+          "",
+          "place_proposed",
+          "place_rejected",
+          "confirmed",
+          "completed",
+        ],
+        default: "",
+      },
+      selectedBy: { type: String, default: "" },
+      acceptedBy: { type: String, default: "" },
+      rejectedBy: { type: String, default: "" },
+      place: {
+        id: { type: String, default: "" },
+        name: { type: String, default: "" },
+        category: { type: String, default: "" },
+        address: { type: String, default: null },
+        coords: {
+          lat: { type: Number, default: null },
+          lng: { type: Number, default: null },
+        },
+        provider: { type: String, default: "" },
+        isMidpoint: { type: Boolean, default: false },
+      },
+      createdAt: { type: Date, default: null },
+      updatedAt: { type: Date, default: null },
     },
 
     // ✅ video/audio call history metadata

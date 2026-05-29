@@ -1,22 +1,38 @@
 /**
  * ============================================================
  * 📁 File: services/meetMiddleChatService.js
- * 💬 Purpose: Creates clean system chat messages for confirmed
- *             Meet in the Middle sessions.
+ * 💬 Purpose: Creates durable chat milestone messages for
+ *             RomBuzz Meet in the Middle.
  *
  * Used by:
- *   - sockets/meetMiddleSocket.js
+ *   - routes/meetMiddle.js
+ *   - sockets/meetMiddleSocket.js if needed later
+ *
+ * Chat milestones handled here:
+ *   - place_proposed
+ *   - place_rejected
+ *   - confirmed
  *
  * Important:
  *   - MongoDB only.
  *   - No LowDB.
- *   - No old meet:* socket events.
- *   - Keeps chat-message creation out of the socket file.
+ *   - No Geoapify calls here.
+ *   - No Socket.IO emit logic here.
+ *   - Keeps Meet chat persistence out of route/socket files.
  * ============================================================
  */
 
 const shortid = require("shortid");
 const ChatRoom = require("../models/ChatRoom");
+
+const MEET_MIDDLE_MESSAGE_TYPE = "meetup";
+
+const MEET_MIDDLE_STATUSES = {
+  PLACE_PROPOSED: "place_proposed",
+  PLACE_REJECTED: "place_rejected",
+  CONFIRMED: "confirmed",
+  COMPLETED: "completed",
+};
 
 function makeRoomId(a, b) {
   const userA = String(a || "").trim();
@@ -48,32 +64,82 @@ function getPlaceCoords(place = {}) {
   return { lat, lng };
 }
 
-function buildMeetupMessageText(place = {}) {
-  const name = safeText(place.name, "the selected place");
-  const category = safeText(place.category, "Meetup spot");
-  const address = safeText(place.address, "");
+function normalizeMeetPlace(place = {}) {
   const coords = getPlaceCoords(place);
 
+  return {
+    id: String(place?.id || ""),
+    name: safeText(place?.name, "Selected place"),
+    category: safeText(place?.category, "Place"),
+    address: place?.address ? safeText(place.address) : null,
+    coords,
+    provider: safeText(place?.provider, "geoapify"),
+    isMidpoint:
+      place?.isMidpoint === true ||
+      place?.provider === "rombuzz_midpoint" ||
+      String(place?.id || "").startsWith("midpoint:"),
+  };
+}
+
+function buildDirectionsUrl(place = {}) {
+  const coords = getPlaceCoords(place);
+
+  if (!coords) return "";
+
+  return `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
+}
+
+function buildMeetupMessageText(place = {}) {
+  const safePlace = normalizeMeetPlace(place);
   const lines = [
     `🎉 Meetup Confirmed`,
-    `You both agreed to meet at ${name}.`,
-    `Type: ${category}`,
+    `You both agreed to meet at ${safePlace.name}.`,
+    `Type: ${safePlace.category}`,
   ];
 
-  if (address) {
-    lines.push(`Address: ${address}`);
+  if (safePlace.address) {
+    lines.push(`Address: ${safePlace.address}`);
   }
 
-  if (coords) {
-    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
+  const mapsUrl = buildDirectionsUrl(safePlace);
+  if (mapsUrl) {
     lines.push(`Directions: ${mapsUrl}`);
   }
 
   return lines.join("\n");
 }
 
-function buildMeetupMessagePayload({ fromId, toId, session }) {
-  const place = session?.selectedPlace || {};
+function buildMeetMiddleMilestoneText({ status, session }) {
+  const place = normalizeMeetPlace(session?.selectedPlace || {});
+
+  if (status === MEET_MIDDLE_STATUSES.PLACE_PROPOSED) {
+    return `${place.name} was picked as a meetup spot. Waiting for confirmation.`;
+  }
+
+  if (status === MEET_MIDDLE_STATUSES.PLACE_REJECTED) {
+    return `Meetup spot was not confirmed. Pick another spot.`;
+  }
+
+  if (status === MEET_MIDDLE_STATUSES.COMPLETED) {
+    return `Meetup marked as completed.`;
+  }
+
+  if (status === MEET_MIDDLE_STATUSES.CONFIRMED) {
+    return buildMeetupMessageText(place);
+  }
+
+  return `Meet in the Middle was updated.`;
+}
+
+function buildMeetMiddlePayload({
+  fromId,
+  toId,
+  session,
+  status,
+  actorId = "",
+}) {
+  const now = new Date();
+  const place = normalizeMeetPlace(session?.selectedPlace || {});
   const roomId = makeRoomId(fromId, toId);
 
   return {
@@ -81,35 +147,41 @@ function buildMeetupMessagePayload({ fromId, toId, session }) {
     roomId,
     from: String(fromId),
     to: String(toId),
-    text: buildMeetupMessageText(place),
-    type: "meetup",
-    time: new Date(),
+    text: buildMeetMiddleMilestoneText({
+      status,
+      session,
+      actorId,
+    }),
+    type: MEET_MIDDLE_MESSAGE_TYPE,
+    time: now,
+    createdAt: now,
     edited: false,
     deleted: false,
+    system: true,
     reactions: {},
     hiddenFor: [],
-    ephemeral: { mode: "none" },
-       meetMiddle: {
+    ephemeral: { mode: "none", viewsLeft: 0 },
+    meetMiddle: {
+      type: "meet_middle_milestone",
       sessionId: String(session?.sessionId || ""),
-      place: {
-        id: String(place?.id || ""),
-        name: safeText(place?.name, "Selected place"),
-        category: safeText(place?.category, "Place"),
-        address: place?.address || null,
-        coords: place?.coords || null,
-        provider: place?.provider || "geoapify",
-        isMidpoint:
-          place?.isMidpoint === true ||
-          place?.provider === "rombuzz_midpoint" ||
-          String(place?.id || "").startsWith("midpoint:"),
-      },
+      status: String(status || ""),
+      selectedBy: String(session?.selectedBy || ""),
+      acceptedBy:
+        status === MEET_MIDDLE_STATUSES.CONFIRMED
+          ? String(session?.confirmedBy || actorId || "")
+          : "",
+      rejectedBy:
+        status === MEET_MIDDLE_STATUSES.PLACE_REJECTED
+          ? String(actorId || "")
+          : "",
+      place,
+      createdAt: now,
+      updatedAt: now,
     },
   };
 }
 
-async function createMeetMiddleSystemMessage({ fromId, toId, session }) {
-  const roomId = makeRoomId(fromId, toId);
-
+async function findOrCreateRoom(roomId, fromId, toId) {
   let room = await ChatRoom.findOne({ roomId });
 
   if (!room) {
@@ -120,30 +192,119 @@ async function createMeetMiddleSystemMessage({ fromId, toId, session }) {
     });
   }
 
-  const message = buildMeetupMessagePayload({
-    fromId,
-    toId,
-    session,
-  });
-
   if (!Array.isArray(room.messages)) {
     room.messages = [];
   }
 
-  room.messages.push(message);
-  room.updatedAt = new Date();
+  return room;
+}
+
+function findExistingMeetMiddleMessageIndex(room, sessionId, status) {
+  const safeSessionId = String(sessionId || "");
+  const safeStatus = String(status || "");
+
+  return (room.messages || []).findIndex((message) => {
+    return (
+      String(message?.type || "") === MEET_MIDDLE_MESSAGE_TYPE &&
+      String(message?.meetMiddle?.sessionId || "") === safeSessionId &&
+      String(message?.meetMiddle?.status || "") === safeStatus
+    );
+  });
+}
+
+function shouldUpdateExistingStatus(status) {
+  return (
+    status === MEET_MIDDLE_STATUSES.PLACE_PROPOSED ||
+    status === MEET_MIDDLE_STATUSES.PLACE_REJECTED ||
+    status === MEET_MIDDLE_STATUSES.CONFIRMED
+  );
+}
+
+async function createOrUpdateMeetMiddleMilestoneMessage({
+  fromId,
+  toId,
+  session,
+  status,
+  actorId = "",
+}) {
+  const roomId = makeRoomId(fromId, toId);
+  const room = await findOrCreateRoom(roomId, fromId, toId);
+  const now = new Date();
+
+  const nextMessage = buildMeetMiddlePayload({
+    fromId,
+    toId,
+    session,
+    status,
+    actorId,
+  });
+
+  const existingIndex = shouldUpdateExistingStatus(status)
+    ? findExistingMeetMiddleMessageIndex(room, session?.sessionId, status)
+    : -1;
+
+  if (existingIndex !== -1) {
+    const existing = room.messages[existingIndex];
+
+    existing.text = nextMessage.text;
+    existing.from = nextMessage.from;
+    existing.to = nextMessage.to;
+    existing.type = nextMessage.type;
+    existing.system = true;
+    existing.time = now;
+    existing.edited = false;
+    existing.deleted = false;
+    existing.meetMiddle = {
+      ...(existing.meetMiddle?.toObject
+        ? existing.meetMiddle.toObject()
+        : existing.meetMiddle || {}),
+      ...nextMessage.meetMiddle,
+      createdAt: existing.meetMiddle?.createdAt || nextMessage.meetMiddle.createdAt,
+      updatedAt: now,
+    };
+
+    room.updatedAt = now;
+    await room.save();
+
+    const updatedMessage = existing.toObject ? existing.toObject() : existing;
+
+    return {
+      roomId,
+      message: updatedMessage,
+      action: "updated",
+    };
+  }
+
+  room.messages.push(nextMessage);
+  room.updatedAt = now;
 
   await room.save();
 
   return {
     roomId,
-    message,
+    message: nextMessage,
+    action: "created",
   };
 }
 
+async function createMeetMiddleSystemMessage({ fromId, toId, session }) {
+  return createOrUpdateMeetMiddleMilestoneMessage({
+    fromId,
+    toId,
+    session,
+    status: MEET_MIDDLE_STATUSES.CONFIRMED,
+    actorId: session?.confirmedBy || fromId,
+  });
+}
+
 module.exports = {
+  MEET_MIDDLE_MESSAGE_TYPE,
+  MEET_MIDDLE_STATUSES,
   makeRoomId,
+  buildDirectionsUrl,
   buildMeetupMessageText,
-  buildMeetupMessagePayload,
+  buildMeetMiddleMilestoneText,
+  buildMeetMiddlePayload,
+  createOrUpdateMeetMiddleMilestoneMessage,
   createMeetMiddleSystemMessage,
 };
