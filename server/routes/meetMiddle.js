@@ -462,15 +462,50 @@ router.post("/:sessionId/location", authMiddleware, async (req, res) => {
       coords: req.body?.coords,
     });
 
-    return res.json({
+    const io = getRouteIo(req);
+    const users = Array.isArray(result?.session?.users)
+      ? result.session.users.map(String).filter(Boolean)
+      : [];
+
+    const payload = {
       success: true,
       ready: !!result.ready,
       session: result.session,
       midpoint: result.midpoint,
       smartMidpoint: result.smartMidpoint,
+      midpointPlace: result.midpointPlace || result.session?.midpointPlace || null,
       radiusUsedMeters: result.radiusUsedMeters,
-      places: result.places,
-    });
+      radiusUsedMiles: result.radiusUsedMiles || result.session?.radiusUsedMiles || null,
+      radiusStepsTriedMeters: result.radiusStepsTriedMeters || [],
+      canExpandMore: !!result.canExpandMore,
+      placesSearchExhausted: !!result.placesSearchExhausted,
+      places: result.places || [],
+      approximateParticipants:
+        result.approximateParticipants ||
+        result.session?.approximateParticipants ||
+        [],
+      sharedBy: String(req.user.id),
+      createdAt: new Date().toISOString(),
+    };
+
+    if (result.ready || result.session?.status === "suggested") {
+      users.forEach((id) => {
+        emitToUser(io, id, "meetMiddle:suggestions:ready", payload);
+      });
+    } else {
+      users.forEach((id) => {
+        emitToUser(
+          io,
+          id,
+          id === String(req.user.id)
+            ? "meetMiddle:location:waiting"
+            : "meetMiddle:location:peer-shared",
+          payload
+        );
+      });
+    }
+
+    return res.json(payload);
   } catch (err) {
     return sendMeetError(res, err);
   }
