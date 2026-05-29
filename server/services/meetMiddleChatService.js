@@ -26,6 +26,7 @@ const shortid = require("shortid");
 const ChatRoom = require("../models/ChatRoom");
 
 const MEET_MIDDLE_MESSAGE_TYPE = "meetup";
+const MEET_REQUEST_BUBBLE_TYPE = "meet_middle_request";
 
 const MEET_MIDDLE_STATUSES = {
   PLACE_PROPOSED: "place_proposed",
@@ -201,13 +202,25 @@ async function findOrCreateRoom(roomId, fromId, toId) {
 
 function findExistingMeetMiddleMessageIndex(room, sessionId, status) {
   const safeSessionId = String(sessionId || "");
-  const safeStatus = String(status || "");
+
+  if (!safeSessionId) return -1;
+
+  const requestIndex = (room.messages || []).findIndex((message) => {
+    return (
+      String(message?.meetMiddleRequest?.sessionId || "") === safeSessionId ||
+      (
+        String(message?.type || "") === MEET_REQUEST_BUBBLE_TYPE &&
+        String(message?.meetMiddleRequest?.sessionId || "") === safeSessionId
+      )
+    );
+  });
+
+  if (requestIndex !== -1) return requestIndex;
 
   return (room.messages || []).findIndex((message) => {
     return (
       String(message?.type || "") === MEET_MIDDLE_MESSAGE_TYPE &&
-      String(message?.meetMiddle?.sessionId || "") === safeSessionId &&
-      String(message?.meetMiddle?.status || "") === safeStatus
+      String(message?.meetMiddle?.sessionId || "") === safeSessionId
     );
   });
 }

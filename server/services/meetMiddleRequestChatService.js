@@ -1,37 +1,45 @@
 /**
  * ============================================================
- * 📁 File: services/meetMiddleRequestChatService.js
- * 💬 Purpose: Creates and updates chat bubbles for RomBuzz
- *             Meet in the Middle request flow.
+ * 📁 File: services/meetMiddleChatService.js
+ * 💬 Purpose: Creates durable chat milestone messages for
+ *             RomBuzz Meet in the Middle.
  *
- * Handles chat bubble states:
- *   - pending
- *   - accepted
- *   - rejected
- *   - cancelled
- *   - expired
+ * Used by:
+ *   - routes/meetMiddle.js
+ *   - sockets/meetMiddleSocket.js if needed later
+ *
+ * Chat milestones handled here:
+ *   - place_proposed
+ *   - place_rejected
+ *   - confirmed
  *
  * Important:
  *   - MongoDB only.
  *   - No LowDB.
- *   - No Geoapify.
- *   - No old meet:* events.
- *   - This is separate from meetMiddleChatService.js, which is
- *     only for final confirmed meetup place messages.
+ *   - No Geoapify calls here.
+ *   - No Socket.IO emit logic here.
+ *   - Keeps Meet chat persistence out of route/socket files.
  * ============================================================
  */
 
 const shortid = require("shortid");
 const ChatRoom = require("../models/ChatRoom");
 
-const MEET_REQUEST_BUBBLE_TYPE = "meet_middle_request";
+const MEET_MIDDLE_MESSAGE_TYPE = "meetup";
+
+const MEET_MIDDLE_STATUSES = {
+  PLACE_PROPOSED: "place_proposed",
+  PLACE_REJECTED: "place_rejected",
+  CONFIRMED: "confirmed",
+  COMPLETED: "completed",
+};
 
 function makeRoomId(a, b) {
   const userA = String(a || "").trim();
   const userB = String(b || "").trim();
 
   if (!userA || !userB) {
-    const err = new Error("Both user ids are required to create meet request chat bubble");
+    const err = new Error("Both user ids are required to create chat room id");
     err.code = "ROOM_USERS_REQUIRED";
     err.statusCode = 400;
     throw err;
@@ -45,86 +53,130 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
-function getDisplayName(user = {}, fallback = "Someone") {
-  const first = safeText(user.firstName || "");
-  const last = safeText(user.lastName || "");
-  const full = [first, last].filter(Boolean).join(" ").trim();
+function getPlaceCoords(place = {}) {
+  const lat = Number(place?.coords?.lat);
+  const lng = Number(place?.coords?.lng);
 
-  return (
-    full ||
-    safeText(user.name || "") ||
-    fallback
-  );
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  return { lat, lng };
 }
 
-function getAvatar(user = {}) {
-  return (
-    safeText(user.avatar || "") ||
-    (Array.isArray(user.photos) && user.photos.length ? safeText(user.photos[0]) : "")
-  );
+function normalizeMeetPlace(place = {}) {
+  const coords = getPlaceCoords(place);
+
+  return {
+    id: String(place?.id || ""),
+    name: safeText(place?.name, "Selected place"),
+    category: safeText(place?.category, "Place"),
+    address: place?.address ? safeText(place.address) : null,
+    coords,
+    provider: safeText(place?.provider, "geoapify"),
+    isMidpoint:
+      place?.isMidpoint === true ||
+      place?.provider === "rombuzz_midpoint" ||
+      String(place?.id || "").startsWith("midpoint:"),
+  };
 }
 
-function getBubbleText(status, fromName, toName) {
-  if (status === "accepted") {
-    return `${toName} accepted the Meet in the Middle request.`;
-  }
+function buildDirectionsUrl(place = {}) {
+  const coords = getPlaceCoords(place);
 
-  if (status === "rejected") {
-    return `${toName} rejected the Meet in the Middle request.`;
-  }
+  if (!coords) return "";
 
-  if (status === "cancelled") {
-    return `${fromName} cancelled the Meet in the Middle request.`;
-  }
-
-  if (status === "expired") {
-    return `Meet in the Middle request expired.`;
-  }
-
-  return `${fromName} wants to meet halfway with ${toName}.`;
+  return `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
 }
 
-function buildMeetRequestPayload({
+function buildMeetupMessageText(place = {}) {
+  const safePlace = normalizeMeetPlace(place);
+  const lines = [
+    `🎉 Meetup Confirmed`,
+    `You both agreed to meet at ${safePlace.name}.`,
+    `Type: ${safePlace.category}`,
+  ];
+
+  if (safePlace.address) {
+    lines.push(`Address: ${safePlace.address}`);
+  }
+
+  const mapsUrl = buildDirectionsUrl(safePlace);
+  if (mapsUrl) {
+    lines.push(`Directions: ${mapsUrl}`);
+  }
+
+  return lines.join("\n");
+}
+
+function buildMeetMiddleMilestoneText({ status, session, actorId }) {
+  const place = normalizeMeetPlace(session?.selectedPlace || {});
+
+  if (status === MEET_MIDDLE_STATUSES.PLACE_PROPOSED) {
+    return `${place.name} was picked as a meetup spot. Waiting for confirmation.`;
+  }
+
+  if (status === MEET_MIDDLE_STATUSES.PLACE_REJECTED) {
+    return `Meetup spot was not confirmed. Pick another spot.`;
+  }
+
+  if (status === MEET_MIDDLE_STATUSES.COMPLETED) {
+    return `Meetup marked as completed.`;
+  }
+
+  if (status === MEET_MIDDLE_STATUSES.CONFIRMED) {
+    return buildMeetupMessageText(place);
+  }
+
+  return `Meet in the Middle was updated.`;
+}
+
+function buildMeetMiddlePayload({
   fromId,
   toId,
-  fromUser,
-  toUser,
   session,
-  status = "pending",
+  status,
+  actorId = "",
 }) {
-  const fromName = getDisplayName(fromUser, "Someone");
-  const toName = getDisplayName(toUser, "your match");
-
-  const expiresAt =
-    session?.expiresAt
-      ? new Date(session.expiresAt).toISOString()
-      : new Date(Date.now() + 60 * 1000).toISOString();
+  const now = new Date();
+  const place = normalizeMeetPlace(session?.selectedPlace || {});
+  const roomId = makeRoomId(fromId, toId);
 
   return {
     id: shortid.generate(),
-    roomId: makeRoomId(fromId, toId),
+    roomId,
     from: String(fromId),
     to: String(toId),
-    text: getBubbleText(status, fromName, toName),
-    type: MEET_REQUEST_BUBBLE_TYPE,
-    time: new Date(),
+    text: buildMeetMiddleMilestoneText({
+      status,
+      session,
+      actorId,
+    }),
+    type: MEET_MIDDLE_MESSAGE_TYPE,
+    time: now,
+    createdAt: now,
     edited: false,
     deleted: false,
+    system: true,
     reactions: {},
     hiddenFor: [],
-    ephemeral: { mode: "none" },
-    meetMiddleRequest: {
-      type: MEET_REQUEST_BUBBLE_TYPE,
+    ephemeral: { mode: "none", viewsLeft: 0 },
+    meetMiddle: {
+      type: "meet_middle_milestone",
       sessionId: String(session?.sessionId || ""),
-      status,
-      fromUserId: String(fromId),
-      toUserId: String(toId),
-      fromName,
-      toName,
-      fromAvatar: getAvatar(fromUser),
-      toAvatar: getAvatar(toUser),
-      createdAt: new Date().toISOString(),
-      expiresAt,
+      status: String(status || ""),
+      selectedBy: String(session?.selectedBy || ""),
+      acceptedBy:
+        status === MEET_MIDDLE_STATUSES.CONFIRMED
+          ? String(session?.confirmedBy || actorId || "")
+          : "",
+      rejectedBy:
+        status === MEET_MIDDLE_STATUSES.PLACE_REJECTED
+          ? String(actorId || "")
+          : "",
+      place,
+      createdAt: now,
+      updatedAt: now,
     },
   };
 }
@@ -147,147 +199,119 @@ async function findOrCreateRoom(roomId, fromId, toId) {
   return room;
 }
 
-async function createMeetRequestChatBubble({
+function findExistingMeetMiddleMessageIndex(room, sessionId, status) {
+  const safeSessionId = String(sessionId || "");
+  const safeStatus = String(status || "");
+
+  return (room.messages || []).findIndex((message) => {
+    return (
+      String(message?.type || "") === MEET_MIDDLE_MESSAGE_TYPE &&
+      String(message?.meetMiddle?.sessionId || "") === safeSessionId &&
+      String(message?.meetMiddle?.status || "") === safeStatus
+    );
+  });
+}
+
+function shouldUpdateExistingStatus(status) {
+  return (
+    status === MEET_MIDDLE_STATUSES.PLACE_PROPOSED ||
+    status === MEET_MIDDLE_STATUSES.PLACE_REJECTED ||
+    status === MEET_MIDDLE_STATUSES.CONFIRMED
+  );
+}
+
+async function createOrUpdateMeetMiddleMilestoneMessage({
   fromId,
   toId,
-  fromUser,
-  toUser,
   session,
+  status,
+  actorId = "",
 }) {
   const roomId = makeRoomId(fromId, toId);
   const room = await findOrCreateRoom(roomId, fromId, toId);
+  const now = new Date();
 
-  const existingIndex = room.messages.findIndex((message) => {
-    return (
-      String(message?.type || "") === MEET_REQUEST_BUBBLE_TYPE &&
-      String(message?.meetMiddleRequest?.sessionId || "") === String(session?.sessionId || "")
-    );
+  const nextMessage = buildMeetMiddlePayload({
+    fromId,
+    toId,
+    session,
+    status,
+    actorId,
   });
+
+  const existingIndex = shouldUpdateExistingStatus(status)
+    ? findExistingMeetMiddleMessageIndex(room, session?.sessionId, status)
+    : -1;
 
   if (existingIndex !== -1) {
     const existing = room.messages[existingIndex];
 
-    existing.text = getBubbleText(
-      "pending",
-      getDisplayName(fromUser, "Someone"),
-      getDisplayName(toUser, "your match")
-    );
-    existing.meetMiddleRequest = {
-      ...(existing.meetMiddleRequest || {}),
-      type: MEET_REQUEST_BUBBLE_TYPE,
-      sessionId: String(session?.sessionId || ""),
-      status: "pending",
-      fromUserId: String(fromId),
-      toUserId: String(toId),
-      fromName: getDisplayName(fromUser, "Someone"),
-      toName: getDisplayName(toUser, "your match"),
-      fromAvatar: getAvatar(fromUser),
-      toAvatar: getAvatar(toUser),
-      createdAt: existing?.meetMiddleRequest?.createdAt || new Date().toISOString(),
-      expiresAt: session?.expiresAt
-        ? new Date(session.expiresAt).toISOString()
-        : new Date(Date.now() + 60 * 1000).toISOString(),
+    existing.text = nextMessage.text;
+    existing.from = nextMessage.from;
+    existing.to = nextMessage.to;
+    existing.type = nextMessage.type;
+    existing.system = true;
+    existing.time = now;
+    existing.edited = false;
+    existing.deleted = false;
+    existing.meetMiddle = {
+      ...(existing.meetMiddle?.toObject
+        ? existing.meetMiddle.toObject()
+        : existing.meetMiddle || {}),
+      ...nextMessage.meetMiddle,
+      createdAt: existing.meetMiddle?.createdAt || nextMessage.meetMiddle.createdAt,
+      updatedAt: now,
     };
 
-    room.updatedAt = new Date();
+    room.updatedAt = now;
     await room.save();
+
+    const updatedMessage = existing.toObject ? existing.toObject() : existing;
 
     return {
       roomId,
-      message: existing,
-      reused: true,
+      message: updatedMessage,
+      action: "updated",
     };
   }
 
-  const message = buildMeetRequestPayload({
-    fromId,
-    toId,
-    fromUser,
-    toUser,
-    session,
-    status: "pending",
-  });
-
-  room.messages.push(message);
-  room.updatedAt = new Date();
+  room.messages.push(nextMessage);
+  room.updatedAt = now;
 
   await room.save();
 
   return {
     roomId,
-    message,
-    reused: false,
+    message: nextMessage,
+    action: "created",
   };
 }
 
-async function updateMeetRequestChatBubble({
-  sessionId,
-  status,
-  actorId = "",
-}) {
-  const cleanSessionId = String(sessionId || "").trim();
-
-  if (!cleanSessionId) {
-    const err = new Error("Meet session id is required to update request chat bubble");
-    err.code = "SESSION_ID_REQUIRED";
-    err.statusCode = 400;
-    throw err;
-  }
-
-  const room = await ChatRoom.findOne({
-    "messages.type": MEET_REQUEST_BUBBLE_TYPE,
-    "messages.meetMiddleRequest.sessionId": cleanSessionId,
+/**
+ * Backward-compatible wrapper.
+ *
+ * Existing routes already call createMeetMiddleSystemMessage()
+ * after final place acceptance. Keep that name working while
+ * routing it through the new durable milestone helper.
+ */
+async function createMeetMiddleSystemMessage({ fromId, toId, session }) {
+  return createOrUpdateMeetMiddleMilestoneMessage({
+    fromId,
+    toId,
+    session,
+    status: MEET_MIDDLE_STATUSES.CONFIRMED,
+    actorId: session?.confirmedBy || fromId,
   });
-
-  if (!room || !Array.isArray(room.messages)) {
-    return {
-      roomId: null,
-      message: null,
-      updated: false,
-    };
-  }
-
-  const index = room.messages.findIndex((message) => {
-    return (
-      String(message?.type || "") === MEET_REQUEST_BUBBLE_TYPE &&
-      String(message?.meetMiddleRequest?.sessionId || "") === cleanSessionId
-    );
-  });
-
-  if (index === -1) {
-    return {
-      roomId: room.roomId,
-      message: null,
-      updated: false,
-    };
-  }
-
-  const message = room.messages[index];
-  const request = message.meetMiddleRequest || {};
-
-  const fromName = safeText(request.fromName, "Someone");
-  const toName = safeText(request.toName, "your match");
-
-  message.text = getBubbleText(status, fromName, toName);
-  message.meetMiddleRequest = {
-    ...request,
-    status,
-    updatedAt: new Date().toISOString(),
-    updatedBy: String(actorId || ""),
-  };
-
-  room.updatedAt = new Date();
-  await room.save();
-
-  return {
-    roomId: room.roomId,
-    message,
-    updated: true,
-  };
 }
 
 module.exports = {
-  MEET_REQUEST_BUBBLE_TYPE,
-  createMeetRequestChatBubble,
-  updateMeetRequestChatBubble,
+  MEET_MIDDLE_MESSAGE_TYPE,
+  MEET_MIDDLE_STATUSES,
+  makeRoomId,
+  buildDirectionsUrl,
+  buildMeetupMessageText,
+  buildMeetMiddleMilestoneText,
+  buildMeetMiddlePayload,
+  createOrUpdateMeetMiddleMilestoneMessage,
+  createMeetMiddleSystemMessage,
 };
