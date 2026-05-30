@@ -49,12 +49,12 @@ const {
 const {
   MEET_MIDDLE_STATUSES,
   createOrUpdateMeetMiddleMilestoneMessage,
-} = require("./services/meetMiddleChatService");
+} = require("../services/meetMiddleChatService");
 
 const {
   getGeoapifyHealthStatus,
   searchPlacesAroundPoint,
-} = require("./services/geoapifyService");
+} = require("../services/geoapifyService");
 
 /**
  * GET /api/meet-middle/health
