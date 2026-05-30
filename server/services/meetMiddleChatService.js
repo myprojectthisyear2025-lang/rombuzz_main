@@ -85,34 +85,31 @@ function normalizeMeetPlace(place = {}) {
 function buildDirectionsUrl(place = {}) {
   const coords = getPlaceCoords(place);
 
-  if (!coords) return "";
+  if (coords) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}`;
+  }
 
-  return `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
+  const query = encodeURIComponent(
+    [
+      place?.name,
+      place?.address,
+      place?.category,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim() || "meetup spot"
+  );
+
+  return `https://www.google.com/maps/search/?api=1&query=${query}`;
 }
 
 function buildMeetupMessageText(place = {}) {
   const safePlace = normalizeMeetPlace(place);
-  const lines = [
-    `🎉 Meetup Confirmed`,
-    `You both agreed to meet at ${safePlace.name}.`,
-    `Type: ${safePlace.category}`,
-  ];
-
-  if (safePlace.address) {
-    lines.push(`Address: ${safePlace.address}`);
-  }
-
-  const mapsUrl = buildDirectionsUrl(safePlace);
-  if (mapsUrl) {
-    lines.push(`Directions: ${mapsUrl}`);
-  }
-
-  return lines.join("\n");
+  return `Meetup confirmed at ${safePlace.name}.`;
 }
 
 function buildMeetMiddleMilestoneText({ status, session }) {
   const place = normalizeMeetPlace(session?.selectedPlace || {});
-
   if (status === MEET_MIDDLE_STATUSES.PLACE_PROPOSED) {
     return `${place.name} was picked as a meetup spot. Waiting for confirmation.`;
   }
