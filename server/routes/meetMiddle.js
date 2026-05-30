@@ -48,14 +48,13 @@ const {
 
 const {
   MEET_MIDDLE_STATUSES,
-  createMeetMiddleSystemMessage,
   createOrUpdateMeetMiddleMilestoneMessage,
-} = require("../services/meetMiddleChatService");
+} = require("./services/meetMiddleChatService");
 
 const {
   getGeoapifyHealthStatus,
   searchPlacesAroundPoint,
-} = require("../services/geoapifyService");
+} = require("./services/geoapifyService");
 
 /**
  * GET /api/meet-middle/health
@@ -705,39 +704,13 @@ router.post("/:sessionId/place/accept", authMiddleware, async (req, res) => {
     });
 
     const io = getRouteIo(req);
-    const otherUserId = getOtherUserId(session, userId);
-
-      let chatMessage = null;
-
-    if (otherUserId) {
-      try {
-        const chatResult = await createMeetMiddleSystemMessage({
-          fromId: userId,
-          toId: otherUserId,
-          session,
-        });
-
-        chatMessage = chatResult?.message || null;
-
-        if (chatResult?.roomId && chatResult?.message) {
-          emitMeetMiddleMilestoneUpdate(
-            io,
-            chatResult.roomId,
-            chatResult.message,
-            session.users || []
-          );
-        }
-      } catch (chatErr) {
-        console.error("❌ MeetMiddle HTTP confirmed chat message create error:", chatErr);
-      }
-    }
 
     const payload = {
       success: true,
       session,
       place: session.selectedPlace,
       acceptedBy: userId,
-      chatMessage,
+      chatMessage: null,
       createdAt: new Date().toISOString(),
     };
 

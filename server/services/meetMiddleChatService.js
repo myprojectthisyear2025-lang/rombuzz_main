@@ -225,8 +225,7 @@ function findExistingMeetMiddleMessageIndex(room, sessionId, status) {
 function shouldUpdateExistingStatus(status) {
   return (
     status === MEET_MIDDLE_STATUSES.PLACE_PROPOSED ||
-    status === MEET_MIDDLE_STATUSES.PLACE_REJECTED ||
-    status === MEET_MIDDLE_STATUSES.CONFIRMED
+    status === MEET_MIDDLE_STATUSES.PLACE_REJECTED
   );
 }
 
@@ -238,6 +237,15 @@ async function createOrUpdateMeetMiddleMilestoneMessage({
   actorId = "",
 }) {
   const roomId = makeRoomId(fromId, toId);
+
+  if (status === MEET_MIDDLE_STATUSES.CONFIRMED) {
+    return {
+      roomId,
+      message: null,
+      action: "skipped_confirmed_meetup_chat_message",
+    };
+  }
+
   const room = await findOrCreateRoom(roomId, fromId, toId);
   const now = new Date();
 
@@ -298,13 +306,14 @@ async function createOrUpdateMeetMiddleMilestoneMessage({
 }
 
 async function createMeetMiddleSystemMessage({ fromId, toId, session }) {
-  return createOrUpdateMeetMiddleMilestoneMessage({
-    fromId,
-    toId,
-    session,
-    status: MEET_MIDDLE_STATUSES.CONFIRMED,
-    actorId: session?.confirmedBy || fromId,
-  });
+  const roomId = makeRoomId(fromId, toId);
+
+  return {
+    roomId,
+    message: null,
+    action: "skipped_confirmed_meetup_chat_message",
+    sessionId: String(session?.sessionId || ""),
+  };
 }
 
 module.exports = {
