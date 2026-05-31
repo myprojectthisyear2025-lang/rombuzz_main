@@ -335,7 +335,7 @@ router.post("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
     if (blocked) {
       return res.status(403).json({
         error: "blocked",
-        message: "Message failed. You cannot send messages in this chat.",
+        message: "Message failed. You cannot send messages to this user.",
       });
     }
 
