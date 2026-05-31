@@ -32,6 +32,7 @@ const ChatRoom = require("../models/ChatRoom");
 const MediaGift = require("../models/MediaGift");
 const User = require("../models/User");
 const Match = require("../models/Match");
+const Relationship = require("../models/Relationship");
 const { debitBuzzCoins, creditBuzzCoins } = require("../services/buzzCoinService");
 
 // ✅ Proper Socket.IO + state wiring
@@ -65,6 +66,23 @@ function getPeersFromRoomId(roomId) {
     a: nonEmpty[0] || "",
     b: nonEmpty[1] || "",
   };
+}
+
+async function isChatBlocked(userA, userB) {
+  const a = String(userA || "");
+  const b = String(userB || "");
+
+  if (!a || !b) return false;
+
+  const block = await Relationship.findOne({
+    type: "block",
+    $or: [
+      { from: a, to: b },
+      { from: b, to: a },
+    ],
+  }).lean();
+
+  return !!block;
 }
 
 function sanitizeReplyToSnapshot(input) {
@@ -310,8 +328,16 @@ router.post("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
     if (![a, b].includes(req.user.id))
       return res.status(403).json({ error: "forbidden" });
 
-    const fromId = req.user.id;
+      const fromId = req.user.id;
     const toId = fromId === a ? b : a;
+
+    const blocked = await isChatBlocked(fromId, toId);
+    if (blocked) {
+      return res.status(403).json({
+        error: "blocked",
+        message: "Message failed. You cannot send messages in this chat.",
+      });
+    }
 
 // ✅ Detect ephemeral + gift lock from ::RBZ:: payload
 let epMode = "none";
