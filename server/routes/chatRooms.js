@@ -625,27 +625,84 @@ router.post("/chat/rooms/:roomId/:msgId/react", authMiddleware, async (req, res)
     if (!(await enforceChatAllowed(req, res))) return;
 
     const room = await getRoomDoc(roomId);
-    const msg = room.messages.find((m) => m.id === msgId);
+    const msg = room.messages.find((m) => String(m.id) === String(msgId));
     if (!msg) return res.status(404).json({ error: "not found" });
 
+    const reactorId = String(req.user.id);
+    const messageOwnerId = String(msg.from || "");
+    const messageReceiverId = String(msg.to || "");
+
     msg.reactions = msg.reactions || {};
-    if (msg.reactions.get(req.user.id) === emoji) {
-      msg.reactions.delete(req.user.id);
+
+    if (msg.reactions.get(reactorId) === emoji) {
+      msg.reactions.delete(reactorId);
     } else {
-      msg.reactions.set(req.user.id, emoji);
+      msg.reactions.set(reactorId, emoji);
     }
 
-  await room.save();
+    await room.save();
 
-const io = getIO();
-io.to(roomId).emit("message:react", {
-  msgId,
-  userId: req.user.id,
-  emoji: msg.reactions.get(req.user.id) || null,
-});
+    const reactions = Object.fromEntries(msg.reactions || new Map());
 
-res.json({ ok: true, reactions: Object.fromEntries(msg.reactions) });
+    const messagePayload =
+      typeof msg.toObject === "function"
+        ? msg.toObject({ flattenMaps: true })
+        : { ...msg };
 
+    messagePayload.reactions = reactions;
+
+    const currentEmoji = reactions[reactorId] || null;
+
+    const reactionPayload = {
+      roomId,
+      id: String(msgId),
+      msgId: String(msgId),
+      messageId: String(msgId),
+      userId: reactorId,
+      reactorId,
+      emoji: currentEmoji,
+      reactions,
+      message: messagePayload,
+    };
+
+    const io = getIO();
+
+    // ✅ Update anyone currently inside the room instantly.
+    io.to(roomId).emit("message:react", reactionPayload);
+    io.to(roomId).emit("chat:react", reactionPayload);
+
+    // ✅ Also push directly to the other user's socket in case room join is stale.
+    const reactionTargetId =
+      reactorId === messageOwnerId ? messageReceiverId : messageOwnerId;
+
+    const targetSid = onlineUsers?.[reactionTargetId];
+    if (targetSid) {
+      io.to(targetSid).emit("message:react", reactionPayload);
+      io.to(targetSid).emit("chat:react", reactionPayload);
+
+      // ✅ Chat-list preview event. This moves the chat up / updates preview
+      // without pretending this is a real new message in the DB.
+      io.to(targetSid).emit("chat:reaction-preview", {
+        id: `reaction-${roomId}-${msgId}-${reactorId}-${Date.now()}`,
+        roomId,
+        peerId: reactorId,
+        from: reactorId,
+        to: reactionTargetId,
+        msgId: String(msgId),
+        emoji: currentEmoji,
+        type: "reaction",
+        time: new Date().toISOString(),
+        preview: currentEmoji
+          ? `Reacted ${currentEmoji} to your message`
+          : "Removed a reaction",
+      });
+    }
+
+    res.json({
+      ok: true,
+      reactions,
+      message: messagePayload,
+    });
   } catch (err) {
     console.error("❌ REACT message error:", err);
     res.status(500).json({ error: "Failed to react" });
