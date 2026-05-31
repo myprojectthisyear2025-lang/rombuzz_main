@@ -651,7 +651,7 @@ router.post("/chat/rooms/:roomId/:msgId/react", authMiddleware, async (req, res)
 
     messagePayload.reactions = reactions;
 
-    const currentEmoji = reactions[reactorId] || null;
+      const currentEmoji = reactions[reactorId] || null;
 
     const reactionPayload = {
       roomId,
@@ -680,22 +680,22 @@ router.post("/chat/rooms/:roomId/:msgId/react", authMiddleware, async (req, res)
       io.to(targetSid).emit("message:react", reactionPayload);
       io.to(targetSid).emit("chat:react", reactionPayload);
 
-      // ✅ Chat-list preview event. This moves the chat up / updates preview
-      // without pretending this is a real new message in the DB.
-      io.to(targetSid).emit("chat:reaction-preview", {
-        id: `reaction-${roomId}-${msgId}-${reactorId}-${Date.now()}`,
-        roomId,
-        peerId: reactorId,
-        from: reactorId,
-        to: reactionTargetId,
-        msgId: String(msgId),
-        emoji: currentEmoji,
-        type: "reaction",
-        time: new Date().toISOString(),
-        preview: currentEmoji
-          ? `Reacted ${currentEmoji} to your message`
-          : "Removed a reaction",
-      });
+      // ✅ Chat-list notification only when a reaction is ADDED.
+      // Removing a reaction should only update the bubble in the open thread.
+      if (currentEmoji) {
+        io.to(targetSid).emit("chat:reaction-preview", {
+          id: `reaction-${roomId}-${msgId}-${reactorId}-${Date.now()}`,
+          roomId,
+          peerId: reactorId,
+          from: reactorId,
+          to: reactionTargetId,
+          msgId: String(msgId),
+          emoji: currentEmoji,
+          type: "reaction",
+          time: new Date().toISOString(),
+          preview: `Reacted ${currentEmoji} to your message`,
+        });
+      }
     }
 
     res.json({
