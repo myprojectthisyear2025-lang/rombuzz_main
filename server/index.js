@@ -13,7 +13,6 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const shortid = require('shortid');
-const sgMail = require('./config/sendgrid');
 const upload = multer({ dest: 'uploads/' }); // âœ… used for avatar uploads fallback
 
 // =======================
