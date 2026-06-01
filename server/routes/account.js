@@ -22,7 +22,7 @@
  * ⚙️ Dependencies:
  *   - db.lowdb.js          → Persistent user data
  *   - auth-middleware.js   → JWT token validation
- *   - sendgrid.js          → Email dispatch
+ *   - resend          → Email dispatch
  *   - utils/helpers.js     → baseSanitizeUser()
  *
  * ============================================================
@@ -31,9 +31,13 @@
 const express = require("express");
 const router = express.Router();
 const db = require("../models/db.lowdb");
-const sgMail = require("../config/sendgrid");
+const { Resend } = require("resend");
 const authMiddleware = require("./auth-middleware");
 const { baseSanitizeUser } = require("../utils/helpers");
+
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
 
 /* ============================================================
    🔒 PATCH /api/account/deactivate  (MongoDB version)
@@ -140,28 +144,27 @@ router.post("/request-email-change", authMiddleware, async (req, res) => {
     const user = await User.findOne({ id: req.user.id });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // 🔢 Generate 6-digit verification code
+      // 🔢 Generate 6-digit verification code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
     user.pendingEmailChange = { email: emailLower, code, expires };
     await user.save();
 
-    // ✉️ Send via SendGrid or log in dev
-    if (!process.env.SENDGRID_API_KEY) {
+    // ✉️ Send via Resend or log in dev
+    if (!resend) {
       console.log(`📧 [DEV] Email-change code for ${emailLower}: ${code}`);
       return res.json({ success: true, dev: true });
     }
 
-    const msg = {
+    await resend.emails.send({
       to: emailLower,
-      from: process.env.FROM_EMAIL || "myprojectthisyear2025@gmail.com",
+      from: process.env.FROM_EMAIL || "RomBuzz <onboarding@resend.dev>",
       subject: "Confirm your new email",
       text: `Your verification code is ${code}. It expires in 10 minutes.`,
       html: `<p>Your verification code is <strong>${code}</strong>. It expires in 10 minutes.</p>`,
-    };
+    });
 
-    await sgMail.send(msg);
     res.json({ success: true });
   } catch (err) {
     console.error("❌ request-email-change error:", err);
