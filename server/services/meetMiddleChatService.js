@@ -238,14 +238,6 @@ async function createOrUpdateMeetMiddleMilestoneMessage({
 }) {
   const roomId = makeRoomId(fromId, toId);
 
-  if (status === MEET_MIDDLE_STATUSES.CONFIRMED) {
-    return {
-      roomId,
-      message: null,
-      action: "skipped_confirmed_meetup_chat_message",
-    };
-  }
-
   const room = await findOrCreateRoom(roomId, fromId, toId);
   const now = new Date();
 

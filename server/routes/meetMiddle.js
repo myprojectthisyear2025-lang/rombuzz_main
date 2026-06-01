@@ -704,13 +704,41 @@ router.post("/:sessionId/place/accept", authMiddleware, async (req, res) => {
     });
 
     const io = getRouteIo(req);
+    const otherUserId = getOtherUserId(session, userId);
+
+    let chatMessage = null;
+
+    if (otherUserId) {
+      try {
+        const chatResult = await createOrUpdateMeetMiddleMilestoneMessage({
+          fromId: userId,
+          toId: otherUserId,
+          session,
+          status: MEET_MIDDLE_STATUSES.CONFIRMED,
+          actorId: userId,
+        });
+
+        chatMessage = chatResult?.message || null;
+
+        if (chatResult?.roomId && chatResult?.message) {
+          emitMeetMiddleMilestoneUpdate(
+            io,
+            chatResult.roomId,
+            chatResult.message,
+            session.users || []
+          );
+        }
+      } catch (chatErr) {
+        console.error("❌ MeetMiddle HTTP final confirmed chat message error:", chatErr);
+      }
+    }
 
     const payload = {
       success: true,
       session,
       place: session.selectedPlace,
       acceptedBy: userId,
-      chatMessage: null,
+      chatMessage,
       createdAt: new Date().toISOString(),
     };
 
