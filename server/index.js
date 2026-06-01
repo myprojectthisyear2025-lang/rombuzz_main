@@ -234,15 +234,6 @@ app.use("/api", require("./modules/health"));
 const { startAiWingmanTask } = require('./modules/aiWingmanTask');
 startAiWingmanTask();
 
-// ðŸ’ž Legacy Meet-in-Middle Sockets
-// Optional only. The new mobile Meet in the Middle feature uses meetMiddle:* below.
-try {
-  const { registerMeetSockets } = require('./sockets/meetSocket');
-  registerMeetSockets(io);
-} catch (err) {
-  console.warn('⚠️ Legacy meetSocket skipped:', err?.message || err);
-}
-
 // 📍 Meet in the Middle — NEW CLEAN SOCKETS
 // Uses meetMiddle:* events only, so it does not conflict with old meet:* events.
 const { registerMeetMiddleSockets } = require('./sockets/meetMiddleSocket');
