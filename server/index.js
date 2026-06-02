@@ -232,6 +232,10 @@ app.use("/api", require("./modules/health"));
 // ðŸ¤– BACKGROUND MODULES
 // =====================================================
 const { startAiWingmanTask } = require('./modules/aiWingmanTask');
+const {
+  startPendingDeletionCleanupJob,
+} = require("./services/accountDeletionService");
+
 startAiWingmanTask();
 
 // 📍 Meet in the Middle — NEW CLEAN SOCKETS
@@ -254,6 +258,12 @@ app.use(errorHandler);
 // =====================================================
 (async () => {
   await initMongo();  // â­ Ensure Mongo is ready
+
+  // 🧹 Account deletion cleanup:
+  // Runs once after startup and then every 6 hours while Render is awake.
+  // It permanently wipes accounts whose 7-day pending_delete hold expired.
+  startPendingDeletionCleanupJob();
+
   server.listen(PORT, () => {
     logSuccess(`ðŸƒ Mongo ready â€” Rombuzz API running on port ${PORT}`);
   });
