@@ -35,7 +35,7 @@ const { isPendingDeleteUser } = require("../../services/accountDeletionService")
 
 function sendPendingDeleteOtpResponse(res, user) {
   return res.status(423).json({
-    status: "account_pending_delete",
+    status: "Account scheduled for deletion",
     error:
       "This email is on a 7-day deletion hold. You can create a fresh account with this email after the hold ends.",
     reusableAfter: user?.deletion?.purgeAfter || null,

@@ -20,7 +20,7 @@ const { isPendingDeleteUser } = require("../../services/accountDeletionService")
 
 function sendPendingDeletePasswordResponse(res, user) {
   return res.status(423).json({
-    status: "account_pending_delete",
+    status: "Account scheduled for deletion",
     error:
       "This account was deleted and cannot reset password during the 7-day hold.",
     reusableAfter: user?.deletion?.purgeAfter || null,

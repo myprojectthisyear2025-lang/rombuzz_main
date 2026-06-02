@@ -134,7 +134,7 @@ module.exports = async function authMiddleware(req, res, next) {
 
     if (accountStatus === "pending_delete") {
       return res.status(403).json({
-        error: "ACCOUNT_PENDING_DELETE",
+        error: "Account scheduled for deletion",
         message:
           "This account has been deleted and is waiting for permanent cleanup.",
         reusableAfter: user?.deletion?.purgeAfter || null,
