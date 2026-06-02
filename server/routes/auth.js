@@ -50,6 +50,16 @@ const { googleClient } = require("../config/config");
 // =======================
 const User = require("../models/User");
 const PasswordReset = require("../models/PasswordReset");
+const { isPendingDeleteUser } = require("../services/accountDeletionService");
+
+function sendPendingDeleteSignupResponse(res, user) {
+  return res.status(423).json({
+    status: "account_pending_delete",
+    error:
+      "This email is on a 7-day deletion hold. You can create a fresh account with this email after the hold ends.",
+    reusableAfter: user?.deletion?.purgeAfter || null,
+  });
+}
 
 function sanitizeSignupPhotos(photos = []) {
   const list = Array.isArray(photos) ? photos : [];
@@ -144,8 +154,12 @@ router.post("/register-full", async (req, res) => {
     const emailLower = String(email || "").trim().toLowerCase();
     const signupPhotos = sanitizeSignupPhotos(photos);
 
-    // 🧩 Try Mongo first — upgrade if already verified
+      // 🧩 Try Mongo first — upgrade if already verified
     let user = await User.findOne({ email: emailLower });
+    if (user && isPendingDeleteUser(user)) {
+      return sendPendingDeleteSignupResponse(res, user);
+    }
+
     if (user) {
       user.firstName = firstName;
       user.lastName = lastName;
@@ -276,6 +290,10 @@ const emailLower = String(email || "").trim().toLowerCase();
 
 // 🔎 Mongo duplicate check
 const exists = await User.findOne({ email: emailLower }).lean();
+if (exists && isPendingDeleteUser(exists)) {
+  return sendPendingDeleteSignupResponse(res, exists);
+}
+
 if (exists) return res.status(400).json({ error: "User already exists" });
 
 const hash = await bcrypt.hash(password, 10);

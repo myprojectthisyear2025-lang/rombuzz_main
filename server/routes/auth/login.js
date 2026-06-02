@@ -13,6 +13,16 @@ const { JWT_SECRET, TOKEN_EXPIRES_IN } = require("../../config/env");
 const { baseSanitizeUser } = require("../../utils/helpers");
 const { googleClient } = require("../../config/config");
 const User = require("../../models/User");
+const { isPendingDeleteUser } = require("../../services/accountDeletionService");
+
+function sendPendingDeleteAuthResponse(res, user) {
+  return res.status(423).json({
+    status: "account_pending_delete",
+    error:
+      "This account was deleted and cannot be used right now. You can create a fresh account with this email after the 7-day hold ends.",
+    reusableAfter: user?.deletion?.purgeAfter || null,
+  });
+}
 
 /* ============================================================
    🧠 Helper: Dynamically check if profile is complete
@@ -59,6 +69,10 @@ router.post("/login", async (req, res) => {
       status: "no_account",
       error: "No account found. Please sign up first.",
     });
+  }
+
+  if (isPendingDeleteUser(user)) {
+    return sendPendingDeleteAuthResponse(res, user);
   }
 
   // 🧠 Compute profile complete
@@ -181,7 +195,11 @@ router.post("/google", async (req, res) => {
        - Existing account blocks signup.
        - New email returns a clean profile draft for mobile onboarding.
     ------------------------------------------------------------ */
-    if (flowMode === "signup") {
+      if (flowMode === "signup") {
+      if (user && isPendingDeleteUser(user)) {
+        return sendPendingDeleteAuthResponse(res, user);
+      }
+
       if (user) {
         return res.status(409).json({
           status: "account_exists",
@@ -205,12 +223,16 @@ router.post("/google", async (req, res) => {
        LOGIN MODE
        - Missing account blocks login.
     ------------------------------------------------------------ */
-    if (!user) {
+       if (!user) {
       console.log("❌ Google login attempted with NO ACCOUNT:", emailLower);
       return res.status(404).json({
         status: "no_account",
         error: "No account associated with this email. Sign up to continue.",
       });
+    }
+
+    if (isPendingDeleteUser(user)) {
+      return sendPendingDeleteAuthResponse(res, user);
     }
 
     const isProfileComplete = computeProfileComplete(user);

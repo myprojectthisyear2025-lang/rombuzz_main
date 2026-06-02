@@ -34,6 +34,10 @@ const db = require("../models/db.lowdb");
 const { Resend } = require("resend");
 const authMiddleware = require("./auth-middleware");
 const { baseSanitizeUser } = require("../utils/helpers");
+const {
+  getDeleteAccountPreview,
+  startAccountDeletion,
+} = require("../services/accountDeletionService");
 
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
@@ -75,50 +79,68 @@ router.patch("/deactivate", authMiddleware, async (req, res) => {
 
 
 /* ============================================================
-   🗑️ DELETE /api/account/delete (MongoDB version)
+   🧾 GET /api/account/delete-preview
    ------------------------------------------------------------
-   Permanently deletes a user's account and all related data.
+   Returns wallet/forfeiture info before account deletion.
 ============================================================ */
-const PostModel = require("../models/PostModel");
-const Notification = require("../models/Notification");
-const Match = require("../models/Match");
-const ChatRoom = require("../models/ChatRoom");
-const Relationship = require("../models/Relationship");
+router.get("/delete-preview", authMiddleware, async (req, res) => {
+  try {
+    const preview = await getDeleteAccountPreview(req.user?.id);
+    return res.json({
+      success: true,
+      ...preview,
+    });
+  } catch (err) {
+    console.error("❌ delete-preview error:", err);
 
+    return res.status(err.statusCode || 500).json({
+      error: err.code || "DELETE_PREVIEW_FAILED",
+      message: err.message || "Failed to preview account deletion.",
+    });
+  }
+});
+
+/* ============================================================
+   🗑️ DELETE /api/account/delete
+   ------------------------------------------------------------
+   Starts irreversible deletion:
+   - user disappears immediately
+   - email is held for 7 days
+   - expired hold record is wiped by cleanup job
+============================================================ */
 router.delete("/delete", authMiddleware, async (req, res) => {
   try {
     const uid = req.user?.id;
-    if (!uid)
+    if (!uid) {
       return res.status(401).json({ error: "Unauthorized: missing user ID" });
+    }
 
-    const user = await User.findOne({ id: uid });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const confirmForfeit =
+      req.body?.confirmForfeit === true ||
+      req.body?.confirmForfeit === "true";
 
-    const emailLower = (user.email || "").trim().toLowerCase();
-
-    // Remove all user-linked entities
-    await Promise.all([
-      User.deleteOne({ id: uid }),
-      PostModel.deleteMany({ userId: uid }),
-      Notification.deleteMany({ $or: [{ toId: uid }, { fromId: uid }] }),
-      Match.deleteMany({
-        $or: [{ user1: uid }, { user2: uid }, { users: uid }],
-      }),
-      ChatRoom.deleteMany({ participants: uid }),
-      Relationship.deleteMany({ $or: [{ from: uid }, { to: uid }] }),
-    ]);
-
-    console.log(`🗑️ Account deleted permanently for ${emailLower}`);
-
-    return res.json({
-      success: true,
-      message: "Account deleted permanently — you can now sign up again.",
+    const result = await startAccountDeletion(uid, {
+      confirmForfeit,
     });
+
+    return res.json(result);
   } catch (err) {
-    console.error("❌ Error deleting account:", err);
-    res.status(500).json({
-      error: "Server error deleting account",
-      details: err.message,
+    console.error("❌ Error starting account deletion:", err);
+
+    if (err?.code === "BUZZCOIN_FORFEIT_CONFIRMATION_REQUIRED") {
+      return res.status(409).json({
+        error: err.code,
+        code: err.code,
+        message:
+          "You still have BuzzCoins or Creator balance. Confirm forfeiture before deleting your account.",
+        wallet: err.wallet,
+        holdDays: err.holdDays,
+      });
+    }
+
+    return res.status(err.statusCode || 500).json({
+      error: err.code || "DELETE_ACCOUNT_FAILED",
+      message: err.message || "Server error deleting account",
     });
   }
 });

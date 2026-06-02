@@ -2,13 +2,13 @@
  * ============================================================
  * 📁 File: routes/auth-middleware.js
  * 🧩 Purpose: Express middleware that authenticates requests via JWT
- *             and blocks banned / suspended / deactivated accounts.
+ *             and blocks banned / suspended / deactivated / pending-delete accounts.
  *
  * Behavior:
  *   - Reads Authorization header: "Bearer <token>"
  *   - Verifies JWT using process.env.JWT_SECRET
  *   - Looks up the user in MongoDB
- *   - Blocks protected route access if account is banned/suspended/deactivated
+ *   - Blocks protected route access if account is banned/suspended/deactivated/pending_delete
  *   - On success: attaches { id, email } to req.user and calls next()
  *
  * Dependencies:
@@ -24,8 +24,13 @@
 
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const { isPendingDeleteUser } = require("../services/accountDeletionService");
 
 function getAccountStatus(user = {}) {
+  if (isPendingDeleteUser(user)) {
+    return "pending_delete";
+  }
+
   const visibility = String(user?.visibility || "").trim().toLowerCase();
   const moderationStatus = String(user?.moderation?.status || "")
     .trim()
@@ -120,10 +125,19 @@ module.exports = async function authMiddleware(req, res, next) {
       });
     }
 
-    if (accountStatus === "deactivated") {
+      if (accountStatus === "deactivated") {
       return res.status(403).json({
         error: "ACCOUNT_DEACTIVATED",
         message: "This account is deactivated.",
+      });
+    }
+
+    if (accountStatus === "pending_delete") {
+      return res.status(403).json({
+        error: "ACCOUNT_PENDING_DELETE",
+        message:
+          "This account has been deleted and is waiting for permanent cleanup.",
+        reusableAfter: user?.deletion?.purgeAfter || null,
       });
     }
 

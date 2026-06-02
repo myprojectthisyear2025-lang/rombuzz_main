@@ -31,6 +31,16 @@ const User = require("../../models/User");
 const { signToken } = require("../../utils/jwt");
 const { JWT_SECRET, TOKEN_EXPIRES_IN } = require("../../config/env");
 const { baseSanitizeUser } = require("../../utils/helpers");
+const { isPendingDeleteUser } = require("../../services/accountDeletionService");
+
+function sendPendingDeleteOtpResponse(res, user) {
+  return res.status(423).json({
+    status: "account_pending_delete",
+    error:
+      "This email is on a 7-day deletion hold. You can create a fresh account with this email after the hold ends.",
+    reusableAfter: user?.deletion?.purgeAfter || null,
+  });
+}
 
 /* ============================================================
    📩 SEND VERIFICATION CODE
@@ -44,8 +54,12 @@ router.post("/send-code", async (req, res) => {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    // 1️⃣ Upsert user record with OTP
+     // 1️⃣ Upsert user record with OTP
     let user = await User.findOne({ email: emailLower });
+
+    if (user && isPendingDeleteUser(user)) {
+      return sendPendingDeleteOtpResponse(res, user);
+    }
 
     if (!user) {
       user = await User.create({
@@ -192,8 +206,12 @@ router.post("/verify-code", async (req, res) => {
       isExpired: user?.codeExpiresAt ? user.codeExpiresAt < new Date() : 'no expiry'
     });
 
-    if (!user)
+      if (!user)
       return res.status(404).json({ error: "No OTP request found" });
+
+    if (isPendingDeleteUser(user)) {
+      return sendPendingDeleteOtpResponse(res, user);
+    }
 
     // Check if OTP exists
     if (!user.verificationCode || user.verificationCode.trim() === "") {
@@ -238,10 +256,14 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "Email required" });
 
     const emailLower = String(email).trim().toLowerCase();
-    let user = await User.findOne({ email: emailLower });
+       let user = await User.findOne({ email: emailLower });
 
     if (!user)
       return res.status(404).json({ error: "No OTP request found" });
+
+    if (isPendingDeleteUser(user)) {
+      return sendPendingDeleteOtpResponse(res, user);
+    }
 
     // ✅ CRITICAL: Verify OTP is already validated
     if (!user.isVerified) {

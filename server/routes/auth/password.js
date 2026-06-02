@@ -16,6 +16,16 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 const User = require("../../models/User");
 const PasswordReset = require("../../models/PasswordReset");
+const { isPendingDeleteUser } = require("../../services/accountDeletionService");
+
+function sendPendingDeletePasswordResponse(res, user) {
+  return res.status(423).json({
+    status: "account_pending_delete",
+    error:
+      "This account was deleted and cannot reset password during the 7-day hold.",
+    reusableAfter: user?.deletion?.purgeAfter || null,
+  });
+}
 
 /* ============================================================
    🔐 POST /api/auth/forgot-password
@@ -30,9 +40,13 @@ router.post("/forgot-password", async (req, res) => {
     const emailLower = String(email).trim().toLowerCase();
 
     // 🔒 Do NOT leak account existence
-    const user = await User.findOne({ email: emailLower }).lean();
+      const user = await User.findOne({ email: emailLower }).lean();
     if (!user) {
       return res.json({ success: true });
+    }
+
+    if (isPendingDeleteUser(user)) {
+      return sendPendingDeletePasswordResponse(res, user);
     }
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
@@ -110,7 +124,13 @@ router.post("/verify-reset-code", async (req, res) => {
     if (!email || !code)
       return res.status(400).json({ error: "Email and code required" });
 
-    const emailLower = String(email).trim().toLowerCase();
+       const emailLower = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: emailLower }).lean();
+
+    if (user && isPendingDeleteUser(user)) {
+      return sendPendingDeletePasswordResponse(res, user);
+    }
+
     const reset = await PasswordReset.findOne({ email: emailLower });
 
     if (!reset)
@@ -154,8 +174,12 @@ router.post("/reset-password", async (req, res) => {
     if (reset.code !== code)
       return res.status(400).json({ error: "Invalid reset code" });
 
-    const user = await User.findOne({ email: emailLower });
+      const user = await User.findOne({ email: emailLower });
     if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (isPendingDeleteUser(user)) {
+      return sendPendingDeletePasswordResponse(res, user);
+    }
 
     user.passwordHash = await bcrypt.hash(password, 10);
     await user.save();
