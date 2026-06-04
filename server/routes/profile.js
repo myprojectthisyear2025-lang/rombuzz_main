@@ -40,6 +40,84 @@ const Notification = require("../models/Notification");
 const Match = require("../models/Match");
 const { sendNotification } = require("../utils/helpers");
 const PrivateNote = require("../models/PrivateNote");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
+  if (!item) return item;
+
+  if (typeof item === "string") {
+    return signR2Value(item, expiresInSeconds);
+  }
+
+  const rawUrl = normalizeMediaString(
+    item.url ||
+      item.mediaUrl ||
+      item.fileUrl ||
+      item.secure_url ||
+      item.src ||
+      item.imageUrl ||
+      item.videoUrl ||
+      ""
+  );
+
+  const rawKey = normalizeMediaString(item.r2Key || item.key || "");
+  const key = rawKey || (isR2Key(rawUrl) ? rawUrl : "");
+
+  const signedUrl = key
+    ? await getSignedMediaUrl(key, expiresInSeconds)
+    : rawUrl;
+
+  return {
+    ...item,
+    url: signedUrl,
+    mediaUrl: signedUrl,
+    fileUrl: signedUrl,
+    r2Key: key || item.r2Key || "",
+  };
+}
+
+async function signR2UserMedia(user = {}) {
+  const next = { ...(user || {}) };
+
+  next.avatar = await signR2Value(next.avatar, 21600);
+  next.voiceUrl = await signR2Value(next.voiceUrl, 3600);
+
+  if (Array.isArray(next.media)) {
+    next.media = await Promise.all(
+      next.media.map((item) => signR2MediaItem(item, 7200))
+    );
+  }
+
+  if (Array.isArray(next.photos)) {
+    next.photos = await Promise.all(
+      next.photos.map((item) => signR2MediaItem(item, 7200))
+    );
+  }
+
+  return next;
+}
+
+async function signR2PostMedia(post = {}) {
+  const next = { ...(post || {}) };
+
+  if (next.mediaUrl) {
+    next.mediaUrl = await signR2Value(next.mediaUrl, 7200);
+  }
+
+  return next;
+}
 
 /* ============================================================
    ðŸ‘¤ SECTION 1: FULL PROFILE (with media & posts)
@@ -66,38 +144,43 @@ router.get("/profile/full", authMiddleware, async (req, res) => {
       .limit(20)
       .lean();
 
-     // 4ï¸âƒ£ Build response payload
+       // 4ï¸âƒ£ Build response payload
     const sanitized = baseSanitizeUser(user);
+    const signedUser = await signR2UserMedia(user);
+    const signedPosts = await Promise.all(
+      posts.map((post) => signR2PostMedia(post))
+    );
 
     res.json({
       user: {
         ...sanitized,
+        ...signedUser,
 
         // âœ… FORCE INCLUDE: editable profile fields (so mobile can persist after refresh/restart)
-           firstName: user.firstName ?? sanitized.firstName ?? "",
-        lastName: user.lastName ?? sanitized.lastName ?? "",
-        bio: user.bio ?? sanitized.bio ?? "",
-        gender: user.gender ?? sanitized.gender ?? "",
-        dob: user.dob ?? sanitized.dob ?? "",
-        city: user.city ?? sanitized.city ?? "",
-        height: user.height ?? sanitized.height ?? "",
-        orientation: user.orientation ?? sanitized.orientation ?? "",
-        lookingFor: user.lookingFor ?? sanitized.lookingFor ?? "",
-        likes: user.likes ?? sanitized.likes ?? [],
-        dislikes: user.dislikes ?? sanitized.dislikes ?? [],
-        interests: user.interests ?? sanitized.interests ?? [],
-        hobbies: user.hobbies ?? sanitized.hobbies ?? [],
-        favorites: Array.isArray(user.favorites) ? user.favorites : [],
-        voiceUrl: user.voiceUrl ?? "",
-        voiceDurationSec: Number(user.voiceDurationSec || 0),
+        firstName: signedUser.firstName ?? sanitized.firstName ?? "",
+        lastName: signedUser.lastName ?? sanitized.lastName ?? "",
+        bio: signedUser.bio ?? sanitized.bio ?? "",
+        gender: signedUser.gender ?? sanitized.gender ?? "",
+        dob: signedUser.dob ?? sanitized.dob ?? "",
+        city: signedUser.city ?? sanitized.city ?? "",
+        height: signedUser.height ?? sanitized.height ?? "",
+        orientation: signedUser.orientation ?? sanitized.orientation ?? "",
+        lookingFor: signedUser.lookingFor ?? sanitized.lookingFor ?? "",
+        likes: signedUser.likes ?? sanitized.likes ?? [],
+        dislikes: signedUser.dislikes ?? sanitized.dislikes ?? [],
+        interests: signedUser.interests ?? sanitized.interests ?? [],
+        hobbies: signedUser.hobbies ?? sanitized.hobbies ?? [],
+        favorites: Array.isArray(signedUser.favorites) ? signedUser.favorites : [],
+        voiceUrl: signedUser.voiceUrl ?? "",
+        voiceDurationSec: Number(signedUser.voiceDurationSec || 0),
 
         // ✅ keep your media logic (web/mobile compatibility)
         media:
-          Array.isArray(user.media) && user.media.length > 0
-            ? user.media
-            : user.photos || [],
+          Array.isArray(signedUser.media) && signedUser.media.length > 0
+            ? signedUser.media
+            : signedUser.photos || [],
 
-        posts,
+        posts: signedPosts,
         notifications,
       },
     });
