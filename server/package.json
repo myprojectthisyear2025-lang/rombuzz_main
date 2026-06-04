@@ -8,7 +8,9 @@
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
-  "dependencies": {
+   "dependencies": {
+    "@aws-sdk/client-s3": "^3.744.0",
+    "@aws-sdk/s3-request-presigner": "^3.744.0",
     "agora-token": "^2.0.5",
     "axios": "^1.7.4",
     "bcrypt": "^5.1.1",
