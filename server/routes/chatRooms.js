@@ -34,6 +34,7 @@ const User = require("../models/User");
 const Match = require("../models/Match");
 const Relationship = require("../models/Relationship");
 const { debitBuzzCoins, creditBuzzCoins } = require("../services/buzzCoinService");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 
 // ✅ Proper Socket.IO + state wiring
 const { getIO } = require("../socket");
@@ -42,6 +43,64 @@ const { onlineUsers } = require("../models/state");
 // =======================
 // 🧩 Utilities
 // =======================
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return null;
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+function replaceRbzPayloadUrl(text = "", signedUrl = "") {
+  const raw = String(text || "");
+  const nextUrl = String(signedUrl || "").trim();
+
+  if (!raw.startsWith("::RBZ::") || !nextUrl) return raw;
+
+  try {
+    const payload = JSON.parse(raw.slice("::RBZ::".length));
+    if (!payload || typeof payload !== "object") return raw;
+
+    payload.url = nextUrl;
+    return `::RBZ::${JSON.stringify(payload)}`;
+  } catch {
+    return raw;
+  }
+}
+
+async function signChatMessageMedia(message = {}, expiresInSeconds = 3600) {
+  const base =
+    typeof message?.toObject === "function"
+      ? message.toObject({ flattenMaps: true })
+      : { ...(message || {}) };
+
+  const rawUrl = normalizeMediaString(base.url || "");
+  const key = isR2Key(rawUrl) ? rawUrl : "";
+
+  if (!key) return base;
+
+  const signedUrl = await getSignedMediaUrl(key, expiresInSeconds);
+
+  return {
+    ...base,
+    url: signedUrl,
+    r2Key: key,
+    text: replaceRbzPayloadUrl(base.text, signedUrl),
+  };
+}
+
+async function signChatMessages(messages = [], expiresInSeconds = 3600) {
+  return Promise.all(
+    (messages || []).map((message) =>
+      signChatMessageMedia(message, expiresInSeconds)
+    )
+  );
+}
 
 // Parse participants from roomId
 // Supports both "a_b" and legacy "a__b" formats
@@ -304,8 +363,9 @@ const visible = (room.messages || []).filter((m) => {
 });
 
 const dedupedVisible = dedupeMessagesById(visible);
+const signedVisible = await signChatMessages(dedupedVisible, 3600);
 
-res.json(dedupedVisible);
+res.json(signedVisible);
 
   } catch (err) {
     console.error("❌ GET chat room error:", err);
@@ -445,16 +505,18 @@ const room = await getRoomDoc(roomId);
 room.messages.push(msg);
 await room.save();
 
+const signedMsg = await signChatMessageMedia(msg, 3600);
+
 // ✅ Socket events (room + direct)
 const io = getIO();
 
 // 🔥 FIX: Emit chat:message (frontend listens for this)
-io.to(roomId).emit("chat:message", msg);
+io.to(roomId).emit("chat:message", signedMsg);
 
 // 🔥 Also send to peer's private room in case they are not in the chat room
 const sid = onlineUsers?.[toId];
 if (sid) {
-  io.to(sid).emit("chat:message", msg);
+  io.to(sid).emit("chat:message", signedMsg);
 }
 
 // ✅ NEW: emit unread summary update to receiver (server-accurate)
@@ -470,18 +532,18 @@ try {
 // 🔥 Navbar/unread bubble handler
 if (sid) {
   io.to(sid).emit("direct:message", {
-    id: msg.id,
+    id: signedMsg.id,
     roomId,
     from: fromId,
     to: toId,
-    time: msg.time,
-    preview: (msg.text || "").slice(0, 80),
-    type: msg.type || "text",
+    time: signedMsg.time,
+    preview: (signedMsg.text || "").slice(0, 80),
+    type: signedMsg.type || "text",
   });
 }
 
 
-    res.json({ message: msg });
+    res.json({ message: signedMsg });
   } catch (err) {
     console.error("❌ POST message error:", err);
     res.status(500).json({ error: "Failed to send message" });
@@ -1067,9 +1129,10 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
       msg.gift.unlockedBy.push(me);
     }
 
-    await room.save();
+     await room.save();
 
     const updatedMessage = msg.toObject ? msg.toObject() : { ...msg };
+    const signedUpdatedMessage = await signChatMessageMedia(updatedMessage, 3600);
 
       const io = getIO();
     io?.to(roomId).emit("chat:gift:unlocked", {
@@ -1079,7 +1142,7 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
       ownerId,
       priceBC,
       transactionId,
-      message: updatedMessage,
+      message: signedUpdatedMessage,
     });
 
     return res.json({
@@ -1089,7 +1152,7 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
       priceBC,
       transactionId,
       wallet,
-      message: updatedMessage,
+      message: signedUpdatedMessage,
     });
   } catch (err) {
     console.error("❌ unlock error:", err);
