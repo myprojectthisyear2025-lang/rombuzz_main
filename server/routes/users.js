@@ -48,6 +48,81 @@ const User = require("../models/User");
 const Relationship = require("../models/Relationship"); // for likes/blocks
 const Match = require("../models/Match");
 const { onlineUsers } = require("../models/state");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
+  if (!item) return item;
+
+  if (typeof item === "string") {
+    return signR2Value(item, expiresInSeconds);
+  }
+
+  const rawUrl = normalizeMediaString(
+    item.url ||
+      item.mediaUrl ||
+      item.fileUrl ||
+      item.secure_url ||
+      item.src ||
+      item.imageUrl ||
+      item.videoUrl ||
+      ""
+  );
+
+  const rawKey = normalizeMediaString(item.r2Key || item.key || "");
+  const key = rawKey || (isR2Key(rawUrl) ? rawUrl : "");
+
+  const signedUrl = key
+    ? await getSignedMediaUrl(key, expiresInSeconds)
+    : rawUrl;
+
+  return {
+    ...item,
+    url: signedUrl,
+    mediaUrl: signedUrl,
+    fileUrl: signedUrl,
+    r2Key: key || item.r2Key || "",
+  };
+}
+
+async function signR2UserMedia(user = {}) {
+  const next = { ...(user || {}) };
+
+  next.avatar = await signR2Value(next.avatar, 21600);
+  next.voiceUrl = await signR2Value(next.voiceUrl, 3600);
+  next.voiceIntro = await signR2Value(next.voiceIntro, 3600);
+
+  if (Array.isArray(next.media)) {
+    next.media = await Promise.all(
+      next.media.map((item) => signR2MediaItem(item, 7200))
+    );
+  }
+
+  if (Array.isArray(next.photos)) {
+    next.photos = await Promise.all(
+      next.photos.map((item) => signR2MediaItem(item, 7200))
+    );
+  }
+
+  if (Array.isArray(next.reels)) {
+    next.reels = await Promise.all(
+      next.reels.map((item) => signR2MediaItem(item, 7200))
+    );
+  }
+
+  return next;
+}
 
 function isExpoPushToken(token = "") {
   return /^Expo(?:nent)?PushToken\[[^\]]+\]$/.test(String(token || "").trim());
@@ -506,7 +581,9 @@ router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await User.findOne({ id: req.user.id }).lean();
     if (!user) return res.status(404).json({ error: "User not found" });
-    res.json(baseSanitizeUser(user));
+
+    const signedUser = await signR2UserMedia(user);
+    res.json(baseSanitizeUser(signedUser));
   } catch (err) {
     console.error("âŒ /users/me error:", err);
     res.status(500).json({ error: "Failed to fetch user" });
@@ -878,7 +955,9 @@ router.put("/me", authMiddleware, async (req, res) => {
     ).lean();
 
     if (!user) return res.status(404).json({ error: "User not found" });
-    res.json({ user: baseSanitizeUser(user) });
+
+    const signedUser = await signR2UserMedia(user);
+    res.json({ user: baseSanitizeUser(signedUser) });
   } catch (err) {
     console.error("❌ PUT /users/me error:", err);
     res.status(500).json({ error: "Failed to update profile" });
@@ -902,7 +981,11 @@ router.get("/blocks", authMiddleware, async (req, res) => {
       .select("id firstName lastName avatar")
       .lean();
 
-    res.json({ blocks: blocked });
+    const signedBlocked = await Promise.all(
+      blocked.map((item) => signR2UserMedia(item))
+    );
+
+    res.json({ blocks: signedBlocked });
   } catch (err) {
     console.error("âŒ GET /users/blocks error:", err);
     res.status(500).json({ error: "Failed to fetch blocks" });
@@ -949,6 +1032,20 @@ router.get("/:id", authMiddleware, async (req, res) => {
     const profileGallery = viewProfileGallery;
     const distancePayload = buildProfileDistancePayload(viewer, user, req.query);
 
+      const signedAvatar = await signR2Value(user.avatar, 21600);
+    const signedVoiceUrl = await signR2Value(user.voiceUrl, 3600);
+    const signedProfileMedia = await Promise.all(
+      profileGallery.media.map((item) => signR2MediaItem(item, 7200))
+    );
+    const signedProfilePhotos = await Promise.all(
+      profileGallery.photos.map((item) => signR2MediaItem(item, 7200))
+    );
+    const signedProfileReels = canSeeMatchedMedia
+      ? await Promise.all(
+          viewProfileGallery.reels.map((item) => signR2MediaItem(item, 7200))
+        )
+      : [];
+
     res.json({
       matched: canSeeMatchedMedia,
       user: {
@@ -957,7 +1054,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
         lastName: user.lastName,
         name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim(),
         dob: user.dob,
-        avatar: user.avatar,
+        avatar: signedAvatar,
         bio: user.bio,
 
         pronouns: user.pronouns,
@@ -992,17 +1089,17 @@ router.get("/:id", authMiddleware, async (req, res) => {
         likes: user.likes,
         dislikes: user.dislikes,
 
-            interests: user.interests,
+        interests: user.interests,
         hobbies: user.hobbies,
 
-        media: profileGallery.media,
-        photos: profileGallery.photos,
-        reels: canSeeMatchedMedia ? viewProfileGallery.reels : [],
+        media: signedProfileMedia,
+        photos: signedProfilePhotos,
+        reels: signedProfileReels,
         matched: canSeeMatchedMedia,
-        voiceIntro: user.voiceUrl,
-        voiceUrl: user.voiceUrl,
+        voiceIntro: signedVoiceUrl,
+        voiceUrl: signedVoiceUrl,
         voiceDurationSec: Number(user.voiceDurationSec || 0),
-             distanceMeters: distancePayload.distanceMeters,
+        distanceMeters: distancePayload.distanceMeters,
         distanceUnit: distancePayload.distanceUnit,
         distanceValue: distancePayload.distanceValue,
         distanceText: distancePayload.distanceText,
