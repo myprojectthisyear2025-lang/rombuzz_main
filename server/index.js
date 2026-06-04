@@ -49,14 +49,14 @@ const fetch = (...args) =>
 const { signToken } = require('./utils/jwt');
 
 // =======================
-// ðŸ“¦ DATABASE (modularized) â€” LowDB (legacy) + MongoDB init
+// 📦 DATABASE (modularized) — LowDB (legacy) + MongoDB init
 // =======================
-// ðŸ“¦ DATABASE (modularized) â€” LowDB (legacy) + MongoDB init + User sync
+// 📦 DATABASE (modularized) — LowDB (legacy) + MongoDB init + User sync
 const db = require("./models/db.lowdb");
 require("./models/writeGuard")(db);
-const { initMongo } = require("./config/db");  // â­ REAL Mongo connection
+const { initMongo } = require("./config/db");  // ⭐ REAL Mongo connection
 
-// ðŸ”„ Optional one-time user sync on startup
+// 🔄 Optional one-time user sync on startup
 const { bulkSyncAllUsers } = require("./modules/userSync");
 (async () => {
   try {
@@ -64,7 +64,7 @@ const { bulkSyncAllUsers } = require("./modules/userSync");
     if (db.data?.users?.length) {
       await bulkSyncAllUsers(db.data.users);
     } else {
-      console.log("âš™ï¸  No users found in LowDB for sync");
+      console.log("⚙️  No users found in LowDB for sync");
     }
   } catch (err) {
     console.error("User bulk sync error:", err);
@@ -72,12 +72,7 @@ const { bulkSyncAllUsers } = require("./modules/userSync");
 })();
 
 // =======================
-// â˜ï¸ CLOUDINARY CONFIG (modularized)
-// =======================
-const cloudinary = require('./config/cloudinary');
-
-// =======================
-// ðŸ’« VIBE UTILITIES (modularized)
+// 💫 VIBE UTILITIES (modularized)
 // =======================
 const {
   PUBLIC_VIBES,
