@@ -160,6 +160,7 @@ app.use('/api', require('./routes/profile'));
 // ðŸ‘¤ USERS & NOTIFICATIONS
 app.use('/api/users', require('./routes/users'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/admin/announcements', require('./routes/adminAnnouncements'));
 
 // âš™ï¸ SETTINGS & ACCOUNT
 app.use('/api/settings', require('./routes/settings'));
