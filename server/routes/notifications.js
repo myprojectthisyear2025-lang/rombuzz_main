@@ -54,6 +54,50 @@ async function signR2Value(value, expiresInSeconds = 3600) {
   return getSignedMediaUrl(raw, expiresInSeconds);
 }
 
+function getAdminBroadcastEmails() {
+  return String(
+    process.env.ADMIN_NOTIFICATION_EMAILS ||
+      process.env.ADMIN_EMAILS ||
+      process.env.ADMIN_EMAIL ||
+      ""
+  )
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+async function canSendAdminBroadcast(req) {
+  if (!req?.user?.id) return false;
+
+  if (
+    req.user.role === "admin" ||
+    req.user.isAdmin === true ||
+    req.user.admin === true
+  ) {
+    return true;
+  }
+
+  const adminEmails = getAdminBroadcastEmails();
+  if (!adminEmails.length) return false;
+
+  const currentUser = await User.findOne({ id: req.user.id })
+    .select("id email role isAdmin admin")
+    .lean();
+
+  if (!currentUser) return false;
+
+  if (
+    currentUser.role === "admin" ||
+    currentUser.isAdmin === true ||
+    currentUser.admin === true
+  ) {
+    return true;
+  }
+
+  const email = String(currentUser.email || "").trim().toLowerCase();
+  return !!email && adminEmails.includes(email);
+}
+
 async function enrichNotificationActor(notification = {}) {
   const out = { ...notification };
   const fromId = String(out.fromId || "").trim();
@@ -122,9 +166,13 @@ router.get("/", authMiddleware, async (req, res) => {
       // Keep existing valid hrefs, but still return the enriched routing fields above.
       if (out.href?.startsWith("/")) return out;
 
-      switch (n.type) {
+           switch (n.type) {
         case "wingman":
           out.href = "/discover";
+          break;
+
+        case "rombuzz":
+          out.href = "/notifications";
           break;
 
         case "match":
@@ -174,10 +222,83 @@ router.get("/", authMiddleware, async (req, res) => {
       notifs.map((item) => enrichNotificationActor(enrich(item)))
     );
 
-    res.json({ notifications: enriched });
+     res.json({ notifications: enriched });
   } catch (err) {
     console.error("❌ GET /notifications error:", err);
     res.status(500).json({ error: "Failed to fetch notifications" });
+  }
+});
+
+router.post("/admin/broadcast", authMiddleware, async (req, res) => {
+  try {
+    const allowed = await canSendAdminBroadcast(req);
+    if (!allowed) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const message = String(req.body?.message || "").trim();
+    const href = String(req.body?.href || "/notifications").trim() || "/notifications";
+
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
+
+    if (message.length > 500) {
+      return res.status(400).json({ error: "Message must be 500 characters or less" });
+    }
+
+    const users = await User.find({ id: { $exists: true, $ne: "" } })
+      .select("id")
+      .lean();
+
+    const userIds = [
+      ...new Set(
+        users
+          .map((user) => String(user.id || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    let sent = 0;
+    let failed = 0;
+    const chunkSize = 50;
+
+    for (let i = 0; i < userIds.length; i += chunkSize) {
+      const chunk = userIds.slice(i, i + chunkSize);
+
+      const results = await Promise.allSettled(
+        chunk.map((toId) =>
+          sendNotification(toId, {
+            fromId: "system",
+            type: "rombuzz",
+            message,
+            href,
+            entity: "rombuzz_admin",
+            entityId: "broadcast",
+            routeContext: "admin_broadcast",
+          })
+        )
+      );
+
+      for (const result of results) {
+        if (result.status === "fulfilled" && result.value) {
+          sent += 1;
+        } else {
+          failed += 1;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "RomBuzz broadcast notification sent",
+      totalUsers: userIds.length,
+      sent,
+      failed,
+    });
+  } catch (err) {
+    console.error("POST /notifications/admin/broadcast error:", err);
+    res.status(500).json({ error: "Failed to send RomBuzz broadcast" });
   }
 });
 

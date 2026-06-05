@@ -24,6 +24,17 @@ async function createNotification({
   entityId,
   postId,
   postOwnerId,
+  targetType,
+  targetId,
+  targetOwnerId,
+  commentId,
+  replyId,
+  routeContext,
+  via,
+  buzzType,
+  transactionId,
+  priceBC,
+  streak,
 }) {
   return sendNotification(toId, {
     fromId,
@@ -34,6 +45,17 @@ async function createNotification({
     entityId,
     postId,
     postOwnerId,
+    targetType,
+    targetId,
+    targetOwnerId,
+    commentId,
+    replyId,
+    routeContext,
+    via,
+    buzzType,
+    transactionId,
+    priceBC,
+    streak,
   });
 }
 

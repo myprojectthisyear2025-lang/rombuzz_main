@@ -20,24 +20,25 @@ const notificationSchema = new mongoose.Schema(
     id: { type: String, required: true, unique: true, index: true }, // shortid-compatible
     toId: { type: String, required: true, index: true }, // recipient user
     fromId: { type: String, default: "" }, // sender (userId or "system")
-    type: {
+      type: {
       type: String,
-          enum: [
-         "wingman",
-         "match",
-         "buzz",
-         "like",   // legacy (will be phased out)
-         "gift",   // ✅ new
-         "comment",
-         "reaction",
-         "new_post",
-         "share",
-         "system",
-       ],
+      enum: [
+        "wingman",
+        "rombuzz",
+        "match",
+        "buzz",
+        "like",   // legacy (will be phased out)
+        "gift",   // ✅ new
+        "comment",
+        "reaction",
+        "new_post",
+        "share",
+        "system",
+      ],
 
       default: "system",
     },
-     message: { type: String, required: true },
+    message: { type: String, required: true },
     href: { type: String, default: "" },
 
      // Legacy routing fields
