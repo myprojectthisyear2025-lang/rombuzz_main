@@ -46,6 +46,7 @@ import AdminReports from "./pages/admin/AdminReports";
 import AdminReportDetail from "./pages/admin/AdminReportDetail";
 import AdminSupport from "./pages/admin/AdminSupport";
 import AdminSupportDetail from "./pages/admin/AdminSupportDetail";
+import AdminAnnouncements from "./pages/admin/AdminAnnouncements";
 
 /*const API_BASE = "https://rombuzz-api.onrender.com/api";
 
@@ -305,6 +306,15 @@ useEffect(() => {
   element={
     <ProtectedRoute>
       <AdminSupportDetail />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/admin/announcements"
+  element={
+    <ProtectedRoute>
+      <AdminAnnouncements />
     </ProtectedRoute>
   }
 />
