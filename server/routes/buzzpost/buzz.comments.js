@@ -32,6 +32,21 @@ const authMiddleware = require("../auth-middleware");
 const PostModel = require("../../models/PostModel");
 const User = require("../../models/User");
 const { baseSanitizeUser } = require("../../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../../utils/r2Media");
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signCommentAuthor(user = {}) {
+  const safe = baseSanitizeUser(user || {});
+  safe.avatar = await signR2Value(safe.avatar, 21600);
+  return safe;
+}
 
 function isVisibleToViewer(comment, viewerId, postOwnerId) {
   const visibleTo = Array.isArray(comment?.visibleTo)
@@ -117,11 +132,13 @@ router.get("/posts/:postId/comments", authMiddleware, async (req, res) => {
       isVisibleToViewer(c, myId, postOwnerId)
     );
 
-    const userIds = [...new Set(visibleComments.map((c) => c.userId))];
+       const userIds = [...new Set(visibleComments.map((c) => c.userId))];
 
     const authors = await User.find({ id: { $in: userIds } }).lean();
     const authorMap = new Map(
-      authors.map((u) => [String(u.id), baseSanitizeUser(u)])
+      await Promise.all(
+        authors.map(async (u) => [String(u.id), await signCommentAuthor(u)])
+      )
     );
 
     const comments = visibleComments.map((c) => ({

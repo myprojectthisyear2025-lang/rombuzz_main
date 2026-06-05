@@ -30,6 +30,72 @@ const User = require("../models/User");
 const Match = require("../models/Match");
 const PostModel = require("../models/PostModel");
 const { baseSanitizeUser } = require("../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
+  if (!item) return item;
+
+  if (typeof item === "string") {
+    return signR2Value(item, expiresInSeconds);
+  }
+
+  const rawUrl = normalizeMediaString(
+    item.url ||
+      item.mediaUrl ||
+      item.fileUrl ||
+      item.secure_url ||
+      item.src ||
+      item.imageUrl ||
+      item.videoUrl ||
+      ""
+  );
+
+  const rawKey = normalizeMediaString(item.r2Key || item.key || "");
+  const key = rawKey || (isR2Key(rawUrl) ? rawUrl : "");
+
+  const signedUrl = key
+    ? await getSignedMediaUrl(key, expiresInSeconds)
+    : rawUrl;
+
+  return {
+    ...item,
+    url: signedUrl,
+    mediaUrl: signedUrl,
+    fileUrl: signedUrl,
+    r2Key: key || item.r2Key || "",
+  };
+}
+
+async function signFeedUser(user = {}) {
+  const safe = baseSanitizeUser(user);
+  safe.avatar = await signR2Value(safe.avatar, 21600);
+
+  if (Array.isArray(safe.media)) {
+    safe.media = await Promise.all(
+      safe.media.map((item) => signR2MediaItem(item, 7200))
+    );
+  }
+
+  if (Array.isArray(safe.photos)) {
+    safe.photos = await Promise.all(
+      safe.photos.map((item) => signR2MediaItem(item, 7200))
+    );
+  }
+
+  return safe;
+}
 
 // ============================================================
 // ✅ Gallery caption tags parser (scope + kind)
@@ -133,10 +199,11 @@ router.get("/", authMiddleware, async (req, res) => {
       if (seen.has(id)) continue;
       seen.add(id);
 
-      feed.push({
+          feed.push({
         ...p,
         id,
-        user: baseSanitizeUser(owner),
+        mediaUrl: await signR2Value(p.mediaUrl, 7200),
+        user: await signFeedUser(owner),
       });
     }
 
@@ -151,10 +218,11 @@ router.get("/", authMiddleware, async (req, res) => {
         if (id && seen.has(id)) continue;
         if (id) seen.add(id);
 
-        feed.push({
+            feed.push({
           ...p,
           id,
-          user: baseSanitizeUser(u),
+          mediaUrl: await signR2Value(p.mediaUrl || p.url || "", 7200),
+          user: await signFeedUser(u),
         });
       }
     }
@@ -176,13 +244,15 @@ router.get("/", authMiddleware, async (req, res) => {
         if (seen.has(id)) continue;
         seen.add(id);
 
+            const signedMedia = await signR2MediaItem(m, 7200);
+
         feed.push({
           id,
           userId: u.id,
 
           // match PostModel shape used by the app
           text: "",
-          mediaUrl: m.url || m.secureUrl || m.mediaUrl || "",
+          mediaUrl: signedMedia.url || signedMedia.secureUrl || signedMedia.mediaUrl || "",
           type: kind === "reel" ? "video" : "image",
           privacy: scope, // "public" or "matches"
           reactions: {},
@@ -196,7 +266,7 @@ router.get("/", authMiddleware, async (req, res) => {
           mediaId: id,
 
           // user card
-          user: baseSanitizeUser(u),
+          user: await signFeedUser(u),
         });
       }
     }
@@ -252,16 +322,18 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
             u.id
           );
 
+                 const signedMedia = await signR2MediaItem(m, 7200);
+
           feed.push({
             id: m.id,
             userId: u.id,
-            mediaUrl: m.url,
+            mediaUrl: signedMedia.url,
             type: m.type === "video" ? "video" : "image",
             caption: m.caption,
             createdAt: m.createdAt || Date.now(),
             comments: visibleComments,
             commentsCount: visibleComments.length,
-            user: baseSanitizeUser(u),
+            user: await signFeedUser(u),
           });
         }
       }

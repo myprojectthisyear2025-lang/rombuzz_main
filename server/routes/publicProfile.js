@@ -27,6 +27,7 @@ const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../routes/auth-middleware");
 const { baseSanitizeUser } = require("../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 
 // Mongo models
 const User = require("../models/User");
@@ -36,6 +37,62 @@ const Relationship = require("../models/Relationship"); // unified like/block mo
 
 const VIDEO_URL_RE = /\.(mp4|mov|m4v|webm|avi|wmv|flv|mkv|mpg|mpeg)(\?|#|$)/i;
 const MATCHED_MEDIA_PRIVACY_RE = /\b(?:scope|privacy):(matches|matched|private)\b/i;
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
+  if (!item) return item;
+
+  if (typeof item === "string") {
+    return signR2Value(item, expiresInSeconds);
+  }
+
+  const rawUrl = normalizeMediaString(
+    item.url ||
+      item.mediaUrl ||
+      item.fileUrl ||
+      item.secure_url ||
+      item.src ||
+      item.imageUrl ||
+      item.videoUrl ||
+      ""
+  );
+
+  const rawKey = normalizeMediaString(item.r2Key || item.key || "");
+  const key = rawKey || (isR2Key(rawUrl) ? rawUrl : "");
+
+  const signedUrl = key
+    ? await getSignedMediaUrl(key, expiresInSeconds)
+    : rawUrl;
+
+  return {
+    ...item,
+    url: signedUrl,
+    mediaUrl: signedUrl,
+    fileUrl: signedUrl,
+    r2Key: key || item.r2Key || "",
+  };
+}
+
+async function signR2Post(post = {}, expiresInSeconds = 7200) {
+  const next = { ...(post || {}) };
+
+  if (next.mediaUrl) {
+    next.mediaUrl = await signR2Value(next.mediaUrl, expiresInSeconds);
+  }
+
+  return next;
+}
 
 function normalizeSharedWith(sharedWith) {
   if (!Array.isArray(sharedWith)) return [];
@@ -191,22 +248,28 @@ const likedMe = await Relationship.exists({ from: targetId, to: viewerId, type: 
         return res.status(404).json({ error: "User not available" });
       }
 
+          const signedPreviewMedia = await Promise.all(
+        (target.photos || [])
+          .slice(0, 3)
+          .map((item) => signR2MediaItem(item, 7200))
+      );
+
       const preview = {
         id: target.id,
         firstName: target.firstName,
         lastName: (target.lastName ? target.lastName[0] : "") || "",
-        avatar: target.avatar || "",
+        avatar: await signR2Value(target.avatar, 21600),
         bio: target.bio || "",
         vibe: target.vibe || "",
         gender: target.gender || "",
         verified: !!target.verified,
         visibilityMode: target.visibilityMode,
         fieldVisibility: target.fieldVisibility || {},
-        media: (target.photos || []).slice(0, 3),
+        media: signedPreviewMedia,
         posts: [],
       };
 
-      return res.json({
+       return res.json({
         user: preview,
         likedByMe: !!likedByMe,
         likedMe: !!likedMe,
@@ -231,8 +294,21 @@ const likedMe = await Relationship.exists({ from: targetId, to: viewerId, type: 
       .sort({ createdAt: -1 })
       .lean();
 
-    safeUser.media = buildMatchedProfileMedia(target, viewerId, isMatched, isSelf);
-    safeUser.posts = posts;
+    safeUser.avatar = await signR2Value(safeUser.avatar, 21600);
+    safeUser.voiceUrl = await signR2Value(safeUser.voiceUrl, 3600);
+    safeUser.voiceIntro = await signR2Value(safeUser.voiceIntro, 3600);
+
+    safeUser.media = await Promise.all(
+      buildMatchedProfileMedia(target, viewerId, isMatched, isSelf).map((item) =>
+        signR2MediaItem(item, 7200)
+      )
+    );
+
+    safeUser.photos = Array.isArray(target.photos)
+      ? await Promise.all(target.photos.map((item) => signR2MediaItem(item, 7200)))
+      : [];
+
+    safeUser.posts = await Promise.all(posts.map((post) => signR2Post(post, 7200)));
 
     res.json({
       user: safeUser,

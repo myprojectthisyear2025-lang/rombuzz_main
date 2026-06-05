@@ -27,6 +27,21 @@ const Match = require("../../models/Match");
 const MediaGift = require("../../models/MediaGift");
 const MediaThread = require("../../models/MediaThread");
 const { baseSanitizeUser } = require("../../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../../utils/r2Media");
+
+async function signR2Value(value, expiresInSeconds = 21600) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signInsightUser(user = {}) {
+  const safe = baseSanitizeUser(user || {});
+  safe.avatar = await signR2Value(safe.avatar, 21600);
+  return safe;
+}
 
 // --------------------------
 // helpers
@@ -73,12 +88,16 @@ router.get("/media/:ownerId/insights/:mediaId", authMiddleware, async (req, res)
     const totalAmount = gifts.reduce((sum, g) => sum + (Number(g.amount) || 0), 0);
 
     // gifters user info
-    const gifterIds = [...new Set(gifts.map((g) => g.fromId).filter(Boolean))];
+      const gifterIds = [...new Set(gifts.map((g) => g.fromId).filter(Boolean))];
     const gifters = gifterIds.length
       ? await User.find({ id: { $in: gifterIds } }).lean()
       : [];
 
-    const gifterMap = new Map(gifters.map((u) => [u.id, baseSanitizeUser(u)]));
+    const gifterMap = new Map(
+      await Promise.all(
+        gifters.map(async (u) => [u.id, await signInsightUser(u)])
+      )
+    );
 
     const giftsUi = gifts.map((g) => ({
       id: g.id,
@@ -94,9 +113,13 @@ router.get("/media/:ownerId/insights/:mediaId", authMiddleware, async (req, res)
       .sort({ updatedAt: -1 })
       .lean();
 
-    const peerIds = [...new Set(threads.map((t) => t.peerId).filter(Boolean))];
+      const peerIds = [...new Set(threads.map((t) => t.peerId).filter(Boolean))];
     const peers = peerIds.length ? await User.find({ id: { $in: peerIds } }).lean() : [];
-    const peerMap = new Map(peers.map((u) => [u.id, baseSanitizeUser(u)]));
+    const peerMap = new Map(
+      await Promise.all(
+        peers.map(async (u) => [u.id, await signInsightUser(u)])
+      )
+    );
 
     const threadsUi = threads.map((t) => {
       const last = (t.messages || []).slice(-1)[0] || null;

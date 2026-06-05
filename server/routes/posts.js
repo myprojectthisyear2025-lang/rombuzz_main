@@ -37,8 +37,40 @@ const {
   sendFeatureRestrictionError,
 } = require("../utils/moderation");
 const { baseSanitizeUser } = require("../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 const PostModel = require("../models/PostModel"); // Mongo posts
 const User = require("../models/User");           // Mongo users (for user card on each post)
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signPostForResponse(post = {}, expiresInSeconds = 7200) {
+  const raw =
+    typeof post?.toObject === "function"
+      ? post.toObject({ flattenMaps: true })
+      : { ...(post || {}) };
+
+  return {
+    ...raw,
+    mediaUrl: await signR2Value(raw.mediaUrl, expiresInSeconds),
+    r2Key: isR2Key(raw.mediaUrl) ? raw.mediaUrl : raw.r2Key || "",
+  };
+}
+
+async function signUserForPost(user = {}) {
+  const safe = baseSanitizeUser(user || {});
+  safe.avatar = await signR2Value(safe.avatar, 21600);
+  return safe;
+}
 
 async function enforcePostingAllowed(req, res) {
   try {
@@ -105,11 +137,13 @@ try {
     .flatMap(m => m.users)
     .filter(id => id !== myId);
 
-  matches.forEach(uid => {
+ const signedCreated = await signPostForResponse(created, 7200);
+
+matches.forEach(uid => {
     const socketId = onlineUsers[uid];
     if (socketId) {
       io.to(String(socketId)).emit("buzz:post:new", {
-        post: created,
+        post: signedCreated,
         fromId: myId,
       });
     }
@@ -118,7 +152,7 @@ try {
   console.log("⚠️ buzz realtime emit failed", e);
 }
 
-res.json({ post: created });
+res.json({ post: await signPostForResponse(created, 7200) });
 
   } catch (err) {
     console.error("❌ Mongo create /posts error:", err);
@@ -142,7 +176,11 @@ router.get("/me", authMiddleware, async (req, res) => {
       return res.json({ posts: [] }); // No posts yet
     }
 
-    res.json({ posts });
+    const signedPosts = await Promise.all(
+      posts.map((post) => signPostForResponse(post, 7200))
+    );
+
+    res.json({ posts: signedPosts });
   } catch (err) {
     console.error("❌ Mongo fetch /posts/me error:", err);
     res.status(500).json({ error: "Failed to load user posts" });
@@ -181,17 +219,21 @@ router.get("/matches", authMiddleware, async (req, res) => {
       return res.json({ posts: [] });
     }
 
-    // 3) Pull user cards for each owner from Mongo (sanitized)
+     // 3) Pull user cards for each owner from Mongo (sanitized)
     const owners = await User.find({ id: { $in: myMatches } }).lean();
     const ownersMap = new Map(
-      owners.map(u => [u.id, baseSanitizeUser(u)])
+      await Promise.all(
+        owners.map(async (u) => [u.id, await signUserForPost(u)])
+      )
     );
 
     // 4) Attach sanitized user to each post (match previous shape)
-    const posts = mongoPosts.map(p => ({
-      ...p,
-      user: ownersMap.get(p.userId) || { id: p.userId, firstName: "", lastName: "", avatar: "" },
-    }));
+    const posts = await Promise.all(
+      mongoPosts.map(async (p) => ({
+        ...(await signPostForResponse(p, 7200)),
+        user: ownersMap.get(p.userId) || { id: p.userId, firstName: "", lastName: "", avatar: "" },
+      }))
+    );
 
     return res.json({ posts });
   } catch (err) {
@@ -232,17 +274,21 @@ router.get("/reels", authMiddleware, async (req, res) => {
       return res.json({ posts: [] });
     }
 
-    // 3️⃣ Get user details from Mongo for display
+       // 3️⃣ Get user details from Mongo for display
     const owners = await User.find({ id: { $in: myMatches } }).lean();
     const ownersMap = new Map(
-      owners.map(u => [u.id, baseSanitizeUser(u)])
+      await Promise.all(
+        owners.map(async (u) => [u.id, await signUserForPost(u)])
+      )
     );
 
     // 4️⃣ Merge posts with owner info
-    const posts = reels.map(p => ({
-      ...p,
-      user: ownersMap.get(p.userId) || { id: p.userId, firstName: "", lastName: "", avatar: "" },
-    }));
+    const posts = await Promise.all(
+      reels.map(async (p) => ({
+        ...(await signPostForResponse(p, 7200)),
+        user: ownersMap.get(p.userId) || { id: p.userId, firstName: "", lastName: "", avatar: "" },
+      }))
+    );
 
        return res.json({ posts });
   } catch (err) {

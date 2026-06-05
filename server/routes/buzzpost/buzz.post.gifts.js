@@ -36,6 +36,21 @@ const PostModel = require("../../models/PostModel");
 const BuzzPostGift = require("../../models/BuzzPostGift");
 const { baseSanitizeUser, sendNotification } = require("../../utils/helpers");
 const { validateGiftPurchase } = require("../../config/rombuzzGifts");
+const { getSignedMediaUrl, isR2Key } = require("../../utils/r2Media");
+
+async function signR2Value(value, expiresInSeconds = 21600) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signGiftUser(user = {}) {
+  const safe = baseSanitizeUser(user || {});
+  safe.avatar = await signR2Value(safe.avatar, 21600);
+  return safe;
+}
 
 function getIO() {
   return global.io || null;
@@ -229,17 +244,21 @@ router.get("/buzz/posts/:postId/gifts/summary", authMiddleware, async (req, res)
         byUserMap[uid].totalBC += Number(g.priceBC) || 0;
       }
 
-      const userIds = Object.keys(byUserMap);
+       const userIds = Object.keys(byUserMap);
       const users = await User.find({ id: { $in: userIds } }).lean();
+      const userMap = new Map(
+        await Promise.all(
+          users.map(async (u) => [String(u.id), await signGiftUser(u)])
+        )
+      );
 
       byUser = userIds
         .map((uid) => {
-          const u = users.find((x) => String(x.id) === String(uid));
           return {
             ...byUserMap[uid],
-            user: u
-              ? baseSanitizeUser(u)
-              : { id: uid, firstName: "Unknown", lastName: "", avatar: "" },
+            user:
+              userMap.get(String(uid)) ||
+              { id: uid, firstName: "Unknown", lastName: "", avatar: "" },
           };
         })
         .sort((a, b) => (b.total || 0) - (a.total || 0));

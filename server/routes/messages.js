@@ -1,3 +1,36 @@
+/**
+ * ============================================================
+ * 📁 File: routes/messages.js
+ * 💬 Purpose: Legacy/simple RomBuzz direct message route.
+ *
+ * Endpoint:
+ *   POST /api/messages        → Send a direct message or media message
+ *
+ * Features:
+ *   - Authenticated message sending
+ *   - Checks chat permission and block status before sending
+ *   - Saves messages to MongoDB Message model
+ *   - Emits real-time socket events to sender and receiver
+ *   - Sends chat push notifications when possible
+ *   - Supports text and media URL messages
+ *   - Signs private Cloudflare R2 media URLs before returning/emitting
+ *
+ * Dependencies:
+ *   - models/Message.js
+ *   - models/User.js
+ *   - models/Match.js
+ *   - auth-middleware.js
+ *   - utils/helpers.js
+ *   - utils/moderation.js
+ *   - utils/r2Media.js
+ *
+ * Notes:
+ *   - This is a legacy/simple message route.
+ *   - Main chat room logic lives in routes/chatRooms.js.
+ *   - Keep this route R2-safe in case older clients or fallback flows still use /api/messages.
+ * ============================================================
+ */
+
 const express = require("express");
 const router = express.Router();
 const shortid = require("shortid");
@@ -10,7 +43,38 @@ const {
 const Message = require("../models/Message");
 const User = require("../models/User");
 const Match = require("../models/Match");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 const { io, onlineUsers } = global;
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return null;
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signMessageMedia(message = {}, expiresInSeconds = 3600) {
+  const base =
+    typeof message?.toObject === "function"
+      ? message.toObject({ flattenMaps: true })
+      : { ...(message || {}) };
+
+  const rawUrl = normalizeMediaString(base.url || "");
+  const key = isR2Key(rawUrl) ? rawUrl : "";
+
+  if (!key) return base;
+
+  return {
+    ...base,
+    url: await getSignedMediaUrl(key, expiresInSeconds),
+    r2Key: key,
+  };
+}
 
 router.post("/", authMiddleware, async (req, res) => {
   try {
@@ -56,40 +120,38 @@ router.post("/", authMiddleware, async (req, res) => {
       createdAt,
     });
 
+      const signedMsg = await signMessageMedia(msg, 3600);
+
     const livePayload = {
-      id: msg.id,
-      roomId: [String(msg.from), String(msg.to)].sort().join("_"),
-      from: msg.from,
-      to: msg.to,
-      time: new Date(msg.createdAt).toISOString(),
-      preview: (msg.text || "").slice(0, 80),
+      id: signedMsg.id,
+      roomId: [String(signedMsg.from), String(signedMsg.to)].sort().join("_"),
+      from: signedMsg.from,
+      to: signedMsg.to,
+      time: new Date(signedMsg.createdAt).toISOString(),
+      preview: (signedMsg.text || "").slice(0, 80),
       type: msgType,
     };
 
     const receiverSocket = onlineUsers?.[to];
     if (receiverSocket) {
-      io?.to(receiverSocket).emit("message", msg);
+      io?.to(receiverSocket).emit("message", signedMsg);
       io?.to(String(to)).emit("direct:message", livePayload);
     }
 
-    const senderSocket = onlineUsers?.[from];
+      const senderSocket = onlineUsers?.[from];
     if (senderSocket) {
-      io?.to(senderSocket).emit("message:delivered", {
-        id: msg.id,
-        to: msg.to,
-        time: msg.createdAt,
-      });
+      io?.to(senderSocket).emit("message", signedMsg);
     }
 
     if (sender && recipient) {
       await sendChatMessagePush({
-        message: msg.toObject ? msg.toObject() : msg,
+        message: signedMsg,
         sender,
         recipient,
       });
     }
 
-    res.json({ message: msg });
+    res.json({ message: signedMsg });
   } catch (err) {
     console.error("Message send error:", err);
     res.status(500).json({ error: "failed to send message" });
@@ -131,14 +193,19 @@ router.get("/", authMiddleware, async (req, res) => {
       .sort({ createdAt: 1 })
       .lean();
 
-     res.json({
-      messages: convo.map((m) => ({
+        const signedConvo = await Promise.all(
+      convo.map((m) => signMessageMedia(m, 3600))
+    );
+
+    res.json({
+      messages: signedConvo.map((m) => ({
         id: m.id,
         from: m.from,
         to: m.to,
         text: m.text || "",
         type: m.type || "text",
         url: m.url || null,
+        r2Key: m.r2Key || "",
         ephemeral: m.ephemeral || "keep",
 
         // 📹 Call-history message metadata

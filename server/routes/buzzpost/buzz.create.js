@@ -31,10 +31,29 @@ const {
   sendFeatureRestrictionError,
 } = require("../../utils/moderation");
 const { sendNotification } = require("../../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../../utils/r2Media");
 
 const PostModel = require("../../models/PostModel");
 const User = require("../../models/User");
 const Match = require("../../models/Match");   // ✅ Now using only one Match model
+
+async function signR2Value(value, expiresInSeconds = 7200) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signCreatedPostForResponse(post = {}) {
+  const raw = typeof post.toObject === "function" ? post.toObject() : { ...(post || {}) };
+
+  return {
+    ...raw,
+    mediaUrl: await signR2Value(raw.mediaUrl, 7200),
+    r2Key: isR2Key(raw.mediaUrl) ? raw.mediaUrl : raw.r2Key || "",
+  };
+}
 
 async function enforcePostingAllowed(req, res) {
   try {
@@ -121,7 +140,7 @@ router.post("/buzz/posts", authMiddleware, async (req, res) => {
       .filter(Boolean);
 
     // Notify matched users depending on privacy settings
-    for (const matchId of matchedUserIds) {
+      for (const matchId of matchedUserIds) {
       if (
         privacy === "matches" ||
         (privacy === "specific" && sharedWith.includes(matchId))
@@ -139,8 +158,10 @@ router.post("/buzz/posts", authMiddleware, async (req, res) => {
       }
     }
 
+    const signedPost = await signCreatedPostForResponse(created);
+
     // Response
-    res.json({ success: true, post: created });
+    res.json({ success: true, post: signedPost });
   } catch (err) {
     console.error("❌ Mongo create /buzz/posts error:", err);
     res.status(500).json({ error: "Failed to create post" });

@@ -1,11 +1,91 @@
+/**
+ * ============================================================
+ * 📁 File: routes/notifications.js
+ * 🔔 Purpose: Manage RomBuzz in-app notifications.
+ *
+ * Endpoints:
+ *   GET    /api/notifications              → Fetch user notifications
+ *   PATCH  /api/notifications/:id/read     → Mark one notification as read
+ *   PATCH  /api/notifications/:id/unread   → Mark one notification as unread
+ *   DELETE /api/notifications/:id          → Delete one notification
+ *   POST   /api/notifications/test         → Create/send test notification
+ *
+ * Features:
+ *   - Returns notifications for the authenticated user
+ *   - Enriches notification routing fields for posts, comments, gifts, shares, and reports
+ *   - Adds sender info/avatar when available
+ *   - Signs private Cloudflare R2 avatars before sending them to the app
+ *   - Supports notification filtering on the mobile side
+ *
+ * Dependencies:
+ *   - models/Notification.js
+ *   - models/User.js
+ *   - auth-middleware.js
+ *   - utils/helpers.js
+ *   - utils/r2Media.js
+ *
+ * Notes:
+ *   - Mounted under /api/notifications in index.js
+ *   - Used by the mobile Notifications tab and real-time notification flow
+ * ============================================================
+ */
+
+
 const express = require("express");
 const router = express.Router();
 const shortid = require("shortid");
 
 const Notification = require("../models/Notification");
 const Block = require("../models/Block");
+const User = require("../models/User");
 const authMiddleware = require("./auth-middleware");
 const { sendNotification } = require("../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function enrichNotificationActor(notification = {}) {
+  const out = { ...notification };
+  const fromId = String(out.fromId || "").trim();
+
+  if (!fromId || fromId === "system") {
+    return out;
+  }
+
+  try {
+    const actor = await User.findOne({ id: fromId })
+      .select("id firstName lastName avatar")
+      .lean();
+
+    if (!actor) return out;
+
+    const signedAvatar = await signR2Value(actor.avatar, 21600);
+
+    out.fromUser = {
+      id: actor.id,
+      firstName: actor.firstName || "",
+      lastName: actor.lastName || "",
+      avatar: signedAvatar || "",
+    };
+
+    out.fromName = [actor.firstName, actor.lastName].filter(Boolean).join(" ").trim();
+    out.fromAvatar = signedAvatar || "";
+  } catch (err) {
+    console.error("⚠️ notification actor enrichment failed:", err?.message || err);
+  }
+
+  return out;
+}
 
 router.get("/", authMiddleware, async (req, res) => {
   try {
@@ -90,9 +170,13 @@ router.get("/", authMiddleware, async (req, res) => {
       return out;
     };
 
-    res.json(notifs.map(enrich));
+       const enriched = await Promise.all(
+      notifs.map((item) => enrichNotificationActor(enrich(item)))
+    );
+
+    res.json({ notifications: enriched });
   } catch (err) {
-    console.error("GET /notifications error:", err);
+    console.error("❌ GET /notifications error:", err);
     res.status(500).json({ error: "Failed to fetch notifications" });
   }
 });

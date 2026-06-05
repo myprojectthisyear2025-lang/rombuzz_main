@@ -40,6 +40,7 @@ const VideoCallSession = require("../models/VideoCallSession");
 const { createRtcToken } = require("../services/agoraTokenService");
 const { sendIncomingVideoCallPush } = require("../services/expoPushService");
 const { isBlocked } = require("../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 
 // Same socket style used by chatRooms.js
 const { getIO } = require("../socket");
@@ -48,6 +49,18 @@ const { onlineUsers } = require("../models/state");
 const CALL_RING_SECONDS = 45;
 const CALL_ROOM_EXPIRES_MINUTES = 10;
 const TOKEN_TTL_SECONDS = 60 * 60;
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
 
 function makeRoomId(a, b) {
   return [String(a), String(b)].sort().join("_");
@@ -63,14 +76,17 @@ function cleanFirstName(value) {
   return text.split(/\s+/).find(Boolean) || "";
 }
 
-function cleanUserSnapshot(user) {
+async function cleanUserSnapshot(user) {
   if (!user) return null;
+
+  const rawAvatar = cleanText(user.avatar || user.profilePic || user.photo);
+  const signedAvatar = await signR2Value(rawAvatar, 21600);
 
   return {
     id: cleanText(user.id || user._id),
     firstName: cleanFirstName(user.firstName),
     lastName: cleanText(user.lastName),
-    avatar: cleanText(user.avatar || user.profilePic || user.photo),
+    avatar: signedAvatar,
   };
 }
 
@@ -97,32 +113,51 @@ function isTerminalStatus(status) {
   );
 }
 
-function publicCall(call) {
+async function publicCall(call) {
   if (!call) return null;
 
+  const raw =
+    typeof call.toObject === "function"
+      ? call.toObject({ flattenMaps: true })
+      : { ...call };
+
+  const caller = raw.caller
+    ? {
+        ...raw.caller,
+        avatar: await signR2Value(raw.caller.avatar, 21600),
+      }
+    : null;
+
+  const receiver = raw.receiver
+    ? {
+        ...raw.receiver,
+        avatar: await signR2Value(raw.receiver.avatar, 21600),
+      }
+    : null;
+
   return {
-    id: call.id,
-    provider: call.provider || "agora",
-    callType: call.callType || "video",
-    status: call.status,
-    callerId: call.callerId,
-    receiverId: call.receiverId,
-    participants: call.participants || [],
-    roomId: call.roomId,
-    channelName: call.channelName,
-    caller: call.caller || null,
-    receiver: call.receiver || null,
-    startedAt: call.startedAt,
-    acceptedAt: call.acceptedAt,
-    declinedAt: call.declinedAt,
-    canceledAt: call.canceledAt,
-    endedAt: call.endedAt,
-    missedAt: call.missedAt,
-    expiresAt: call.expiresAt,
-    endedBy: call.endedBy || "",
-    lastReason: call.lastReason || "",
-    createdAt: call.createdAt,
-    updatedAt: call.updatedAt,
+    id: raw.id,
+    provider: raw.provider || "agora",
+    callType: raw.callType || "video",
+    status: raw.status,
+    callerId: raw.callerId,
+    receiverId: raw.receiverId,
+    participants: raw.participants || [],
+    roomId: raw.roomId,
+    channelName: raw.channelName,
+    caller,
+    receiver,
+    startedAt: raw.startedAt,
+    acceptedAt: raw.acceptedAt,
+    declinedAt: raw.declinedAt,
+    canceledAt: raw.canceledAt,
+    endedAt: raw.endedAt,
+    missedAt: raw.missedAt,
+    expiresAt: raw.expiresAt,
+    endedBy: raw.endedBy || "",
+    lastReason: raw.lastReason || "",
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
   };
 }
 
@@ -174,10 +209,10 @@ async function markExpiredRingingCallsForUser(userId) {
     call.missedAt = now;
     call.endedAt = now;
     call.lastReason = "ring_timeout";
-    await call.save();
+       await call.save();
 
     await createCallHistoryMessage(call, "missed");
-    emitCallEvent(call, "video-call:missed");
+    await emitCallEvent(call, "video-call:missed");
   }
 }
 function emitToUser(userId, eventName, payload) {
@@ -195,9 +230,9 @@ function emitToUser(userId, eventName, payload) {
   }
 }
 
-function emitCallEvent(call, eventName, extra = {}) {
+async function emitCallEvent(call, eventName, extra = {}) {
   const payload = {
-    call: publicCall(call),
+    call: await publicCall(call),
     ...extra,
   };
 
@@ -431,12 +466,12 @@ router.post("/start", authMiddleware, async (req, res) => {
       status: { $in: ["ringing", "accepted"] },
     }).sort({ createdAt: -1 });
 
-    if (existing) {
+      if (existing) {
       const token = createTokenForCall(existing, callerId);
 
       return res.status(409).json({
         error: "Call is already in progress",
-        call: publicCall(existing),
+        call: await publicCall(existing),
         token,
       });
     }
@@ -444,7 +479,7 @@ router.post("/start", authMiddleware, async (req, res) => {
     const callId = safeCallId();
     const roomId = makeRoomId(callerId, peerId);
 
-    const call = await VideoCallSession.create({
+     const call = await VideoCallSession.create({
       id: callId,
       provider: "agora",
       callType: "video",
@@ -454,8 +489,8 @@ router.post("/start", authMiddleware, async (req, res) => {
       participants: [callerId, peerId],
       roomId,
       channelName: safeChannelName(callId),
-      caller: cleanUserSnapshot(caller),
-      receiver: cleanUserSnapshot(receiver),
+      caller: await cleanUserSnapshot(caller),
+      receiver: await cleanUserSnapshot(receiver),
       startedAt: new Date(),
       expiresAt: ringExpiresAt(),
       lastReason: "started",
@@ -464,7 +499,7 @@ router.post("/start", authMiddleware, async (req, res) => {
     const callerToken = createTokenForCall(call, callerId);
 
        emitToUser(peerId, "video-call:incoming", {
-      call: publicCall(call),
+      call: await publicCall(call),
     });
 
     // ✅ Off-app / locked-phone fallback.
@@ -477,13 +512,13 @@ router.post("/start", authMiddleware, async (req, res) => {
     });
 
     emitToUser(callerId, "video-call:ringing", {
-      call: publicCall(call),
+      call: await publicCall(call),
       token: callerToken,
     });
 
     return res.json({
       ok: true,
-      call: publicCall(call),
+      call: await publicCall(call),
       token: callerToken,
     });
   } catch (err) {
@@ -520,7 +555,7 @@ router.get("/active", authMiddleware, async (req, res) => {
 
     return res.json({
       ok: true,
-      call: publicCall(call),
+      call: await publicCall(call),
     });
   } catch (err) {
     console.error("❌ active video call error:", err);
@@ -545,7 +580,7 @@ router.get("/:callId", authMiddleware, async (req, res) => {
 
     return res.json({
       ok: true,
-      call: publicCall(call),
+      call: await publicCall(call),
     });
   } catch (err) {
     console.error("❌ get video call error:", err);
@@ -574,7 +609,7 @@ router.post("/:callId/token", authMiddleware, async (req, res) => {
     if (isTerminalStatus(call.status)) {
       return res.status(409).json({
         error: "call_not_active",
-        call: publicCall(call),
+        call: await publicCall(call),
       });
     }
 
@@ -582,7 +617,7 @@ router.post("/:callId/token", authMiddleware, async (req, res) => {
 
     return res.json({
       ok: true,
-      call: publicCall(call),
+      call: await publicCall(call),
       token,
     });
   } catch (err) {
@@ -616,7 +651,7 @@ router.post("/:callId/accept", authMiddleware, async (req, res) => {
     if (call.status !== "ringing") {
       return res.status(409).json({
         error: "call_not_ringing",
-        call: publicCall(call),
+        call: await publicCall(call),
       });
     }
 
@@ -625,14 +660,14 @@ router.post("/:callId/accept", authMiddleware, async (req, res) => {
       call.missedAt = new Date();
       call.endedAt = new Date();
       call.lastReason = "ring_timeout";
-      await call.save();
+          await call.save();
 
       await createCallHistoryMessage(call, "missed");
-      emitCallEvent(call, "video-call:missed");
+      await emitCallEvent(call, "video-call:missed");
 
       return res.status(410).json({
         error: "call_missed",
-        call: publicCall(call),
+        call: await publicCall(call),
       });
     }
 
@@ -642,13 +677,13 @@ router.post("/:callId/accept", authMiddleware, async (req, res) => {
     call.lastReason = "accepted";
     await call.save();
 
-    const receiverToken = createTokenForCall(call, me);
+      const receiverToken = createTokenForCall(call, me);
 
-    emitCallEvent(call, "video-call:accepted");
+    await emitCallEvent(call, "video-call:accepted");
 
     return res.json({
       ok: true,
-      call: publicCall(call),
+      call: await publicCall(call),
       token: receiverToken,
     });
   } catch (err) {
@@ -680,7 +715,7 @@ router.post("/:callId/decline", authMiddleware, async (req, res) => {
     if (isTerminalStatus(call.status)) {
       return res.json({
         ok: true,
-        call: publicCall(call),
+        call: await publicCall(call),
       });
     }
 
@@ -691,12 +726,14 @@ router.post("/:callId/decline", authMiddleware, async (req, res) => {
     call.lastReason = "declined";
     await call.save();
 
+      await call.save();
+
     await createCallHistoryMessage(call, "declined");
-    emitCallEvent(call, "video-call:declined");
+    await emitCallEvent(call, "video-call:declined");
 
     return res.json({
       ok: true,
-      call: publicCall(call),
+      call: await publicCall(call),
     });
   } catch (err) {
     console.error("❌ video call decline error:", err);
@@ -727,7 +764,7 @@ router.post("/:callId/cancel", authMiddleware, async (req, res) => {
     if (isTerminalStatus(call.status)) {
       return res.json({
         ok: true,
-        call: publicCall(call),
+        call: await publicCall(call),
       });
     }
 
@@ -736,14 +773,14 @@ router.post("/:callId/cancel", authMiddleware, async (req, res) => {
     call.endedAt = new Date();
     call.endedBy = me;
     call.lastReason = "canceled";
-    await call.save();
+      await call.save();
 
     await createCallHistoryMessage(call, "canceled");
-    emitCallEvent(call, "video-call:canceled");
+    await emitCallEvent(call, "video-call:canceled");
 
     return res.json({
       ok: true,
-      call: publicCall(call),
+      call: await publicCall(call),
     });
   } catch (err) {
     console.error("❌ video call cancel error:", err);
@@ -771,7 +808,7 @@ router.post("/:callId/end", authMiddleware, async (req, res) => {
     if (isTerminalStatus(call.status)) {
       return res.json({
         ok: true,
-        call: publicCall(call),
+        call: await publicCall(call),
       });
     }
 
@@ -782,11 +819,11 @@ router.post("/:callId/end", authMiddleware, async (req, res) => {
     await call.save();
 
     await createCallHistoryMessage(call, "ended");
-    emitCallEvent(call, "video-call:ended");
+    await emitCallEvent(call, "video-call:ended");
 
     return res.json({
       ok: true,
-      call: publicCall(call),
+      call: await publicCall(call),
     });
   } catch (err) {
     console.error("❌ video call end error:", err);

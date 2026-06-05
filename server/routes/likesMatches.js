@@ -56,6 +56,19 @@ const {
   isBlocked,
   incMatchStreakOut,
 } = require("../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
 
 // Socket helpers – defer lookup so we don't capture undefined at require-time
 function getIO() {
@@ -733,7 +746,7 @@ router.get("/matches", authMiddleware, async (req, res) => {
 
     const users = await User.find({ id: { $in: ids } }).lean();
 
-    const result = await Promise.all(
+        const result = await Promise.all(
       users.map(async (u) => {
         const otherId = String(u.id);
         const roomId = [selfId, otherId].sort().join("_");
@@ -752,11 +765,15 @@ router.get("/matches", authMiddleware, async (req, res) => {
           ? visibleMessages[visibleMessages.length - 1]
           : null;
 
+        const signedAvatar =
+          (await signR2Value(u.avatar, 21600)) ||
+          "https://via.placeholder.com/150x150?text=No+Photo";
+
         return {
           id: u.id,
           firstName: u.firstName,
           lastName: u.lastName,
-          avatar: u.avatar || "https://via.placeholder.com/150x150?text=No+Photo",
+          avatar: signedAvatar,
           bio: u.bio || "",
           gender: u.gender || "",
           verified: !!u.verified,
@@ -891,18 +908,26 @@ router.get("/social/:type", authMiddleware, async (req, res) => {
         .map((m) => m.users.find((id) => id !== userId));
     } else return res.status(400).json({ error: "Invalid type" });
 
-    const idSet = new Set(targetIds);
-    const result = users
-      .filter((u) => idSet.has(u.id))
-      .map((u) => ({
-        id: u.id,
-        firstName: u.firstName || "",
-        lastName: u.lastName || "",
-        avatar: u.avatar || "https://via.placeholder.com/150x150?text=No+Photo",
-        bio: u.bio || "",
-        gender: u.gender || "",
-        verified: !!u.verified,
-      }));
+      const idSet = new Set(targetIds);
+    const result = await Promise.all(
+      users
+        .filter((u) => idSet.has(u.id))
+        .map(async (u) => {
+          const signedAvatar =
+            (await signR2Value(u.avatar, 21600)) ||
+            "https://via.placeholder.com/150x150?text=No+Photo";
+
+          return {
+            id: u.id,
+            firstName: u.firstName || "",
+            lastName: u.lastName || "",
+            avatar: signedAvatar,
+            bio: u.bio || "",
+            gender: u.gender || "",
+            verified: !!u.verified,
+          };
+        })
+    );
 
     res.json(result);
   } catch (e) {

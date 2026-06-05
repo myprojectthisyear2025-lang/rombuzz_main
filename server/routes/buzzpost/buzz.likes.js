@@ -29,6 +29,22 @@ const authMiddleware = require("../auth-middleware");
 const PostModel = require("../../models/PostModel");
 const User = require("../../models/User");
 const { sendNotification } = require("../../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../../utils/r2Media");
+
+async function signR2Value(value, expiresInSeconds = 21600) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signLikeForResponse(like = {}) {
+  return {
+    ...(like || {}),
+    avatar: await signR2Value(like?.avatar, 21600),
+  };
+}
 
 // =======================================================
 // ✅ Like / Unlike a post (MongoDB)
@@ -88,18 +104,21 @@ router.get("/posts/:postId/likes", authMiddleware, async (req, res) => {
     const { postId } = req.params;
     const myId = req.user.id;
 
-    const post = await PostModel.findOne({ id: postId }).lean();
+      const post = await PostModel.findOne({ id: postId }).lean();
     if (!post) return res.status(404).json({ error: "Post not found" });
 
     const isOwner = post.userId === myId;
+    const signedLikes = isOwner
+      ? await Promise.all((post.likes || []).map((like) => signLikeForResponse(like)))
+      : [];
+
     res.json({
-      likes: isOwner ? post.likes : [],
+      likes: signedLikes,
       likesCount: post.likes?.length || 0,
       isOwner,
     });
   } catch (err) {
     console.error("❌ Mongo GET /posts/:postId/likes error:", err);
-    res.status(500).json({ error: "Failed to fetch likes" });
   }
 });
 

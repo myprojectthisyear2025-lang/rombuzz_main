@@ -26,6 +26,7 @@ const router = express.Router();
 const authMiddleware = require("./auth-middleware");
 
 const User = require("../models/User");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 
 const {
   createMeetRequest,
@@ -246,6 +247,18 @@ function emitMeetMiddleMilestoneUpdate(io, roomId, message, users = []) {
   });
 }
 
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
 function getPublicUser(user = {}) {
   return {
     id: String(user.id || ""),
@@ -261,6 +274,31 @@ function getPublicUser(user = {}) {
   };
 }
 
+async function signPublicUserAvatar(user = {}) {
+  const next = { ...(user || {}) };
+  next.avatar = await signR2Value(next.avatar, 21600);
+  return next;
+}
+
+async function signMeetChatMessageAvatars(message = {}) {
+  if (!message || typeof message !== "object") return message;
+
+  const next =
+    typeof message.toObject === "function"
+      ? message.toObject({ flattenMaps: true })
+      : { ...message };
+
+  if (next.meetMiddleRequest) {
+    next.meetMiddleRequest = {
+      ...next.meetMiddleRequest,
+      fromAvatar: await signR2Value(next.meetMiddleRequest.fromAvatar, 21600),
+      toAvatar: await signR2Value(next.meetMiddleRequest.toAvatar, 21600),
+    };
+  }
+
+  return next;
+}
+
 async function getPublicUserById(userId) {
   const user = await User.findOne(
     { id: String(userId) },
@@ -274,7 +312,8 @@ async function getPublicUserById(userId) {
     }
   ).lean();
 
-  return getPublicUser(user || { id: userId });
+  const publicUser = getPublicUser(user || { id: userId });
+  return signPublicUserAvatar(publicUser);
 }
 
 function scheduleMeetRequestExpiryFromRoute(req, session) {
@@ -298,11 +337,13 @@ function scheduleMeetRequestExpiryFromRoute(req, session) {
         actorId: "",
       });
 
-      if (updateResult?.message && updateResult?.roomId) {
+        if (updateResult?.message && updateResult?.roomId) {
+        const signedMessage = await signMeetChatMessageAvatars(updateResult.message);
+
         emitMeetRequestBubbleUpdate(
           io,
           updateResult.roomId,
-          updateResult.message,
+          signedMessage,
           expiredSession.users || []
         );
       }
@@ -361,12 +402,12 @@ router.post("/request", authMiddleware, async (req, res) => {
         session: result.session,
       });
 
-      chatBubble = bubbleResult.message;
+        chatBubble = await signMeetChatMessageAvatars(bubbleResult.message);
 
       emitChatMessageToPair(
         io,
         bubbleResult.roomId,
-        bubbleResult.message,
+        chatBubble,
         result.session?.users || [fromId, toId]
       );
     } catch (chatErr) {
@@ -534,21 +575,24 @@ router.post("/:sessionId/decline", authMiddleware, async (req, res) => {
       actorId: String(req.user.id),
     });
 
-    if (updateResult?.message && updateResult?.roomId) {
+      if (updateResult?.message && updateResult?.roomId) {
+      const signedMessage = await signMeetChatMessageAvatars(updateResult.message);
+
       emitMeetRequestBubbleUpdate(
         io,
         updateResult.roomId,
-        updateResult.message,
+        signedMessage,
         session.users || []
       );
     }
-
     const payload = {
       success: true,
       session,
       declinedBy: String(req.user.id),
       reason: session.declineReason || "",
-      chatMessage: updateResult?.message || null,
+         chatMessage: updateResult?.message
+        ? await signMeetChatMessageAvatars(updateResult.message)
+        : null,
       createdAt: new Date().toISOString(),
     };
 

@@ -45,8 +45,55 @@ const {
   sendFeatureRestrictionError,
 } = require("../utils/moderation");
 const { onlineUsers } = require("../models/state");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 
 const helpers = require("../utils/helpers");
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
+  if (!item) return item;
+
+  if (typeof item === "string") {
+    return signR2Value(item, expiresInSeconds);
+  }
+
+  const rawUrl = normalizeMediaString(
+    item.url ||
+      item.mediaUrl ||
+      item.fileUrl ||
+      item.secure_url ||
+      item.src ||
+      item.imageUrl ||
+      item.videoUrl ||
+      ""
+  );
+
+  const rawKey = normalizeMediaString(item.r2Key || item.key || "");
+  const key = rawKey || (isR2Key(rawUrl) ? rawUrl : "");
+
+  const signedUrl = key
+    ? await getSignedMediaUrl(key, expiresInSeconds)
+    : rawUrl;
+
+  return {
+    ...item,
+    url: signedUrl,
+    mediaUrl: signedUrl,
+    fileUrl: signedUrl,
+    r2Key: key || item.r2Key || "",
+  };
+}
 
 const LOCAL_RESTRICTED_VALUES = new Set([
   "flirty",
@@ -623,68 +670,77 @@ router.get("/", authMiddleware, async (req, res) => {
     --------------------------- */
     const viewerUsesMiles = isUnitedStatesCountry(viewerCountry || self?.country);
 
-    const sorted = withScores
-      .sort((a, b) => {
-        // higher score first
-        if (b._score !== a._score) return b._score - a._score;
+       const sorted = await Promise.all(
+      withScores
+        .sort((a, b) => {
+          // higher score first
+          if (b._score !== a._score) return b._score - a._score;
 
-        // then closer distance
-        if (a.distanceMeters != null && b.distanceMeters != null) {
-          return a.distanceMeters - b.distanceMeters;
-        }
+          // then closer distance
+          if (a.distanceMeters != null && b.distanceMeters != null) {
+            return a.distanceMeters - b.distanceMeters;
+          }
 
-        // then most recently active
-        return (b._lastActive || 0) - (a._lastActive || 0);
-      })
-      .map((u) => {
-        const hasLocation =
-          typeof u.distanceMeters === "number" && u.distanceMeters >= 0;
+          // then most recently active
+          return (b._lastActive || 0) - (a._lastActive || 0);
+        })
+        .map(async (u) => {
+          const hasLocation =
+            typeof u.distanceMeters === "number" && u.distanceMeters >= 0;
 
-        const distanceText = hasLocation
-          ? formatDiscoverDistanceText(u.distanceMeters, viewerUsesMiles)
-          : "—";
+          const distanceText = hasLocation
+            ? formatDiscoverDistanceText(u.distanceMeters, viewerUsesMiles)
+            : "—";
 
-        return {
-          id: u.id,
-          firstName: u.firstName,
-          lastName: u.lastName,
-          avatar:
-            u.avatar ||
-            "https://via.placeholder.com/400x400?text=No+Photo",
-                bio: u.bio || "",
-          gender: u.gender || "",
-          vibe: u.vibe || "",
+          const signedAvatar =
+            (await signR2Value(u.avatar, 21600)) ||
+            "https://via.placeholder.com/400x400?text=No+Photo";
 
-          // ✅ keep both for backward-compat (mobile used to read "intent")
-          lookingFor: u.lookingFor || "",
-          intent: u.lookingFor || "",
+          const signedMedia = Array.isArray(u.media)
+            ? await Promise.all(
+                u.media.map((item) => signR2MediaItem(item, 7200))
+              )
+            : [];
 
-          verified: !!u.isVerified,
-          zodiac: u.zodiac || "",
+          return {
+            id: u.id,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            avatar: signedAvatar,
+            bio: u.bio || "",
+            gender: u.gender || "",
+            vibe: u.vibe || "",
 
-          loveLanguage: u.loveLanguage || "",
-                distanceMeters: hasLocation ? u.distanceMeters : null,
-          distanceText,
-          status: u._status || "inactive",
-          isOnline: !!onlineUsers[u.id],
+            // ✅ keep both for backward-compat (mobile used to read "intent")
+            lookingFor: u.lookingFor || "",
+            intent: u.lookingFor || "",
 
-          // extra fields used by Discover → ViewProfile preview
-          media: u.media || [],
-          dob: u.dob || null,
-          height: u.height || null,
-          city: u.city || "",
-          orientation: u.orientation || "",
-          interests: u.interests || [],
-          hobbies: u.hobbies || [],
-          favorites: u.favorites || [],
-          visibilityMode: u.visibilityMode || "full",
-          fieldVisibility: u.fieldVisibility || {},
+            verified: !!u.isVerified,
+            zodiac: u.zodiac || "",
 
+            loveLanguage: u.loveLanguage || "",
+            distanceMeters: hasLocation ? u.distanceMeters : null,
+            distanceText,
+            status: u._status || "inactive",
+            isOnline: !!onlineUsers[u.id],
 
-          // debug / tuning (safe to ignore on frontend)
-          _score: u._score,
-        };
-      });
+            // extra fields used by Discover → ViewProfile preview
+            media: signedMedia,
+            dob: u.dob || null,
+            height: u.height || null,
+            city: u.city || "",
+            orientation: u.orientation || "",
+            interests: u.interests || [],
+            hobbies: u.hobbies || [],
+            favorites: u.favorites || [],
+            visibilityMode: u.visibilityMode || "full",
+            fieldVisibility: u.fieldVisibility || {},
+
+            // debug / tuning (safe to ignore on frontend)
+            _score: u._score,
+          };
+        })
+    );
 
     return res.json({ users: sorted });
   } catch (err) {

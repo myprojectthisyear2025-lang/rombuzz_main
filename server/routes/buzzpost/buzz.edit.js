@@ -27,6 +27,25 @@ const {
   sendFeatureRestrictionError,
 } = require("../../utils/moderation");
 const PostModel = require("../../models/PostModel");
+const { getSignedMediaUrl, isR2Key } = require("../../utils/r2Media");
+
+async function signR2Value(value, expiresInSeconds = 7200) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signEditedPostForResponse(post = {}) {
+  const raw = typeof post.toObject === "function" ? post.toObject() : { ...(post || {}) };
+
+  return {
+    ...raw,
+    mediaUrl: await signR2Value(raw.mediaUrl, 7200),
+    r2Key: isR2Key(raw.mediaUrl) ? raw.mediaUrl : raw.r2Key || "",
+  };
+}
 
 async function enforcePostingAllowed(req, res) {
   try {
@@ -54,13 +73,15 @@ router.patch("/posts/:postId", authMiddleware, async (req, res) => {
     if (post.userId !== myId)
       return res.status(403).json({ error: "Not your post" });
 
-    if (typeof text === "string") post.text = text.trim();
+      if (typeof text === "string") post.text = text.trim();
     if (privacy) post.privacy = privacy;
 
     post.updatedAt = Date.now();
     await post.save();
 
-    res.json({ success: true, post });
+    const signedPost = await signEditedPostForResponse(post);
+
+    res.json({ success: true, post: signedPost });
   } catch (err) {
     console.error("❌ Mongo PATCH /posts/:postId error:", err);
     res.status(500).json({ error: "Failed to update post" });

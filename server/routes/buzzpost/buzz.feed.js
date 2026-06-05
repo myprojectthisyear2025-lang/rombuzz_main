@@ -33,6 +33,35 @@ const PostModel = require("../../models/PostModel");
 const User = require("../../models/User");
 const Match = require("../../models/Match");
 const { baseSanitizeUser } = require("../../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../../utils/r2Media");
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signFeedUser(user = {}) {
+  const safe = baseSanitizeUser(user || {});
+  safe.avatar = await signR2Value(safe.avatar, 21600);
+  return safe;
+}
+
+async function signPostForFeed(post = {}, expiresInSeconds = 7200) {
+  const raw = { ...(post || {}) };
+
+  return {
+    ...raw,
+    mediaUrl: await signR2Value(raw.mediaUrl, expiresInSeconds),
+    r2Key: isR2Key(raw.mediaUrl) ? raw.mediaUrl : raw.r2Key || "",
+  };
+}
 
 // =======================================================
 // ✅ GET: Main feed (MongoDB)
@@ -117,27 +146,37 @@ router.get("/buzz/feed", authMiddleware, async (req, res) => {
       return res.json({ posts: [], total: 0, hasMore: false });
     }
 
-    // 4️⃣ Fetch owners
+     // 4️⃣ Fetch owners
     const userIds = [...new Set(posts.map((p) => p.userId))];
     const owners = await User.find({ id: { $in: userIds } }).lean();
-    const ownersMap = new Map(owners.map((u) => [u.id, baseSanitizeUser(u)]));
+    const ownersMap = new Map(
+      await Promise.all(
+        owners.map(async (u) => [u.id, await signFeedUser(u)])
+      )
+    );
 
     // 5️⃣ Build formatted feed items
-    const formatted = posts.map((p) => ({
-      ...p,
-      user:
-        ownersMap.get(p.userId) || {
-          id: p.userId,
-          firstName: "",
-          lastName: "",
-          avatar: "",
-        },
-      reactionCount: Object.keys(p.reactions || {}).length,
-      commentCount: (p.comments || []).length,
-      shareCount: (p.shares || []).length,
-      hasBookmarked: (p.bookmarks || []).includes(myId),
-      myReaction: p.reactions?.[myId] || null,
-    }));
+    const formatted = await Promise.all(
+      posts.map(async (p) => {
+        const signedPost = await signPostForFeed(p, 7200);
+
+        return {
+          ...signedPost,
+          user:
+            ownersMap.get(p.userId) || {
+              id: p.userId,
+              firstName: "",
+              lastName: "",
+              avatar: "",
+            },
+          reactionCount: Object.keys(p.reactions || {}).length,
+          commentCount: (p.comments || []).length,
+          shareCount: (p.shares || []).length,
+          hasBookmarked: (p.bookmarks || []).includes(myId),
+          myReaction: p.reactions?.[myId] || null,
+        };
+      })
+    );
 
     // 6️⃣ Pagination: count total
     const total = await PostModel.countDocuments(visibilityQuery);
@@ -213,42 +252,48 @@ router.get("/buzz/reels", authMiddleware, async (req, res) => {
 
     if (!reels.length) return res.json({ posts: [] });
 
-    // 4️⃣ Fetch owners
+      // 4️⃣ Fetch owners
     const ownerIds = [...new Set(reels.map((p) => String(p.userId || "")))];
     const owners = await User.find({ id: { $in: ownerIds } }).lean();
     const ownerMap = new Map(
-      owners.map((u) => [String(u.id), baseSanitizeUser(u)])
+      await Promise.all(
+        owners.map(async (u) => [String(u.id), await signFeedUser(u)])
+      )
     );
 
     // 5️⃣ Build response
-    const posts = reels.map((p) => {
-      const uid = String(p.userId || "");
-      const safeUser = ownerMap.get(uid) || {};
+    const posts = await Promise.all(
+      reels.map(async (p) => {
+        const uid = String(p.userId || "");
+        const safeUser = ownerMap.get(uid) || {};
+        const signedPost = await signPostForFeed(p, 7200);
 
-      return {
-        id: String(p.id || p._id || ""),
-        userId: uid,
-        mediaUrl: p.mediaUrl || "",
-        type: p.type || "video",
-        privacy: p.privacy || "",
-        text: p.text || "",
-        createdAt: p.createdAt,
-        updatedAt: p.updatedAt,
-        isActive: p.isActive !== false,
-        viewCount: p.viewCount || 0,
-        likesCount: p.likesCount || 0,
-        commentsCount: p.commentsCount || 0,
-        giftCount: p.giftCount || 0,
-        isLiked: false,
-        user: {
-          id: uid,
-          firstName: safeUser.firstName || "",
-          lastName: safeUser.lastName || "",
-          username: safeUser.username || "",
-          avatar: safeUser.avatar || "",
-        },
-      };
-    });
+            return {
+          id: String(p.id || p._id || ""),
+          userId: uid,
+          mediaUrl: signedPost.mediaUrl || "",
+          r2Key: signedPost.r2Key || "",
+          type: p.type || "video",
+          privacy: p.privacy || "",
+          text: p.text || "",
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+          isActive: p.isActive !== false,
+          viewCount: p.viewCount || 0,
+          likesCount: p.likesCount || 0,
+          commentsCount: p.commentsCount || 0,
+          giftCount: p.giftCount || 0,
+          isLiked: false,
+          user: {
+            id: uid,
+            firstName: safeUser.firstName || "",
+            lastName: safeUser.lastName || "",
+            username: safeUser.username || "",
+            avatar: safeUser.avatar || "",
+          },
+        };
+      })
+    );
 
     res.json({ posts });
   } catch (err) {

@@ -38,6 +38,48 @@ const {
 const User = require("../../models/User");
 const Match = require("../../models/Match");
 const { sendNotification } = require("../../utils/helpers");
+const { getSignedMediaUrl, isR2Key, deleteR2Object } = require("../../utils/r2Media");
+
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signMediaCommentForResponse(comment = {}) {
+  const raw = typeof comment.toObject === "function" ? comment.toObject() : { ...(comment || {}) };
+  const signedAttachment = await signR2Value(
+    raw.imageUrl || raw.photoUrl || raw.mediaUrl || raw.attachmentUrl || "",
+    3600
+  );
+
+  return {
+    ...raw,
+    imageUrl: raw.imageUrl ? signedAttachment : raw.imageUrl,
+    photoUrl: raw.photoUrl ? signedAttachment : raw.photoUrl,
+    mediaUrl: raw.mediaUrl ? signedAttachment : raw.mediaUrl,
+    attachmentUrl: raw.attachmentUrl ? signedAttachment : raw.attachmentUrl,
+    r2Key: isR2Key(raw.imageUrl || raw.photoUrl || raw.mediaUrl || raw.attachmentUrl || "")
+      ? raw.imageUrl || raw.photoUrl || raw.mediaUrl || raw.attachmentUrl || ""
+      : raw.r2Key || "",
+  };
+}
+
+async function signMediaItemForResponse(media = {}) {
+  const raw = typeof media.toObject === "function" ? media.toObject() : { ...(media || {}) };
+  const originalUrl = raw.url || raw.mediaUrl || raw.secureUrl || raw.secure_url || "";
+
+  return {
+    ...raw,
+    url: raw.url ? await signR2Value(raw.url, 7200) : raw.url,
+    mediaUrl: raw.mediaUrl ? await signR2Value(raw.mediaUrl, 7200) : raw.mediaUrl,
+    secureUrl: raw.secureUrl ? await signR2Value(raw.secureUrl, 7200) : raw.secureUrl,
+    secure_url: raw.secure_url ? await signR2Value(raw.secure_url, 7200) : raw.secure_url,
+    r2Key: isR2Key(originalUrl) ? originalUrl : raw.r2Key || "",
+  };
+}
 
 async function enforcePostingAllowed(req, res) {
   try {
@@ -370,7 +412,8 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       }
     }
 
-    const notifyUsers = [...new Set([...visibleRecipients, String(me)])];
+       const notifyUsers = [...new Set([...visibleRecipients, String(me)])];
+    const signedComment = await signMediaCommentForResponse(comment);
 
     emitToUsers(notifyUsers, "comment:new", {
       postId: String(mediaId),
@@ -379,10 +422,10 @@ router.post("/media/:ownerId/comment", authMiddleware, async (req, res) => {
       targetType: "gallery_media",
       targetId: String(mediaId),
       targetOwnerId: String(ownerId),
-      comment,
+      comment: signedComment,
     });
 
-    return res.json({ ok: true, comment });
+    return res.json({ ok: true, comment: signedComment });
   } catch (err) {
     console.error("❌ /media/:ownerId/comment error:", err);
     return res.status(500).json({ error: "Failed to comment" });
@@ -599,16 +642,18 @@ router.patch("/media/:ownerId/comment/:commentId", authMiddleware, async (req, r
       comment.visibleTo
     );
 
-    owner.markModified("media");
+      owner.markModified("media");
     await owner.save();
+
+    const signedComment = await signMediaCommentForResponse(comment);
 
     emitToUsers([me, ownerId], "comment:updated", {
       postId: String(mediaId),
       ownerId: String(ownerId),
-      comment,
+      comment: signedComment,
     });
 
-    return res.json({ ok: true, comment });
+    return res.json({ ok: true, comment: signedComment });
   } catch (err) {
     console.error("❌ PATCH /media/:ownerId/comment/:commentId error:", err);
     return res.status(500).json({ error: "Failed to edit comment" });
@@ -730,13 +775,15 @@ router.patch("/media/:id/privacy", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Media not found" });
     }
 
-    media.privacy =
+      media.privacy =
       privacy || (media.privacy === "private" ? "public" : "private");
 
     user.markModified("media");
     await user.save();
 
-    return res.json({ success: true, media });
+    const signedMedia = await signMediaItemForResponse(media);
+
+    return res.json({ success: true, media: signedMedia });
   } catch (err) {
     console.error("❌ PATCH /media/:id/privacy error:", err);
     return res.status(500).json({ error: "Failed to update privacy" });
@@ -756,6 +803,14 @@ router.delete("/media/:id", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
+     const mediaToDelete = (user.media || []).find((m) => String(m.id) === String(id));
+    const mediaKey =
+      mediaToDelete?.url ||
+      mediaToDelete?.mediaUrl ||
+      mediaToDelete?.secureUrl ||
+      mediaToDelete?.secure_url ||
+      "";
+
     const before = Array.isArray(user.media) ? user.media.length : 0;
     user.media = (user.media || []).filter((m) => String(m.id) !== String(id));
     const changed = before !== user.media.length;
@@ -763,6 +818,12 @@ router.delete("/media/:id", authMiddleware, async (req, res) => {
     if (changed) {
       user.markModified("media");
       await user.save();
+
+      if (isR2Key(mediaKey)) {
+        deleteR2Object(mediaKey).catch((deleteErr) => {
+          console.error("⚠️ Failed to delete R2 media object:", deleteErr);
+        });
+      }
     }
 
     return res.json({ success: changed });
