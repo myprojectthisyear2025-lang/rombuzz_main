@@ -62,6 +62,24 @@ async function signR2Value(value, expiresInSeconds = 3600) {
   return getSignedMediaUrl(raw, expiresInSeconds);
 }
 
+async function signR2CommentAttachment(comment = {}, expiresInSeconds = 3600) {
+  const raw = { ...(comment || {}) };
+  const originalAttachment = normalizeMediaString(
+    raw.imageUrl || raw.photoUrl || raw.mediaUrl || raw.attachmentUrl || ""
+  );
+
+  const signedAttachment = await signR2Value(originalAttachment, expiresInSeconds);
+
+  return {
+    ...raw,
+    imageUrl: raw.imageUrl ? signedAttachment : raw.imageUrl,
+    photoUrl: raw.photoUrl ? signedAttachment : raw.photoUrl,
+    mediaUrl: raw.mediaUrl ? signedAttachment : raw.mediaUrl,
+    attachmentUrl: raw.attachmentUrl ? signedAttachment : raw.attachmentUrl,
+    r2Key: isR2Key(originalAttachment) ? originalAttachment : raw.r2Key || "",
+  };
+}
+
 async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
   if (!item) return item;
 
@@ -83,9 +101,15 @@ async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
   const rawKey = normalizeMediaString(item.r2Key || item.key || "");
   const key = rawKey || (isR2Key(rawUrl) ? rawUrl : "");
 
-  const signedUrl = key
+   const signedUrl = key
     ? await getSignedMediaUrl(key, expiresInSeconds)
     : rawUrl;
+
+  const signedComments = Array.isArray(item.comments)
+    ? await Promise.all(
+        item.comments.map((comment) => signR2CommentAttachment(comment, 3600))
+      )
+    : item.comments;
 
   return {
     ...item,
@@ -93,6 +117,7 @@ async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
     mediaUrl: signedUrl,
     fileUrl: signedUrl,
     r2Key: key || item.r2Key || "",
+    comments: signedComments,
   };
 }
 
