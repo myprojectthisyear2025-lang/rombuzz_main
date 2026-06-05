@@ -55,9 +55,11 @@ async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
     item.url ||
       item.mediaUrl ||
       item.fileUrl ||
+      item.secureUrl ||
       item.secure_url ||
       item.src ||
       item.imageUrl ||
+      item.photoUrl ||
       item.videoUrl ||
       ""
   );
@@ -74,6 +76,10 @@ async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
     url: signedUrl,
     mediaUrl: signedUrl,
     fileUrl: signedUrl,
+    secureUrl: signedUrl,
+    secure_url: signedUrl,
+    imageUrl: signedUrl,
+    photoUrl: signedUrl,
     r2Key: key || item.r2Key || "",
   };
 }
@@ -311,7 +317,7 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
         // ❌ NEVER show private
         if (caption.includes("scope:private")) continue;
 
-        // ✅ Only public OR matches
+             // ✅ Only public OR matches
         if (
           caption.includes("scope:public") ||
           caption.includes("scope:matches")
@@ -323,11 +329,25 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
           );
 
                  const signedMedia = await signR2MediaItem(m, 7200);
+          const signedMediaUrl =
+            signedMedia.mediaUrl ||
+            signedMedia.url ||
+            signedMedia.secureUrl ||
+            signedMedia.secure_url ||
+            signedMedia.fileUrl ||
+            signedMedia.imageUrl ||
+            signedMedia.photoUrl ||
+            "";
 
           feed.push({
             id: m.id,
             userId: u.id,
-            mediaUrl: signedMedia.url,
+            mediaUrl: signedMediaUrl,
+            url: signedMediaUrl,
+            fileUrl: signedMediaUrl,
+            secureUrl: signedMediaUrl,
+            secure_url: signedMediaUrl,
+            imageUrl: signedMediaUrl,
             type: m.type === "video" ? "video" : "image",
             caption: m.caption,
             createdAt: m.createdAt || Date.now(),
