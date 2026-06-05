@@ -81,6 +81,68 @@ async function signMediaItemForResponse(media = {}) {
   };
 }
 
+function normalizeMediaPrivacy(value = "") {
+  const text = String(value || "").toLowerCase().trim();
+
+  if (
+    text === "private" ||
+    text === "hidden" ||
+    text === "specific"
+  ) {
+    return "private";
+  }
+
+  if (
+    text === "matches" ||
+    text === "matched" ||
+    text === "matched-only" ||
+    text === "matched_only" ||
+    text === "match-only" ||
+    text === "match_only"
+  ) {
+    return "matches";
+  }
+
+  return "public";
+}
+
+function stripScopeTags(caption = "") {
+  return String(caption || "")
+    .trim()
+    .replace(/\bscope:(public|matches|matched|private)\b/gi, "")
+    .replace(/\bprivacy:(public|matches|matched|private)\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function stripKindTags(caption = "") {
+  return String(caption || "")
+    .trim()
+    .replace(/\bkind:(photo|image|reel|video|audio|voice)\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function ensureGalleryCaptionTags(caption = "", privacy = "public", type = "image") {
+  const normalizedPrivacy = normalizeMediaPrivacy(privacy);
+  const normalizedType = String(type || "").toLowerCase() === "video" ? "video" : "image";
+
+  const kindTag = normalizedType === "video" ? "kind:reel" : "kind:photo";
+  const scopeTag =
+    normalizedPrivacy === "private"
+      ? "scope:private"
+      : normalizedPrivacy === "matches"
+      ? "scope:matches"
+      : "scope:public";
+
+  const clean = stripKindTags(stripScopeTags(caption));
+  return [clean, kindTag, scopeTag, "intent:letsbuzz"]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 async function enforcePostingAllowed(req, res) {
   try {
     await ensureFeatureAllowed(req.user.id, "posting");
@@ -775,8 +837,22 @@ router.patch("/media/:id/privacy", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Media not found" });
     }
 
-      media.privacy =
-      privacy || (media.privacy === "private" ? "public" : "private");
+    const nextPrivacy =
+      privacy !== undefined
+        ? normalizeMediaPrivacy(privacy)
+        : normalizeMediaPrivacy(media.privacy) === "private"
+        ? "public"
+        : "private";
+
+    const normalizedType =
+      String(media.type || "").toLowerCase() === "video" ? "video" : "image";
+
+    media.privacy = nextPrivacy;
+    media.caption = ensureGalleryCaptionTags(
+      media.caption,
+      nextPrivacy,
+      normalizedType
+    );
 
     user.markModified("media");
     await user.save();

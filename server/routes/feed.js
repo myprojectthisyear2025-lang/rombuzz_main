@@ -110,6 +110,7 @@ async function signFeedUser(user = {}) {
 }
 
 // ============================================================
+// ============================================================
 // ✅ Gallery caption tags parser (scope + kind)
 // We store visibility inside caption like: "scope:public scope:matches scope:private"
 // and type inside caption like: "kind:photo kind:reel"
@@ -118,17 +119,142 @@ function parseCaptionTags(caption) {
   const text = String(caption || "").toLowerCase();
 
   const scope =
-    text.includes("scope:public") ? "public" :
-    text.includes("scope:matches") ? "matches" :
     text.includes("scope:private") ? "private" :
+    text.includes("scope:matches") ? "matches" :
+    text.includes("scope:matched") ? "matches" :
+    text.includes("scope:public") ? "public" :
     null;
 
   const kind =
     text.includes("kind:reel") ? "reel" :
+    text.includes("kind:video") ? "reel" :
     text.includes("kind:photo") ? "photo" :
     null;
 
   return { scope, kind };
+}
+
+function normalizeLetsBuzzPrivacy(value = "") {
+  const text = String(value || "").toLowerCase().trim();
+
+  if (
+    text === "private" ||
+    text === "hidden" ||
+    text === "specific"
+  ) {
+    return "private";
+  }
+
+  if (
+    text === "matches" ||
+    text === "matched" ||
+    text === "matched-only" ||
+    text === "matched_only" ||
+    text === "match-only" ||
+    text === "match_only"
+  ) {
+    return "matches";
+  }
+
+  if (text === "public") return "public";
+
+  return "";
+}
+
+function getLetsBuzzMediaUrlCandidate(media = {}) {
+  return normalizeMediaString(
+    media.url ||
+      media.mediaUrl ||
+      media.fileUrl ||
+      media.secureUrl ||
+      media.secure_url ||
+      media.src ||
+      media.imageUrl ||
+      media.photoUrl ||
+      media.videoUrl ||
+      ""
+  );
+}
+
+function inferLetsBuzzKind(media = {}) {
+  const caption = String(media.caption || "").toLowerCase();
+  const type = String(media.type || media.mediaType || "").toLowerCase();
+  const url = getLetsBuzzMediaUrlCandidate(media).toLowerCase();
+
+  if (
+    caption.includes("kind:reel") ||
+    caption.includes("kind:video") ||
+    type === "video" ||
+    type === "reel" ||
+    type.includes("video") ||
+    type.includes("reel") ||
+    /\.(mp4|mov|m4v|webm|avi|wmv|flv|mkv|mpg|mpeg)(\?|#|$)/i.test(url)
+  ) {
+    return "reel";
+  }
+
+  if (
+    type === "audio" ||
+    type === "voice" ||
+    type.includes("audio") ||
+    type.includes("voice") ||
+    /\.(m4a|mp3|aac|wav)(\?|#|$)/i.test(url)
+  ) {
+    return "audio";
+  }
+
+  return "photo";
+}
+
+function resolveLetsBuzzScope(media = {}) {
+  const caption = String(media.caption || "").toLowerCase();
+  const tags = parseCaptionTags(caption);
+  const privacy = normalizeLetsBuzzPrivacy(
+    media.privacy || media.visibility || media.scope
+  );
+
+  // Private must always win, no matter where it is stored.
+  if (
+    privacy === "private" ||
+    tags.scope === "private" ||
+    caption.includes("privacy:private")
+  ) {
+    return "private";
+  }
+
+  if (
+    privacy === "matches" ||
+    tags.scope === "matches" ||
+    caption.includes("privacy:matches") ||
+    caption.includes("privacy:matched")
+  ) {
+    return "matches";
+  }
+
+  if (
+    privacy === "public" ||
+    tags.scope === "public" ||
+    caption.includes("privacy:public")
+  ) {
+    return "public";
+  }
+
+  // Old gallery media may not have caption tags.
+  // Since Let’sBuzz is already matched-only, legacy non-private media can be treated as public.
+  return "public";
+}
+
+function isLetsBuzzEligibleGalleryMedia(media = {}) {
+  const rawUrl = getLetsBuzzMediaUrlCandidate(media);
+  if (!rawUrl) return false;
+
+  const scope = resolveLetsBuzzScope(media);
+  if (scope === "private") return false;
+
+  const kind = inferLetsBuzzKind(media);
+  if (kind === "audio") return false;
+
+  return scope === "public" || scope === "matches";
 }
 
 function isPrivateCommentVisibleToViewer(comment, viewerId, mediaOwnerId) {
@@ -329,58 +455,59 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
 
     const feed = [];
 
-    for (const u of users) {
+     for (const u of users) {
       if (!Array.isArray(u.media)) continue;
 
       for (const m of u.media) {
-        const caption = String(m.caption || "");
+        if (!isLetsBuzzEligibleGalleryMedia(m)) continue;
 
-        // ❌ NEVER show private
-        if (caption.includes("scope:private")) continue;
+        const visibleComments = sanitizeMediaCommentsForViewer(
+          m.comments,
+          myId,
+          u.id
+        );
 
-             // ✅ Only public OR matches
-        if (
-          caption.includes("scope:public") ||
-          caption.includes("scope:matches")
-        ) {
-              const visibleComments = sanitizeMediaCommentsForViewer(
-            m.comments,
-            myId,
-            u.id
-          );
+        const signedMedia = await signR2MediaItem(m, 7200);
+        const signedMediaUrl =
+          signedMedia.mediaUrl ||
+          signedMedia.url ||
+          signedMedia.secureUrl ||
+          signedMedia.secure_url ||
+          signedMedia.fileUrl ||
+          signedMedia.imageUrl ||
+          signedMedia.photoUrl ||
+          "";
 
-                 const signedMedia = await signR2MediaItem(m, 7200);
-          const signedMediaUrl =
-            signedMedia.mediaUrl ||
-            signedMedia.url ||
-            signedMedia.secureUrl ||
-            signedMedia.secure_url ||
-            signedMedia.fileUrl ||
-            signedMedia.imageUrl ||
-            signedMedia.photoUrl ||
-            "";
+        if (!signedMediaUrl) continue;
 
-                  feed.push({
-            id: m.id,
-            userId: u.id,
-            mediaUrl: signedMediaUrl,
-            url: signedMediaUrl,
-            fileUrl: signedMediaUrl,
-            secureUrl: signedMediaUrl,
-            secure_url: signedMediaUrl,
-            imageUrl: signedMediaUrl,
-            photoUrl: signedMediaUrl,
-            type: m.type === "video" ? "video" : "image",
-            caption: m.caption,
-            createdAt: m.createdAt || Date.now(),
-            comments: visibleComments,
-            commentsCount: visibleComments.length,
-            fromGallery: true,
-            mediaId: String(m.id || m._id || ""),
-            r2Key: signedMedia.r2Key || "",
-            user: await signFeedUser(u),
-          });
-        }
+        const mediaId = String(m.id || m._id || "");
+        if (!mediaId) continue;
+
+        const kind = inferLetsBuzzKind(m);
+        const scope = resolveLetsBuzzScope(m);
+
+        feed.push({
+          id: mediaId,
+          userId: u.id,
+          mediaUrl: signedMediaUrl,
+          url: signedMediaUrl,
+          fileUrl: signedMediaUrl,
+          secureUrl: signedMediaUrl,
+          secure_url: signedMediaUrl,
+          imageUrl: signedMediaUrl,
+          photoUrl: signedMediaUrl,
+          type: kind === "reel" ? "video" : "image",
+          privacy: scope,
+          caption: m.caption || "",
+          createdAt: m.createdAt || Date.now(),
+          comments: visibleComments,
+          commentsCount: visibleComments.length,
+          fromGallery: true,
+          sourceType: "gallery",
+          mediaId,
+          r2Key: signedMedia.r2Key || "",
+          user: await signFeedUser(u),
+        });
       }
     }
 

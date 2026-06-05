@@ -59,6 +59,66 @@ function normalizeText(value = "") {
   return String(value || "").trim();
 }
 
+function normalizeMediaPrivacy(value = "") {
+  const text = normalizeText(value).toLowerCase();
+
+  if (
+    text === "private" ||
+    text === "hidden" ||
+    text === "specific"
+  ) {
+    return "private";
+  }
+
+  if (
+    text === "matches" ||
+    text === "matched" ||
+    text === "matched-only" ||
+    text === "matched_only" ||
+    text === "match-only" ||
+    text === "match_only"
+  ) {
+    return "matches";
+  }
+
+  return "public";
+}
+
+function stripScopeTags(caption = "") {
+  return normalizeText(caption)
+    .replace(/\bscope:(public|matches|matched|private)\b/gi, "")
+    .replace(/\bprivacy:(public|matches|matched|private)\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function stripKindTags(caption = "") {
+  return normalizeText(caption)
+    .replace(/\bkind:(photo|image|reel|video|audio|voice)\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function ensureGalleryCaptionTags(caption = "", privacy = "public", type = "image") {
+  const normalizedPrivacy = normalizeMediaPrivacy(privacy);
+  const normalizedType = String(type || "").toLowerCase() === "video" ? "video" : "image";
+
+  const kindTag = normalizedType === "video" ? "kind:reel" : "kind:photo";
+  const scopeTag =
+    normalizedPrivacy === "private"
+      ? "scope:private"
+      : normalizedPrivacy === "matches"
+      ? "scope:matches"
+      : "scope:public";
+
+  const clean = stripKindTags(stripScopeTags(caption));
+  return [clean, kindTag, scopeTag, "intent:letsbuzz"]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function isVideoLike(file = {}, type = "") {
   const mime = normalizeText(file?.mimetype).toLowerCase();
   const requestedType = normalizeText(type).toLowerCase();
@@ -436,14 +496,21 @@ router.post(
       const user = await User.findOne({ id: req.user.id });
       if (!user) return res.status(404).json({ error: "User not found" });
 
+        const normalizedPrivacy = normalizeMediaPrivacy(req.body?.privacy);
+      const normalizedType = purpose.type === "video" ? "video" : "image";
+
       const mediaItem = {
         id: shortid.generate(),
         url: uploaded.key,
         r2Key: uploaded.key,
         storage: "r2",
-        type: purpose.type,
-        caption: normalizeText(req.body?.caption),
-        privacy: req.body?.privacy === "private" ? "private" : "public",
+        type: normalizedType,
+        caption: ensureGalleryCaptionTags(
+          req.body?.caption,
+          normalizedPrivacy,
+          normalizedType
+        ),
+        privacy: normalizedPrivacy,
         createdAt: Date.now(),
       };
 
@@ -486,11 +553,12 @@ router.post("/upload-media", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "fileUrl or fileKey is required" });
     }
 
-    const user = await User.findOne({ id: req.user.id });
+     const user = await User.findOne({ id: req.user.id });
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const isR2 = isR2Key(storedValue);
     const normalizedType = type === "video" || type === "reel" ? "video" : "image";
+    const normalizedPrivacy = normalizeMediaPrivacy(privacy);
 
     const mediaItem = {
       id: shortid.generate(),
@@ -498,8 +566,12 @@ router.post("/upload-media", authMiddleware, async (req, res) => {
       r2Key: isR2 ? storedValue : "",
       storage: isR2 ? "r2" : "external",
       type: normalizedType,
-      caption: caption || "",
-      privacy: privacy === "private" ? "private" : "public",
+      caption: ensureGalleryCaptionTags(
+        caption,
+        normalizedPrivacy,
+        normalizedType
+      ),
+      privacy: normalizedPrivacy,
       createdAt: Date.now(),
     };
 
@@ -541,13 +613,25 @@ router.patch("/media/:id/privacy", authMiddleware, async (req, res) => {
 
     const current = user.media[idx];
     const next =
-      privacy === "public" || privacy === "private"
-        ? privacy
-        : current.privacy === "private"
+      privacy !== undefined
+        ? normalizeMediaPrivacy(privacy)
+        : normalizeMediaPrivacy(current.privacy) === "private"
         ? "public"
         : "private";
 
-    user.media[idx] = { ...current, privacy: next };
+    const normalizedType =
+      String(current.type || "").toLowerCase() === "video" ? "video" : "image";
+
+    user.media[idx] = {
+      ...current,
+      privacy: next,
+      caption: ensureGalleryCaptionTags(
+        current.caption,
+        next,
+        normalizedType
+      ),
+    };
+
     await user.save();
 
     const signedItem = await signMediaItem(user.media[idx], 7200);
@@ -581,10 +665,23 @@ router.patch("/media/:id", authMiddleware, async (req, res) => {
 
     const current = user.media[idx];
 
+    const normalizedType =
+      String(current.type || "").toLowerCase() === "video" ? "video" : "image";
+    const nextPrivacy =
+      privacy !== undefined
+        ? normalizeMediaPrivacy(privacy)
+        : normalizeMediaPrivacy(current.privacy);
+    const nextCaption =
+      typeof caption === "string" ? caption : current.caption;
+
     const next = {
       ...current,
-      ...(typeof caption === "string" ? { caption } : null),
-      ...(privacy === "public" || privacy === "private" ? { privacy } : null),
+      privacy: nextPrivacy,
+      caption: ensureGalleryCaptionTags(
+        nextCaption,
+        nextPrivacy,
+        normalizedType
+      ),
     };
 
     user.media[idx] = next;
