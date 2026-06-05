@@ -86,7 +86,13 @@ async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
 
 async function signFeedUser(user = {}) {
   const safe = baseSanitizeUser(user);
-  safe.avatar = await signR2Value(safe.avatar, 21600);
+  const signedAvatar = await signR2Value(
+    safe.avatar || safe.avatarUrl || safe.profilePic || safe.photo || "",
+    21600
+  );
+
+  safe.avatar = signedAvatar;
+  safe.avatarUrl = signedAvatar;
 
   if (Array.isArray(safe.media)) {
     safe.media = await Promise.all(
@@ -250,7 +256,16 @@ router.get("/", authMiddleware, async (req, res) => {
         if (seen.has(id)) continue;
         seen.add(id);
 
-            const signedMedia = await signR2MediaItem(m, 7200);
+             const signedMedia = await signR2MediaItem(m, 7200);
+        const signedMediaUrl =
+          signedMedia.mediaUrl ||
+          signedMedia.url ||
+          signedMedia.secureUrl ||
+          signedMedia.secure_url ||
+          signedMedia.fileUrl ||
+          signedMedia.imageUrl ||
+          signedMedia.photoUrl ||
+          "";
 
         feed.push({
           id,
@@ -258,7 +273,13 @@ router.get("/", authMiddleware, async (req, res) => {
 
           // match PostModel shape used by the app
           text: "",
-          mediaUrl: signedMedia.url || signedMedia.secureUrl || signedMedia.mediaUrl || "",
+          mediaUrl: signedMediaUrl,
+          url: signedMediaUrl,
+          fileUrl: signedMediaUrl,
+          secureUrl: signedMediaUrl,
+          secure_url: signedMediaUrl,
+          imageUrl: signedMediaUrl,
+          photoUrl: signedMediaUrl,
           type: kind === "reel" ? "video" : "image",
           privacy: scope, // "public" or "matches"
           reactions: {},
@@ -339,7 +360,7 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
             signedMedia.photoUrl ||
             "";
 
-          feed.push({
+                  feed.push({
             id: m.id,
             userId: u.id,
             mediaUrl: signedMediaUrl,
@@ -348,11 +369,15 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
             secureUrl: signedMediaUrl,
             secure_url: signedMediaUrl,
             imageUrl: signedMediaUrl,
+            photoUrl: signedMediaUrl,
             type: m.type === "video" ? "video" : "image",
             caption: m.caption,
             createdAt: m.createdAt || Date.now(),
             comments: visibleComments,
             commentsCount: visibleComments.length,
+            fromGallery: true,
+            mediaId: String(m.id || m._id || ""),
+            r2Key: signedMedia.r2Key || "",
             user: await signFeedUser(u),
           });
         }

@@ -39,7 +39,18 @@ async function signR2Value(value, expiresInSeconds = 21600) {
 
 async function signInsightUser(user = {}) {
   const safe = baseSanitizeUser(user || {});
-  safe.avatar = await signR2Value(safe.avatar, 21600);
+  const signedAvatar = await signR2Value(
+    safe.avatar || safe.avatarUrl || safe.profilePic || safe.photo || "",
+    21600
+  );
+
+  safe.avatar = signedAvatar;
+  safe.avatarUrl = signedAvatar;
+  safe.name =
+    [safe.firstName, safe.lastName].filter(Boolean).join(" ").trim() ||
+    safe.username ||
+    "RomBuzz User";
+
   return safe;
 }
 
@@ -99,14 +110,29 @@ router.get("/media/:ownerId/insights/:mediaId", authMiddleware, async (req, res)
       )
     );
 
-    const giftsUi = gifts.map((g) => ({
-      id: g.id,
-      fromId: g.fromId,
-      fromUser: gifterMap.get(g.fromId) || { id: g.fromId, firstName: "", lastName: "", avatar: "" },
-      stickerId: g.stickerId,
-      amount: g.amount || 0,
-      createdAt: g.createdAt,
-    }));
+    const giftsUi = gifts.map((g) => {
+      const safeUser =
+        gifterMap.get(g.fromId) ||
+        { id: g.fromId, firstName: "", lastName: "", name: "", avatar: "", avatarUrl: "" };
+
+      return {
+        id: g.id,
+        mediaId: g.mediaId,
+        ownerId: g.ownerId,
+        fromId: g.fromId,
+        senderId: g.fromId,
+        fromUser: safeUser,
+        user: safeUser,
+        giftId: g.giftId || g.stickerId || "",
+        stickerId: g.stickerId || g.giftId || "",
+        giftKey: g.giftId || g.stickerId || "",
+        amount: Number(g.amount || g.priceBC || 0),
+        priceBC: Number(g.priceBC || g.amount || 0),
+        placement: g.placement || "profile_media",
+        transactionId: g.transactionId || "",
+        createdAt: g.createdAt,
+      };
+    });
 
     // threads list (one per match user per media)
     const threads = await MediaThread.find({ ownerId, mediaId })
@@ -132,12 +158,16 @@ router.get("/media/:ownerId/insights/:mediaId", authMiddleware, async (req, res)
       };
     });
 
-    return res.json({
+     return res.json({
       ok: true,
       mediaId,
       gifts: giftsUi,               // owner-only list of gifters + what
+      rows: giftsUi,
+      transactions: giftsUi,
       totalGifts: giftsUi.length,
+      totalCount: giftsUi.length,
       totalAmount,
+      totalBC: totalAmount,
       threads: threadsUi,           // owner-only thread list
     });
   } catch (err) {

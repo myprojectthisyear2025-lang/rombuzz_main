@@ -48,7 +48,18 @@ async function signR2Value(value, expiresInSeconds = 21600) {
 
 async function signGiftUser(user = {}) {
   const safe = baseSanitizeUser(user || {});
-  safe.avatar = await signR2Value(safe.avatar, 21600);
+  const signedAvatar = await signR2Value(
+    safe.avatar || safe.avatarUrl || safe.profilePic || safe.photo || "",
+    21600
+  );
+
+  safe.avatar = signedAvatar;
+  safe.avatarUrl = signedAvatar;
+  safe.name =
+    [safe.firstName, safe.lastName].filter(Boolean).join(" ").trim() ||
+    safe.username ||
+    "RomBuzz User";
+
   return safe;
 }
 
@@ -228,9 +239,10 @@ router.get("/buzz/posts/:postId/gifts/summary", authMiddleware, async (req, res)
       byGiftMap[k].totalBC += Number(g.priceBC) || 0;
     }
 
-    const byGift = Object.values(byGiftMap).sort((a, b) => b.count - a.count);
+       const byGift = Object.values(byGiftMap).sort((a, b) => b.count - a.count);
 
     let byUser = null;
+    let rows = [];
     if (String(post.userId) === me) {
       const byUserMap = {};
 
@@ -254,23 +266,53 @@ router.get("/buzz/posts/:postId/gifts/summary", authMiddleware, async (req, res)
 
       byUser = userIds
         .map((uid) => {
+          const safeUser =
+            userMap.get(String(uid)) ||
+            { id: uid, firstName: "Unknown", lastName: "", name: "Unknown", avatar: "", avatarUrl: "" };
+
           return {
             ...byUserMap[uid],
-            user:
-              userMap.get(String(uid)) ||
-              { id: uid, firstName: "Unknown", lastName: "", avatar: "" },
+            user: safeUser,
+            fromUser: safeUser,
           };
         })
         .sort((a, b) => (b.total || 0) - (a.total || 0));
+
+      rows = gifts.map((g) => {
+        const uid = String(g.fromId || "");
+        const safeUser =
+          userMap.get(uid) ||
+          { id: uid, firstName: "Unknown", lastName: "", name: "Unknown", avatar: "", avatarUrl: "" };
+
+        return {
+          id: g.id,
+          postId: g.postId,
+          ownerId: g.ownerId,
+          fromId: uid,
+          senderId: uid,
+          giftId: g.giftId || g.giftKey || "",
+          giftKey: g.giftKey || g.giftId || "",
+          amount: Number(g.amount) || 0,
+          priceBC: Number(g.priceBC) || 0,
+          placement: g.placement || "",
+          transactionId: g.transactionId || "",
+          createdAt: g.createdAt,
+          user: safeUser,
+          fromUser: safeUser,
+        };
+      });
     }
 
     return res.json({
       postId,
       ownerId: String(post.userId),
       total,
+      totalCount: total,
       totalBC,
       byGift,
       byUser,
+      rows,
+      transactions: rows,
     });
   } catch (e) {
     console.error("Buzz post gifts summary error:", e);
