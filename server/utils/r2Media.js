@@ -13,6 +13,7 @@
  *   - avatars/
  *   - gallery-photos/
  *   - chat-images/
+ *   - comment-photo/
  *   - voice-intros/
  *   - chat-audio/
  *
@@ -33,6 +34,7 @@ const ALLOWED_FOLDERS = new Set([
   "avatars",
   "gallery-photos",
   "chat-images",
+  "comment-photo",
   "voice-intros",
   "chat-audio",
 ]);
@@ -222,6 +224,7 @@ function isR2Key(value = "") {
     text.startsWith("avatars/") ||
     text.startsWith("gallery-photos/") ||
     text.startsWith("chat-images/") ||
+    text.startsWith("comment-photo/") ||
     text.startsWith("voice-intros/") ||
     text.startsWith("chat-audio/")
   );

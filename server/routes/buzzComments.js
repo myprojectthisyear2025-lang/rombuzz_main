@@ -26,6 +26,7 @@ const Notification = require("../models/Notification"); // fallback
 const authMiddleware = require("../routes/auth-middleware");
 
 const { sendNotification, baseSanitizeUser } = require("../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 
 // socket (your project sets globals)
 const { io } = global;
@@ -94,6 +95,31 @@ function buildReactionCounts(reactions = {}) {
   return counts;
 }
 
+async function signR2Value(value, expiresInSeconds = 3600) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signBuzzCommentForResponse(comment = {}) {
+  const raw = typeof comment.toObject === "function" ? comment.toObject() : { ...(comment || {}) };
+  const originalAttachment =
+    raw.imageUrl || raw.photoUrl || raw.mediaUrl || raw.attachmentUrl || "";
+
+  const signedAttachment = await signR2Value(originalAttachment, 3600);
+
+  return {
+    ...raw,
+    imageUrl: raw.imageUrl ? signedAttachment : raw.imageUrl,
+    photoUrl: raw.photoUrl ? signedAttachment : raw.photoUrl,
+    mediaUrl: raw.mediaUrl ? signedAttachment : raw.mediaUrl,
+    attachmentUrl: raw.attachmentUrl ? signedAttachment : raw.attachmentUrl,
+    r2Key: isR2Key(originalAttachment) ? originalAttachment : raw.r2Key || "",
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* POST: Add comment or reply                                                 */
 /* -------------------------------------------------------------------------- */
@@ -146,7 +172,7 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
       ? parentComment.visibleTo.map(String).filter(Boolean)
       : [];
 
-    const comment = {
+       const comment = {
       id: shortid.generate(),
       userId: myId,
       text: cleanText,
@@ -154,11 +180,10 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
       photoUrl: cleanImageUrl || null,
       mediaUrl: cleanImageUrl || null,
       attachmentUrl: cleanImageUrl || null,
-      attachmentUrl: cleanImageUrl || null,
       parentId: parentComment ? String(parentComment.id) : null,
       replyToCommentId: parentComment ? String(parentComment.id) : null,
       replyToUserId: parentComment ? String(parentComment.userId) : null,
-          createdAt: Date.now(),
+      createdAt: Date.now(),
       updatedAt: Date.now(),
       // 🔒 PRIVATE THREAD:
       // Normal comment: post owner + commenter.
@@ -171,9 +196,11 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
       reactions: {},
     };
 
-      post.comments.push(comment);
+    post.comments.push(comment);
     post.updatedAt = Date.now();
     await post.save();
+
+    const signedComment = await signBuzzCommentForResponse(comment);
 
     // 🔔 Notify the correct private-thread recipient(s)
     // Top-level comment:
@@ -261,12 +288,12 @@ router.post("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => 
           targetType: "buzz_post",
           targetId: postId,
           targetOwnerId: post.userId,
-          comment,
+          comment: signedComment,
         });
       }
     }
 
-    return res.json({ success: true, comment });
+    return res.json({ success: true, comment: signedComment });
   } catch (error) {
     console.error("❌ Add comment error:", error);
     return res.status(500).json({ error: "Failed to add comment" });
@@ -292,34 +319,37 @@ router.get("/buzz/posts/:postId/comments", authMiddleware, async (req, res) => {
       isVisibleToViewer(c, myId, postOwnerId)
     );
 
-    const authorIds = [...new Set(filtered.map((c) => c.userId))];
+      const authorIds = [...new Set(filtered.map((c) => c.userId))];
     const users = await User.find({ id: { $in: authorIds } }).lean();
 
-    const comments = filtered.map((c) => {
-      const author = users.find((u) => String(u.id) === String(c.userId));
-      const reactionCounts = buildReactionCounts(c.reactions || {});
+    const comments = await Promise.all(
+      filtered.map(async (c) => {
+        const author = users.find((u) => String(u.id) === String(c.userId));
+        const reactionCounts = buildReactionCounts(c.reactions || {});
+        const signedComment = await signBuzzCommentForResponse(c);
 
-      return {
-        ...c,
-        author: author
-          ? baseSanitizeUser(author)
-          : { firstName: "Unknown", avatar: "" },
+        return {
+          ...signedComment,
+          author: author
+            ? baseSanitizeUser(author)
+            : { firstName: "Unknown", avatar: "" },
 
-        // reactions summary
-        myReaction: c.reactions?.[myId] || null,
-        reactionCounts,
-        totalReactions: Object.keys(c.reactions || {}).length,
+          // reactions summary
+          myReaction: c.reactions?.[myId] || null,
+          reactionCounts,
+          totalReactions: Object.keys(c.reactions || {}).length,
 
-        // ✅ permissions (for your 3-dot menu)
-        canEdit: String(c.userId) === String(myId),
-              canDelete:
-          String(c.userId) === String(myId) ||
-          String(postOwnerId) === String(myId),
-        canReply: isVisibleToViewer(c, myId, postOwnerId),
+          // ✅ permissions (for your 3-dot menu)
+          canEdit: String(c.userId) === String(myId),
+          canDelete:
+            String(c.userId) === String(myId) ||
+            String(postOwnerId) === String(myId),
+          canReply: isVisibleToViewer(c, myId, postOwnerId),
 
-        isPostOwner: String(postOwnerId) === String(myId),
-      };
-    });
+          isPostOwner: String(postOwnerId) === String(myId),
+        };
+      })
+    );
 
     // ✅ commentCount ONLY for owner
     const commentCount =

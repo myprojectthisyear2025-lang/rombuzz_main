@@ -7,6 +7,7 @@
  *   - avatars        → Cloudflare R2 private bucket
  *   - gallery photos → Cloudflare R2 private bucket
  *   - chat images    → Cloudflare R2 private bucket
+ *   - comment photos → Cloudflare R2 private bucket
  *   - voice intros   → Cloudflare R2 private bucket
  *   - chat audio     → Cloudflare R2 private bucket
  *
@@ -98,13 +99,23 @@ function normalizeR2Purpose(value = "") {
         type: "image",
       };
 
-    case "gallery":
+      case "gallery":
     case "gallery-photo":
     case "gallery-photos":
     case "photo":
     case "image":
       return {
         folder: "gallery-photos",
+        kind: "image",
+        type: "image",
+      };
+
+    case "comment-photo":
+    case "comment-photos":
+    case "private-comment-photo":
+    case "private-comment-photos":
+      return {
+        folder: "comment-photo",
         kind: "image",
         type: "image",
       };
