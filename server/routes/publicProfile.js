@@ -109,12 +109,31 @@ function normalizeSharedWith(sharedWith) {
     .filter(Boolean);
 }
 
+function getStableMediaKey(entry = {}, fallbackUrl = "") {
+  if (typeof entry === "string") {
+    return normalizeMediaString(entry).split("?")[0].split("#")[0];
+  }
+
+  return normalizeMediaString(
+    entry.r2Key ||
+      entry.key ||
+      entry.mediaId ||
+      entry.id ||
+      entry._id ||
+      fallbackUrl
+  )
+    .split("?")[0]
+    .split("#")[0];
+}
+
 function normalizeProfileMediaEntry(entry) {
   if (typeof entry === "string") {
     const url = entry.trim();
     if (!url) return null;
 
     return {
+      id: getStableMediaKey(entry, url),
+      mediaId: getStableMediaKey(entry, url),
       url,
       type: "image",
       privacy: "public",
@@ -124,10 +143,22 @@ function normalizeProfileMediaEntry(entry) {
 
   if (!entry || typeof entry !== "object") return null;
 
-  const rawUrl = entry.url || entry.mediaUrl || "";
+   const rawUrl =
+    entry.url ||
+    entry.mediaUrl ||
+    entry.fileUrl ||
+    entry.secureUrl ||
+    entry.secure_url ||
+    entry.src ||
+    entry.imageUrl ||
+    entry.photoUrl ||
+    entry.videoUrl ||
+    "";
+
   const url = String(rawUrl).trim();
   if (!url) return null;
 
+  const stableKey = getStableMediaKey(entry, url);
   const caption = String(entry.caption || "").trim();
   const privacy = String(entry.privacy || entry.scope || "public").toLowerCase().trim();
   const rawType = String(entry.type || entry.mediaType || "").toLowerCase().trim();
@@ -144,11 +175,14 @@ function normalizeProfileMediaEntry(entry) {
 
   return {
     ...entry,
+    id: String(entry.id || entry._id || entry.mediaId || stableKey),
+    mediaId: String(entry.mediaId || entry.id || entry._id || stableKey),
     url,
     caption,
     privacy,
     sharedWith,
     type: looksLikeVideo ? "reel" : "image",
+    stableKey,
   };
 }
 
@@ -185,22 +219,43 @@ function canViewerSeeMatchedMedia(item, isSelf, isMatched, viewerId) {
 }
 
 function buildMatchedProfileMedia(target, viewerId, isMatched, isSelf) {
-  const combined = [
-    ...(Array.isArray(target.media) ? target.media : []),
-    ...(Array.isArray(target.photos) ? target.photos : []),
-  ];
+  const primaryMedia = Array.isArray(target.media) ? target.media : [];
+  const legacyPhotos = Array.isArray(target.photos) ? target.photos : [];
 
   const seen = new Set();
+  const out = [];
 
-  return combined
-    .map(normalizeProfileMediaEntry)
-    .filter((item) => canViewerSeeMatchedMedia(item, isSelf, isMatched, viewerId))
-    .filter((item) => {
-      if (!item || !item.url) return false;
-      if (seen.has(item.url)) return false;
-      seen.add(item.url);
-      return true;
+  const pushEntry = (entry, index, source) => {
+    const item = normalizeProfileMediaEntry(entry);
+    if (!item || !item.url) return;
+    if (!canViewerSeeMatchedMedia(item, isSelf, isMatched, viewerId)) return;
+
+    const key =
+      getStableMediaKey(entry, item.url) ||
+      item.stableKey ||
+      item.mediaId ||
+      item.id ||
+      item.url;
+
+    if (!key || seen.has(key)) return;
+
+    seen.add(key);
+    out.push({
+      ...item,
+      id: String(item.id || `${source}-${index}-${key}`),
+      mediaId: String(item.mediaId || item.id || `${source}-${index}-${key}`),
+      sourceType: "gallery",
+      fromGallery: true,
     });
+  };
+
+  // Main gallery media is source of truth.
+  primaryMedia.forEach((entry, index) => pushEntry(entry, index, "media"));
+
+  // Legacy photos only fill missing old uploads.
+  legacyPhotos.forEach((entry, index) => pushEntry(entry, index, "photos"));
+
+  return out;
 }
 
 function isDiscoverRestrictedUser(user = {}) {
@@ -298,15 +353,28 @@ const likedMe = await Relationship.exists({ from: targetId, to: viewerId, type: 
     safeUser.voiceUrl = await signR2Value(safeUser.voiceUrl, 3600);
     safeUser.voiceIntro = await signR2Value(safeUser.voiceIntro, 3600);
 
-    safeUser.media = await Promise.all(
-      buildMatchedProfileMedia(target, viewerId, isMatched, isSelf).map((item) =>
-        signR2MediaItem(item, 7200)
-      )
+    const profileMedia = buildMatchedProfileMedia(
+      target,
+      viewerId,
+      isMatched,
+      isSelf
     );
 
-    safeUser.photos = Array.isArray(target.photos)
-      ? await Promise.all(target.photos.map((item) => signR2MediaItem(item, 7200)))
-      : [];
+    safeUser.media = await Promise.all(
+      profileMedia.map((item) => signR2MediaItem(item, 7200))
+    );
+
+    // Do not resend raw target.photos here.
+    // safeUser.media is already the normalized, privacy-filtered, deduped gallery.
+    // Keep photos only as URL strings for older clients.
+    safeUser.photos = safeUser.media
+      .filter((item) => String(item?.type || "").toLowerCase() !== "reel")
+      .map((item) => item.url)
+      .filter(Boolean);
+
+    safeUser.reels = safeUser.media.filter((item) =>
+      ["reel", "video"].includes(String(item?.type || "").toLowerCase())
+    );
 
     safeUser.posts = await Promise.all(posts.map((post) => signR2Post(post, 7200)));
 
