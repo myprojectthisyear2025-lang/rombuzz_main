@@ -291,7 +291,19 @@ function normalizeDiscoverImageUrl(value) {
 
 function getDiscoverMediaUrl(entry) {
   if (typeof entry === "string") return normalizeDiscoverImageUrl(entry);
-  return normalizeDiscoverImageUrl(entry?.url);
+
+  return normalizeDiscoverImageUrl(
+    entry?.url ||
+      entry?.mediaUrl ||
+      entry?.fileUrl ||
+      entry?.secureUrl ||
+      entry?.secure_url ||
+      entry?.src ||
+      entry?.imageUrl ||
+      entry?.photoUrl ||
+      entry?.videoUrl ||
+      ""
+  );
 }
 
 function getDiscoverMediaPrivacy(entry) {
@@ -381,11 +393,13 @@ function normalizeViewProfileMediaUrl(entry) {
   if (typeof entry === "string") return String(entry || "").trim();
   return String(
     entry?.url ||
-      entry?.secure_url ||
-      entry?.src ||
       entry?.mediaUrl ||
       entry?.fileUrl ||
+      entry?.secureUrl ||
+      entry?.secure_url ||
+      entry?.src ||
       entry?.imageUrl ||
+      entry?.photoUrl ||
       entry?.videoUrl ||
       ""
   ).trim();
@@ -1031,33 +1045,42 @@ router.get("/:id", authMiddleware, async (req, res) => {
       if (!viewer) return res.status(404).json({ error: "Viewer not found" });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const isSelf = String(viewer.id) === String(user.id);
+    const viewerId = String(viewer.id || "");
+    const targetId = String(user.id || "");
+
+    const isSelf = viewerId === targetId;
     const matchedConnection = isSelf
       ? true
       : await Match.findOne({
           status: "matched",
           $or: [
-            { user1: viewer.id, user2: user.id },
-            { user1: user.id, user2: viewer.id },
+            // ✅ Current Match model
+            { users: { $all: [viewerId, targetId] } },
+
+            // ✅ Legacy fallback, safe to keep
+            { user1: viewerId, user2: targetId },
+            { user1: targetId, user2: viewerId },
           ],
         }).lean();
 
-       const canSeeMatchedMedia = isSelf || !!matchedConnection;
+    const canSeeMatchedMedia = isSelf || !!matchedConnection;
+
     const discoverGallery = buildDiscoverSafeGallery(user);
     const viewProfileGallery = buildViewProfileGallery(user, {
       canSeeMatchedMedia,
       isSelf,
-      viewerId: viewer.id,
+      viewerId,
     });
 
-    // ✅ ViewProfile must use real profile gallery media.
-    // discoverGallery is only for Discover cards and intentionally removes reels/videos.
-    // buildViewProfileGallery already protects private/matches-only media.
-    // Comments are also filtered here: only media owner + comment author can see each comment.
-    const profileGallery = viewProfileGallery;
+    // Matched/self profile receives public + matched-only.
+    // Unmatched/discover profile receives public-only photos.
+    const profileGallery = canSeeMatchedMedia
+      ? viewProfileGallery
+      : discoverGallery;
+
     const distancePayload = buildProfileDistancePayload(viewer, user, req.query);
 
-      const signedAvatar = await signR2Value(user.avatar, 21600);
+    const signedAvatar = await signR2Value(user.avatar, 21600);
     const signedVoiceUrl = await signR2Value(user.voiceUrl, 3600);
     const signedProfileMedia = await Promise.all(
       profileGallery.media.map((item) => signR2MediaItem(item, 7200))

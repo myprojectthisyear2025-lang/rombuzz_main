@@ -315,7 +315,6 @@ router.post("/upload-avatar-url", authMiddleware, async (req, res) => {
       r2Key: isR2Key(incoming) ? incoming : "",
       storage: isR2Key(incoming) ? "r2" : "external",
       type: "image",
-      caption: "facebuzz",
       privacy: "public",
       createdAt: Date.now(),
     });
