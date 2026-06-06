@@ -95,6 +95,85 @@ async function signR2MediaItem(item = {}, expiresInSeconds = 3600) {
   };
 }
 
+function getDiscoverMediaUrl(entry = {}) {
+  if (typeof entry === "string") return normalizeMediaString(entry);
+
+  return normalizeMediaString(
+    entry.url ||
+      entry.mediaUrl ||
+      entry.fileUrl ||
+      entry.secureUrl ||
+      entry.secure_url ||
+      entry.src ||
+      entry.imageUrl ||
+      entry.photoUrl ||
+      entry.videoUrl ||
+      ""
+  );
+}
+
+function getDiscoverMediaPrivacy(entry = {}) {
+  return String(entry?.privacy || entry?.visibility || entry?.scope || "")
+    .toLowerCase()
+    .trim();
+}
+
+function getDiscoverMediaCaption(entry = {}) {
+  return String(entry?.caption || entry?.text || entry?.description || "")
+    .toLowerCase()
+    .trim();
+}
+
+function isDiscoverSafeMedia(entry = {}) {
+  const url = getDiscoverMediaUrl(entry);
+  if (!url) return false;
+
+  const privacy = getDiscoverMediaPrivacy(entry);
+  const caption = getDiscoverMediaCaption(entry);
+  const type = String(entry?.type || entry?.mediaType || "")
+    .toLowerCase()
+    .trim();
+
+  if (
+    privacy === "private" ||
+    privacy === "matches" ||
+    privacy === "matched" ||
+    privacy === "matched-only" ||
+    privacy === "matched_only" ||
+    privacy === "hidden" ||
+    privacy === "specific"
+  ) {
+    return false;
+  }
+
+  if (caption.includes("scope:private")) return false;
+  if (caption.includes("scope:matches")) return false;
+  if (caption.includes("scope:matched")) return false;
+  if (caption.includes("privacy:private")) return false;
+  if (caption.includes("privacy:matches")) return false;
+  if (caption.includes("privacy:matched")) return false;
+
+  // Discover card/profile should stay photo-only for unmatched users.
+  if (caption.includes("kind:reel")) return false;
+  if (caption.includes("kind:video")) return false;
+  if (type === "video" || type === "reel") return false;
+
+  return true;
+}
+
+function getSignedMediaUrlField(item = {}) {
+  return normalizeMediaString(
+    item.url ||
+      item.mediaUrl ||
+      item.fileUrl ||
+      item.secureUrl ||
+      item.secure_url ||
+      item.imageUrl ||
+      item.photoUrl ||
+      ""
+  );
+}
+
 const LOCAL_RESTRICTED_VALUES = new Set([
   "flirty",
   "chill",
@@ -692,15 +771,21 @@ router.get("/", authMiddleware, async (req, res) => {
             ? formatDiscoverDistanceText(u.distanceMeters, viewerUsesMiles)
             : "—";
 
-          const signedAvatar =
+           const signedAvatar =
             (await signR2Value(u.avatar, 21600)) ||
             "https://via.placeholder.com/400x400?text=No+Photo";
 
-          const signedMedia = Array.isArray(u.media)
-            ? await Promise.all(
-                u.media.map((item) => signR2MediaItem(item, 7200))
-              )
+          const discoverSafeMedia = Array.isArray(u.media)
+            ? u.media.filter((item) => isDiscoverSafeMedia(item))
             : [];
+
+          const signedMedia = await Promise.all(
+            discoverSafeMedia.map((item) => signR2MediaItem(item, 7200))
+          );
+
+          const signedPhotos = signedMedia
+            .map((item) => getSignedMediaUrlField(item))
+            .filter(Boolean);
 
           return {
             id: u.id,
@@ -724,8 +809,10 @@ router.get("/", authMiddleware, async (req, res) => {
             status: u._status || "inactive",
             isOnline: !!onlineUsers[u.id],
 
-            // extra fields used by Discover → ViewProfile preview
+            // extra fields used by Discover → DiscoverProfile preview.
+            // Public-only media. Never send matched/private media to Discover.
             media: signedMedia,
+            photos: signedPhotos,
             dob: u.dob || null,
             height: u.height || null,
             city: u.city || "",
