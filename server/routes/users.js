@@ -1080,19 +1080,16 @@ router.get("/:id", authMiddleware, async (req, res) => {
 
     const distancePayload = buildProfileDistancePayload(viewer, user, req.query);
 
-    const signedAvatar = await signR2Value(user.avatar, 21600);
+      const signedAvatar = await signR2Value(user.avatar, 21600);
     const signedVoiceUrl = await signR2Value(user.voiceUrl, 3600);
+
+    // View Profile source of truth:
+    // Send ONE normalized gallery list only.
+    // Do not also send derived photos/reels arrays because mobile can read all arrays
+    // and that causes repeated thumbnails.
     const signedProfileMedia = await Promise.all(
       profileGallery.media.map((item) => signR2MediaItem(item, 7200))
     );
-    const signedProfilePhotos = await Promise.all(
-      profileGallery.photos.map((item) => signR2MediaItem(item, 7200))
-    );
-    const signedProfileReels = canSeeMatchedMedia
-      ? await Promise.all(
-          viewProfileGallery.reels.map((item) => signR2MediaItem(item, 7200))
-        )
-      : [];
 
     res.json({
       matched: canSeeMatchedMedia,
@@ -1141,8 +1138,12 @@ router.get("/:id", authMiddleware, async (req, res) => {
         hobbies: user.hobbies,
 
         media: signedProfileMedia,
-        photos: signedProfilePhotos,
-        reels: signedProfileReels,
+
+        // Keep these empty for View Profile.
+        // media[] already contains both photos and reels with type metadata.
+        photos: [],
+        reels: [],
+
         matched: canSeeMatchedMedia,
         voiceIntro: signedVoiceUrl,
         voiceUrl: signedVoiceUrl,

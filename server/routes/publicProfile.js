@@ -360,21 +360,16 @@ const likedMe = await Relationship.exists({ from: targetId, to: viewerId, type: 
       isSelf
     );
 
-    safeUser.media = await Promise.all(
+      safeUser.media = await Promise.all(
       profileMedia.map((item) => signR2MediaItem(item, 7200))
     );
 
-    // Do not resend raw target.photos here.
-    // safeUser.media is already the normalized, privacy-filtered, deduped gallery.
-    // Keep photos only as URL strings for older clients.
-    safeUser.photos = safeUser.media
-      .filter((item) => String(item?.type || "").toLowerCase() !== "reel")
-      .map((item) => item.url)
-      .filter(Boolean);
-
-    safeUser.reels = safeUser.media.filter((item) =>
-      ["reel", "video"].includes(String(item?.type || "").toLowerCase())
-    );
+    // View Profile source of truth:
+    // Send ONE normalized gallery list only.
+    // Do not also send derived photos/reels arrays because mobile can read all arrays
+    // and that causes repeated thumbnails.
+    safeUser.photos = [];
+    safeUser.reels = [];
 
     safeUser.posts = await Promise.all(posts.map((post) => signR2Post(post, 7200)));
 
