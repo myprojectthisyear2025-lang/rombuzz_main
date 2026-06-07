@@ -108,14 +108,29 @@ router.post("/media/:ownerId/gift", authMiddleware, async (req, res) => {
       createdAt: Date.now(),
     });
 
-    const gifter = await User.findOne({ id: me }).lean();
+      const gifter = await User.findOne({ id: me }).lean();
     await sendNotification(ownerId, {
       fromId: me,
-      type: "media_gift",
+
+      // ✅ Keep this inside Notification model enum.
+      // Mobile can still understand this is a media gift from targetType/entity.
+      type: "gift",
+
       message: `${gifter?.firstName || "Someone"} sent you a gift 🎁`,
-      entity: "media",
+
+      // Legacy/fallback fields — same shape as media comment notifications.
+      href: `/letsbuzz?post=${mediaId}`,
+      entity: "gallery_media",
       entityId: mediaId,
+      postId: mediaId,
       postOwnerId: ownerId,
+
+      // Exact routing fields
+      targetType: "gallery_media",
+      targetId: mediaId,
+      targetOwnerId: ownerId,
+      routeContext: "gift",
+
       giftId,
       transactionId,
     });

@@ -160,13 +160,24 @@ router.post("/buzz/posts/:postId/gifts", authMiddleware, async (req, res) => {
       const meUser = await User.findOne({ id: me }).lean();
       const fromName = meUser?.firstName || "Someone";
 
-      await sendNotification(String(post.userId), {
+           await sendNotification(String(post.userId), {
         fromId: me,
         type: "gift",
         message: `${fromName} sent you a gift 🎁`,
-        href: `/viewProfile/${me}`,
+
+        // Legacy/fallback fields — same deep-link shape as comment notifications.
+        href: `/letsbuzz?post=${postId}`,
         entity: placement === "reels" ? "buzz_reel" : "buzz_post",
         entityId: postId,
+        postId,
+        postOwnerId: String(post.userId),
+
+        // Exact routing fields
+        targetType: placement === "reels" ? "buzz_reel" : "buzz_post",
+        targetId: postId,
+        targetOwnerId: String(post.userId),
+        routeContext: "gift",
+
         giftId,
         transactionId,
       });
