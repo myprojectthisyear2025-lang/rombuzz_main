@@ -172,9 +172,13 @@ app.use('/api/microbuzz', require('./routes/microbuzz'));
 // ðŸ POSTS / LETSBUZZ
 app.use('/api/posts', require('./routes/posts'));
 
-// ðŸ  FEED & UPLOADS
+// ðŸ  FEED & UPLOADS
 app.use('/api/feed', require('./routes/feed'));
 app.use('/api', require('./routes/upload'));
+
+// 🎬 CLOUDFLARE STREAM VIDEO/REEL UPLOADS
+// Photos/audio stay on private R2. Videos/reels use Stream direct uploads.
+app.use('/api/stream', require('./routes/streamUploads'));
 
 // ðŸ“¸ STORIES & PUBLIC PROFILES
 app.use('/api/stories', require('./routes/stories'));
