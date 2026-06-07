@@ -116,10 +116,13 @@ router.post("/media/:ownerId/gift", authMiddleware, async (req, res) => {
       // Mobile can still understand this is a media gift from targetType/entity.
       type: "gift",
 
-      message: `${gifter?.firstName || "Someone"} sent you a gift 🎁`,
+        message: `${gifter?.firstName || "Someone"} sent you a gift on your post.🎁`,
 
-      // Legacy/fallback fields — same shape as media comment notifications.
-      href: `/letsbuzz?post=${mediaId}`,
+      // Legacy/fallback fields.
+      // Mobile uses exact routing fields below, but this keeps old clients sane.
+      href: `/profile?post=${encodeURIComponent(mediaId)}&ownerId=${encodeURIComponent(
+        ownerId
+      )}&targetType=gallery_media&openInsights=1&insightsTab=gifts`,
       entity: "gallery_media",
       entityId: mediaId,
       postId: mediaId,
