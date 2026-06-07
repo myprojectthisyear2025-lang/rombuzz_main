@@ -23,6 +23,7 @@ const GiftSummary = require("../models/GiftSummary");
 const { validateGiftPurchase } = require("../config/rombuzzGifts");
 const { debitBuzzCoins, creditBuzzCoins } = require("./buzzCoinService");
 const { sendNotification } = require("../utils/helpers");
+const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 
 function getIO() {
   return global.io || null;
@@ -39,6 +40,57 @@ function normalizePlacement(placement) {
 
 function normalizeTargetType(targetType) {
   return String(targetType || "gift").trim().toLowerCase();
+}
+
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signR2Value(value, expiresInSeconds = 21600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+function getFirstPhotoCandidate(photos = []) {
+  if (!Array.isArray(photos)) return "";
+
+  for (const photo of photos) {
+    if (typeof photo === "string" && photo.trim()) {
+      return photo.trim();
+    }
+
+    if (photo && typeof photo === "object") {
+      const value =
+        photo.url ||
+        photo.mediaUrl ||
+        photo.fileUrl ||
+        photo.secureUrl ||
+        photo.secure_url ||
+        photo.imageUrl ||
+        photo.photoUrl ||
+        "";
+
+      if (String(value || "").trim()) return String(value).trim();
+    }
+  }
+
+  return "";
+}
+
+async function getSignedGiftUserAvatar(user = {}) {
+  const candidate =
+    user.avatar ||
+    user.avatarUrl ||
+    user.profilePic ||
+    user.photoUrl ||
+    user.imageUrl ||
+    getFirstPhotoCandidate(user.photos) ||
+    "";
+
+  return signR2Value(candidate, 21600);
 }
 
 async function updateGiftSummary({
@@ -365,11 +417,18 @@ async function getGiftSummary({
     new Set(transactions.map((tx) => String(tx.senderId || "")).filter(Boolean))
   );
 
-  const users = await User.find({ id: { $in: senderIds } })
-    .select("id firstName lastName avatar photos")
+   const users = await User.find({ id: { $in: senderIds } })
+    .select("id firstName lastName username avatar avatarUrl profilePic photoUrl imageUrl photos")
     .lean();
 
-  const userMap = new Map(users.map((user) => [String(user.id), user]));
+  const signedUsers = await Promise.all(
+    users.map(async (user) => ({
+      ...user,
+      signedGiftAvatar: await getSignedGiftUserAvatar(user),
+    }))
+  );
+
+  const userMap = new Map(signedUsers.map((user) => [String(user.id), user]));
   const grouped = new Map();
 
   for (const tx of transactions) {
@@ -386,11 +445,11 @@ async function getGiftSummary({
           id: senderId,
           firstName: user.firstName || "",
           lastName: user.lastName || "",
-          avatar:
-            user.avatar ||
-            (Array.isArray(user.photos) && user.photos.length
-              ? user.photos[0]
-              : ""),
+          username: user.username || "",
+          avatar: user.signedGiftAvatar || "",
+          avatarUrl: user.signedGiftAvatar || "",
+          profilePic: user.signedGiftAvatar || "",
+          photoUrl: user.signedGiftAvatar || "",
         },
         totalCount: 0,
         totalBC: 0,
