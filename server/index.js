@@ -177,8 +177,12 @@ app.use('/api/feed', require('./routes/feed'));
 app.use('/api', require('./routes/upload'));
 
 // 🎬 CLOUDFLARE STREAM VIDEO/REEL UPLOADS
-// Photos/audio stay on private R2. Videos/reels use Stream direct uploads.
+// Photos/audio stay on private R2. Profile reels use Stream direct uploads.
 app.use('/api/stream', require('./routes/streamUploads'));
+
+// 🎥 CHAT VIDEO STREAM UPLOADS
+// Chat videos use a separate Stream purpose/context: chat_video.
+app.use('/api/chat-stream', require('./routes/chatStreamUploads'));
 
 // ðŸ“¸ STORIES & PUBLIC PROFILES
 app.use('/api/stories', require('./routes/stories'));

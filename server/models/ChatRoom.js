@@ -29,15 +29,40 @@ const replyToSchema = new mongoose.Schema(
 
 const messageSchema = new mongoose.Schema(
   {
-    id: { type: String, required: true, index: true },   // shortid-style
+     id: { type: String, required: true, index: true },   // shortid-style
     from: { type: String, required: true },
     to: { type: String, required: true },
       text: { type: String, default: "" },
 
      // ✅ important: store media fields so realtime + refresh behave the same
-    url: { type: String, default: null }, // cloudinary url for media
+    url: { type: String, default: null }, // R2 key, Cloudinary URL, or signed Stream playback URL
        mediaType: { type: String, enum: ["image", "video", "audio", null], default: null },
     overlayText: { type: String, default: "" },
+    muted: { type: Boolean, default: false },
+
+    // ✅ Chat video Stream metadata. Old Cloudinary videos keep using url.
+    provider: { type: String, enum: ["", "r2", "cloudinary", "cloudflare_stream"], default: "" },
+    storage: { type: String, enum: ["", "r2", "cloudinary", "cloudflare_stream"], default: "" },
+    purpose: { type: String, default: "" },
+    streamUid: { type: String, default: "", index: true },
+    thumbnailUrl: { type: String, default: "" },
+    status: { type: String, default: "" },
+    duration: { type: Number, default: 0 },
+    playback: {
+      hls: { type: String, default: "" },
+      dash: { type: String, default: "" },
+      iframe: { type: String, default: "" },
+      thumbnailUrl: { type: String, default: "" },
+    },
+    cloudflareStream: {
+      uid: { type: String, default: "" },
+      provider: { type: String, default: "" },
+      purpose: { type: String, default: "" },
+      context: { type: String, default: "" },
+      status: { type: String, default: "" },
+      duration: { type: Number, default: 0 },
+      requireSignedURLs: { type: Boolean, default: true },
+    },
 
     type: {
       type: String,

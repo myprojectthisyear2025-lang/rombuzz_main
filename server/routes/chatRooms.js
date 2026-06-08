@@ -35,6 +35,11 @@ const Match = require("../models/Match");
 const Relationship = require("../models/Relationship");
 const { debitBuzzCoins, creditBuzzCoins } = require("../services/buzzCoinService");
 const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
+const {
+  createSignedPlaybackToken,
+  getStreamVideo,
+  normalizeStreamUid,
+} = require("../services/cloudflareStreamService");
 
 // ✅ Proper Socket.IO + state wiring
 const { getIO } = require("../socket");
@@ -56,6 +61,18 @@ async function signR2Value(value, expiresInSeconds = 3600) {
   return getSignedMediaUrl(raw, expiresInSeconds);
 }
 
+function decodeRbzPayload(text = "") {
+  const raw = String(text || "");
+  if (!raw.startsWith("::RBZ::")) return null;
+
+  try {
+    const payload = JSON.parse(raw.slice("::RBZ::".length));
+    return payload && typeof payload === "object" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
 function replaceRbzPayloadUrl(text = "", signedUrl = "") {
   const raw = String(text || "");
   const nextUrl = String(signedUrl || "").trim();
@@ -73,11 +90,141 @@ function replaceRbzPayloadUrl(text = "", signedUrl = "") {
   }
 }
 
+function replaceRbzPayloadStreamPlayback(text = "", stream = {}) {
+  const raw = String(text || "");
+  if (!raw.startsWith("::RBZ::")) return raw;
+
+  try {
+    const payload = JSON.parse(raw.slice("::RBZ::".length));
+    if (!payload || typeof payload !== "object") return raw;
+
+    payload.provider = "cloudflare_stream";
+    payload.storage = "cloudflare_stream";
+    payload.purpose = "chat_video";
+    payload.context = "chat_video";
+    payload.streamUid = stream.streamUid || payload.streamUid || "";
+    payload.uid = stream.streamUid || payload.uid || "";
+    payload.url = stream.playback?.hls || payload.url || "";
+    payload.previewUrl = stream.playback?.hls || payload.previewUrl || "";
+    payload.playback = stream.playback || payload.playback || {};
+    payload.thumbnailUrl = stream.thumbnailUrl || payload.thumbnailUrl || "";
+    payload.status = stream.status || payload.status || "processing";
+    payload.duration = Number(stream.duration || payload.duration || 0);
+    payload.cloudflareStream = {
+      ...(payload.cloudflareStream || {}),
+      uid: stream.streamUid || payload.cloudflareStream?.uid || "",
+      provider: "cloudflare_stream",
+      purpose: "chat_video",
+      context: "chat_video",
+      status: stream.status || payload.cloudflareStream?.status || "processing",
+      duration: Number(stream.duration || payload.cloudflareStream?.duration || 0),
+      requireSignedURLs: true,
+    };
+
+    return `::RBZ::${JSON.stringify(payload)}`;
+  } catch {
+    return raw;
+  }
+}
+
+function getChatStreamUid(base = {}, payload = {}) {
+  return normalizeStreamUid(
+    base?.streamUid ||
+      base?.cloudflareStream?.uid ||
+      payload?.streamUid ||
+      payload?.uid ||
+      payload?.cloudflareStream?.uid ||
+      ""
+  );
+}
+
+function isChatStreamVideo(base = {}, payload = {}) {
+  const provider = String(
+    base?.provider ||
+      base?.storage ||
+      payload?.provider ||
+      payload?.storage ||
+      ""
+  ).toLowerCase();
+
+  const purpose = String(
+    base?.purpose ||
+      base?.cloudflareStream?.purpose ||
+      base?.cloudflareStream?.context ||
+      payload?.purpose ||
+      payload?.context ||
+      payload?.cloudflareStream?.purpose ||
+      payload?.cloudflareStream?.context ||
+      ""
+  ).toLowerCase();
+
+  const mediaType = String(base?.mediaType || payload?.mediaType || "").toLowerCase();
+
+  return (
+    mediaType === "video" &&
+    provider === "cloudflare_stream" &&
+    purpose === "chat_video" &&
+    !!getChatStreamUid(base, payload)
+  );
+}
+
+async function signChatStreamVideoMessage(base = {}, payload = {}) {
+  const streamUid = getChatStreamUid(base, payload);
+  if (!streamUid) return base;
+
+  try {
+    const video = await getStreamVideo(streamUid);
+    const signed = await createSignedPlaybackToken(streamUid);
+    const playback = signed?.playback || {};
+
+    const streamPayload = {
+      streamUid,
+      playback,
+      thumbnailUrl: playback?.thumbnailUrl || video?.thumbnailUrl || "",
+      status: video?.status || "processing",
+      duration: Number(video?.duration || 0),
+    };
+
+    return {
+      ...base,
+      provider: "cloudflare_stream",
+      storage: "cloudflare_stream",
+      purpose: "chat_video",
+      streamUid,
+      url: playback?.hls || "",
+      playback,
+      thumbnailUrl: streamPayload.thumbnailUrl,
+      status: streamPayload.status,
+      duration: streamPayload.duration,
+      cloudflareStream: {
+        ...(base.cloudflareStream || {}),
+        uid: streamUid,
+        provider: "cloudflare_stream",
+        purpose: "chat_video",
+        context: "chat_video",
+        status: streamPayload.status,
+        duration: streamPayload.duration,
+        requireSignedURLs: true,
+      },
+      text: replaceRbzPayloadStreamPlayback(base.text, streamPayload),
+    };
+  } catch (err) {
+    console.warn("signChatStreamVideoMessage failed:", err?.message || err);
+    return base;
+  }
+}
+
 async function signChatMessageMedia(message = {}, expiresInSeconds = 3600) {
   const base =
     typeof message?.toObject === "function"
       ? message.toObject({ flattenMaps: true })
       : { ...(message || {}) };
+
+  const payload = decodeRbzPayload(base.text);
+
+  if (isChatStreamVideo(base, payload || {})) {
+    return signChatStreamVideoMessage(base, payload || {});
+  }
 
   const rawUrl = normalizeMediaString(base.url || "");
   const key = isR2Key(rawUrl) ? rawUrl : "";
@@ -414,6 +561,25 @@ let mediaType = null; // "image" | "video" | "audio"
 let overlayText = "";
 let muted = false;
 
+// ✅ Chat video Stream fields. Old Cloudinary videos keep using url only.
+let provider = "";
+let storage = "";
+let purpose = "";
+let streamUid = "";
+let thumbnailUrl = "";
+let status = "";
+let duration = 0;
+let playback = {};
+let cloudflareStream = {
+  uid: "",
+  provider: "",
+  purpose: "",
+  context: "",
+  status: "",
+  duration: 0,
+  requireSignedURLs: true,
+};
+
 if (text.startsWith("::RBZ::")) {
   try {
     const payload = JSON.parse(text.slice("::RBZ::".length));
@@ -458,6 +624,45 @@ if (text.startsWith("::RBZ::")) {
       mediaType = "image";
     }
 
+    provider = String(payload?.provider || "").trim();
+    storage = String(payload?.storage || provider || "").trim();
+    purpose = String(payload?.purpose || payload?.context || "").trim();
+
+    streamUid = normalizeStreamUid(
+      payload?.streamUid ||
+        payload?.uid ||
+        payload?.cloudflareStream?.uid ||
+        ""
+    );
+
+    if (
+      mediaType === "video" &&
+      (provider === "cloudflare_stream" || storage === "cloudflare_stream") &&
+      streamUid
+    ) {
+      provider = "cloudflare_stream";
+      storage = "cloudflare_stream";
+      purpose = "chat_video";
+      mediaUrl = streamUid;
+      thumbnailUrl = String(payload?.thumbnailUrl || "");
+      status = String(payload?.status || payload?.cloudflareStream?.status || "processing");
+      duration = Number(payload?.duration || payload?.cloudflareStream?.duration || 0);
+      playback =
+        payload?.playback && typeof payload.playback === "object"
+          ? payload.playback
+          : {};
+
+      cloudflareStream = {
+        uid: streamUid,
+        provider: "cloudflare_stream",
+        purpose: "chat_video",
+        context: "chat_video",
+        status,
+        duration,
+        requireSignedURLs: true,
+      };
+    }
+
     muted = !!payload?.muted;
 
     if (payload?.overlayText) overlayText = String(payload.overlayText || "");
@@ -481,6 +686,17 @@ const msg = {
   mediaType: isRBZ ? mediaType : null,
   overlayText: isRBZ ? overlayText : "",
   muted: isRBZ ? muted : false,
+
+  // ✅ Chat video Stream metadata. Old Cloudinary videos keep provider empty/cloudinary.
+  provider: isRBZ ? provider : "",
+  storage: isRBZ ? storage : "",
+  purpose: isRBZ ? purpose : "",
+  streamUid: isRBZ ? streamUid : "",
+  thumbnailUrl: isRBZ ? thumbnailUrl : "",
+  status: isRBZ ? status : "",
+  duration: isRBZ ? duration : 0,
+  playback: isRBZ ? playback : {},
+  cloudflareStream: isRBZ ? cloudflareStream : {},
 
   time: new Date(),
   edited: false,
