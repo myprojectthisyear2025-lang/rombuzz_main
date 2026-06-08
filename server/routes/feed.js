@@ -176,19 +176,46 @@ function getLetsBuzzMediaUrlCandidate(media = {}) {
   );
 }
 
+function getCloudflareStreamUid(media = {}) {
+  return normalizeMediaString(
+    media.streamUid ||
+      media.uid ||
+      media?.cloudflareStream?.uid ||
+      ""
+  );
+}
+
+function isCloudflareStreamProfileReel(media = {}) {
+  const provider = String(media.provider || media.storage || "").toLowerCase();
+  const purpose = String(
+    media.purpose ||
+      media.uploadPurpose ||
+      media.context ||
+      media?.cloudflareStream?.purpose ||
+      media?.cloudflareStream?.context ||
+      ""
+  ).toLowerCase();
+
+  return (
+    (provider === "cloudflare_stream" || !!getCloudflareStreamUid(media)) &&
+    (!purpose || purpose === "profile_reel")
+  );
+}
+
 function inferLetsBuzzKind(media = {}) {
   const caption = String(media.caption || "").toLowerCase();
   const type = String(media.type || media.mediaType || "").toLowerCase();
   const url = getLetsBuzzMediaUrlCandidate(media).toLowerCase();
 
   if (
+    isCloudflareStreamProfileReel(media) ||
     caption.includes("kind:reel") ||
     caption.includes("kind:video") ||
     type === "video" ||
     type === "reel" ||
     type.includes("video") ||
     type.includes("reel") ||
-    /\.(mp4|mov|m4v|webm|avi|wmv|flv|mkv|mpg|mpeg)(\?|#|$)/i.test(url)
+    /\.(mp4|mov|m4v|webm|avi|wmv|flv|mkv|mpg|mpeg|m3u8)(\?|#|$)/i.test(url)
   ) {
     return "reel";
   }
@@ -246,7 +273,9 @@ function resolveLetsBuzzScope(media = {}) {
 
 function isLetsBuzzEligibleGalleryMedia(media = {}) {
   const rawUrl = getLetsBuzzMediaUrlCandidate(media);
-  if (!rawUrl) return false;
+  const streamUid = getCloudflareStreamUid(media);
+
+  if (!rawUrl && !streamUid) return false;
 
   const scope = resolveLetsBuzzScope(media);
   if (scope === "private") return false;
@@ -467,7 +496,7 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
           u.id
         );
 
-        const signedMedia = await signR2MediaItem(m, 7200);
+          const signedMedia = await signR2MediaItem(m, 7200);
         const signedMediaUrl =
           signedMedia.mediaUrl ||
           signedMedia.url ||
@@ -478,13 +507,14 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
           signedMedia.photoUrl ||
           "";
 
-        if (!signedMediaUrl) continue;
+        const streamUid = getCloudflareStreamUid(signedMedia || m);
+        if (!signedMediaUrl && !streamUid) continue;
 
-        const mediaId = String(m.id || m._id || "");
+        const mediaId = String(m.id || m._id || streamUid || "");
         if (!mediaId) continue;
 
-        const kind = inferLetsBuzzKind(m);
-        const scope = resolveLetsBuzzScope(m);
+        const kind = inferLetsBuzzKind(signedMedia || m);
+        const scope = resolveLetsBuzzScope(signedMedia || m);
 
         feed.push({
           id: mediaId,
@@ -506,6 +536,29 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
           sourceType: "gallery",
           mediaId,
           r2Key: signedMedia.r2Key || "",
+
+          // Cloudflare Stream profile_reel support.
+          // LetsBuzz mobile resolves signed playback through /api/stream/:uid/playback.
+          provider: signedMedia.provider || m.provider || "",
+          storage: signedMedia.storage || m.storage || "",
+          streamUid,
+          playback: signedMedia.playback || m.playback || {},
+          thumbnailUrl: signedMedia.thumbnailUrl || m.thumbnailUrl || "",
+          cloudflareStream: signedMedia.cloudflareStream || m.cloudflareStream || null,
+          status:
+            signedMedia.status ||
+            m.status ||
+            signedMedia?.cloudflareStream?.status ||
+            m?.cloudflareStream?.status ||
+            "",
+          duration: Number(
+            signedMedia.duration ||
+              m.duration ||
+              signedMedia?.cloudflareStream?.duration ||
+              m?.cloudflareStream?.duration ||
+              0
+          ),
+
           user: await signFeedUser(u),
         });
       }
