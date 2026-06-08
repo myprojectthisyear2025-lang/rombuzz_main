@@ -12,6 +12,7 @@
  *
  * Endpoints:
  *   POST   /api/media/:ownerId/react                 → React / unreact to media
+ *   GET    /api/media/:ownerId/comments              → Fetch visible private media comments
  *   POST   /api/media/:ownerId/comment               → Add comment / reply to media
  *   PATCH  /api/media/:ownerId/comment/:commentId    → Edit a media comment
  *   DELETE /api/media/:ownerId/comment/:commentId    → Delete a media comment
@@ -180,10 +181,18 @@ function getMediaKeyCandidates(media = {}) {
     media?._id,
     media?.mediaId,
     media?.postId,
+
+    // ✅ Cloudflare Stream profile reel identifiers
+    media?.streamUid,
+    media?.uid,
+    media?.cloudflareStream?.uid,
+
     media?.url,
     media?.mediaUrl,
     media?.secureUrl,
     media?.secure_url,
+    media?.playback?.hls,
+    media?.playback?.dash,
   ]
     .map((value) => String(value || "").trim())
     .filter(Boolean);
@@ -245,6 +254,81 @@ function buildReactionCounts(reactions = {}) {
   });
   return counts;
 }
+
+// =======================================================
+// ✅ Fetch visible private comments for gallery media/reels
+//    Used by PrivateCommentsSheet for targetType="gallery_media"
+// =======================================================
+router.get("/media/:ownerId/comments", authMiddleware, async (req, res) => {
+  try {
+    const me = String(req.user.id);
+    const { ownerId } = req.params;
+    const mediaId = String(req.query?.mediaId || "").trim();
+
+    if (!mediaId) {
+      return res.status(400).json({ error: "mediaId required" });
+    }
+
+    const owner = await User.findOne({ id: ownerId }).lean();
+    if (!owner) {
+      return res.status(404).json({ error: "owner not found" });
+    }
+
+    const canComment = await canInteractWithOwnerMedia(me, ownerId);
+    if (!canComment) {
+      return res.status(403).json({
+        error: "Only matched users can view comments on this media",
+      });
+    }
+
+    const media = getMedia(owner, mediaId);
+    if (!media) {
+      return res.status(404).json({
+        error: "media not found",
+        mediaId: String(mediaId),
+        ownerId: String(ownerId),
+      });
+    }
+
+    const visibleComments = Array.isArray(media.comments)
+      ? media.comments.filter((comment) =>
+          canSeePrivateComment(comment, me, ownerId)
+        )
+      : [];
+
+    const comments = await Promise.all(
+      visibleComments.map(async (comment) => {
+        const signed = await signMediaCommentForResponse(comment);
+        const reactions = signed?.reactions || {};
+        const reactionCounts = buildReactionCounts(reactions || {});
+
+        return {
+          ...signed,
+          canEdit: String(signed.userId) === String(me),
+          canDelete:
+            String(signed.userId) === String(me) ||
+            String(ownerId) === String(me),
+          canReply: true,
+          myReaction: reactions?.[me] || null,
+          reactionCounts,
+          totalReactions: Object.keys(reactions || {}).length,
+        };
+      })
+    );
+
+    return res.json({
+      ok: true,
+      targetType: "gallery_media",
+      targetId: String(mediaId),
+      ownerId: String(ownerId),
+      comments,
+      commentsCount: comments.length,
+    });
+  } catch (err) {
+    console.error("❌ GET /media/:ownerId/comments error:", err);
+    return res.status(500).json({ error: "Failed to fetch comments" });
+  }
+});
 
 // =======================================================
 // ✅ React / unreact to a media item (MongoDB)
