@@ -42,6 +42,15 @@ function normalizeMediaString(value = "") {
   return String(value || "").trim();
 }
 
+function getCloudflareStreamUid(media = {}) {
+  return normalizeMediaString(
+    media.streamUid ||
+      media.uid ||
+      media?.cloudflareStream?.uid ||
+      ""
+  );
+}
+
 async function signR2Value(value, expiresInSeconds = 3600) {
   const raw = normalizeMediaString(value);
   if (!raw) return "";
@@ -156,14 +165,21 @@ function normalizeProfileMediaEntry(entry) {
     "";
 
   const url = String(rawUrl).trim();
-  if (!url) return null;
+  const streamUid = getCloudflareStreamUid(entry);
 
-  const stableKey = getStableMediaKey(entry, url);
+  if (!url && !streamUid) return null;
+
+  const stableKey = getStableMediaKey(entry, url) || streamUid;
   const caption = String(entry.caption || "").trim();
   const privacy = String(entry.privacy || entry.scope || "public").toLowerCase().trim();
   const rawType = String(entry.type || entry.mediaType || "").toLowerCase().trim();
   const sharedWith = normalizeSharedWith(entry.sharedWith);
+  const isStreamReel =
+    String(entry.provider || entry.storage || "").toLowerCase() === "cloudflare_stream" ||
+    !!streamUid;
+
   const looksLikeVideo =
+    isStreamReel ||
     rawType === "reel" ||
     rawType === "video" ||
     rawType.includes("reel") ||
@@ -178,16 +194,28 @@ function normalizeProfileMediaEntry(entry) {
     id: String(entry.id || entry._id || entry.mediaId || stableKey),
     mediaId: String(entry.mediaId || entry.id || entry._id || stableKey),
     url,
+    mediaUrl: entry.mediaUrl || url,
+    videoUrl: entry.videoUrl || url,
     caption,
     privacy,
     sharedWith,
     type: looksLikeVideo ? "reel" : "image",
     stableKey,
+
+    // Cloudflare Stream profile_reel support.
+    provider: entry.provider || "",
+    storage: entry.storage || "",
+    streamUid,
+    playback: entry.playback || {},
+    thumbnailUrl: entry.thumbnailUrl || "",
+    cloudflareStream: entry.cloudflareStream || null,
+    status: entry.status || entry?.cloudflareStream?.status || "",
+    duration: Number(entry.duration || entry?.cloudflareStream?.duration || 0),
   };
 }
 
 function canViewerSeeMatchedMedia(item, isSelf, isMatched, viewerId) {
-  if (!item || !item.url) return false;
+  if (!item || (!item.url && !getCloudflareStreamUid(item))) return false;
   if (isSelf) return true;
 
   const privacy = String(item.privacy || "public").toLowerCase();
@@ -227,11 +255,12 @@ function buildMatchedProfileMedia(target, viewerId, isMatched, isSelf) {
 
   const pushEntry = (entry, index, source) => {
     const item = normalizeProfileMediaEntry(entry);
-    if (!item || !item.url) return;
+    if (!item || (!item.url && !getCloudflareStreamUid(item))) return;
     if (!canViewerSeeMatchedMedia(item, isSelf, isMatched, viewerId)) return;
 
     const key =
       getStableMediaKey(entry, item.url) ||
+      getCloudflareStreamUid(item) ||
       item.stableKey ||
       item.mediaId ||
       item.id ||
