@@ -248,9 +248,15 @@ async function canViewProfileReel({ viewerId, ownerId, media }) {
 
   if (!isMatchedOnly) return true;
 
+  // Keep this match check in sync with /api/users/:id.
+  // Older Match docs may use user1/user2, newer ones may use users[].
   const match = await Match.findOne({
     status: "matched",
-    users: { $all: [me, owner] },
+    $or: [
+      { user1: me, user2: owner },
+      { user1: owner, user2: me },
+      { users: { $all: [me, owner] } },
+    ],
   }).lean();
 
   return !!match;
