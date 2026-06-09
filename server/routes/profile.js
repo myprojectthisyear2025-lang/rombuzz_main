@@ -40,7 +40,12 @@ const Notification = require("../models/Notification");
 const Match = require("../models/Match");
 const { sendNotification } = require("../utils/helpers");
 const PrivateNote = require("../models/PrivateNote");
-const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
+const {
+  deleteStoredR2ObjectBestEffort,
+  getSignedMediaUrl,
+  getStoredMediaR2Key,
+  isR2Key,
+} = require("../utils/r2Media");
 
 function normalizeMediaString(value = "") {
   return String(value || "").trim();
@@ -117,6 +122,23 @@ async function signR2PostMedia(post = {}) {
   }
 
   return next;
+}
+
+function isUserMediaKeyStillReferenced(user = {}, key = "") {
+  const cleanKey = normalizeMediaString(key);
+  if (!cleanKey) return false;
+
+  if (normalizeMediaString(user.avatar) === cleanKey) return true;
+
+  if (Array.isArray(user.photos)) {
+    if (user.photos.some((photo) => normalizeMediaString(photo) === cleanKey)) {
+      return true;
+    }
+  }
+
+  return (user.media || []).some((item) => {
+    return getStoredMediaR2Key(item) === cleanKey;
+  });
 }
 
 /* ============================================================
@@ -319,14 +341,73 @@ router.put("/users/complete-profile", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Failed to complete profile" });
   }
 });
+
 /* ============================================================
-   ðŸ“ SECTION 4: PRIVATE NOTES (Diary-style, user-only)
+   🎙️ SECTION 4: VOICE INTRO DELETE
+============================================================ */
+
+/**
+ * DELETE /api/profile/voice-intro
+ * Deletes the authenticated user's voice intro from MongoDB and R2.
+ */
+router.delete("/profile/voice-intro", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findOne({ id: req.user.id });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const voiceKey = normalizeMediaString(user.voiceUrl || "");
+    const storageCandidate = {
+      r2Key: isR2Key(voiceKey) ? voiceKey : "",
+      url: voiceKey,
+      mediaUrl: voiceKey,
+      fileUrl: voiceKey,
+    };
+
+    const r2Key = getStoredMediaR2Key(storageCandidate);
+    const stillReferenced = r2Key
+      ? isUserMediaKeyStillReferenced(user, r2Key)
+      : false;
+
+    user.voiceUrl = "";
+    user.voiceDurationSec = 0;
+    user.markModified("voiceUrl");
+    user.markModified("voiceDurationSec");
+    await user.save();
+
+    const storageDelete = r2Key && !stillReferenced
+      ? await deleteStoredR2ObjectBestEffort(
+          storageCandidate,
+          `voice-intro:${req.user.id}`
+        )
+      : {
+          deleted: false,
+          provider: r2Key ? "r2" : "",
+          key: r2Key || "",
+          reason: stillReferenced ? "still_referenced" : "no_r2_key",
+        };
+
+    return res.json({
+      success: true,
+      voiceUrl: "",
+      voiceDurationSec: 0,
+      deletedFromR2: !!storageDelete.deleted,
+      storageDelete,
+    });
+  } catch (err) {
+    console.error("❌ DELETE /profile/voice-intro error:", err);
+    res.status(500).json({ error: "Failed to delete voice intro" });
+  }
+});
+
+/* ============================================================
+   🎙️ SECTION 5: PRIVATE NOTES (Diary-style, user-only)
 ============================================================ */
 
 /**
  * GET /api/profile/notes
  * Returns all private notes for the authenticated user.
  */
+ 
 router.get("/profile/notes", authMiddleware, async (req, res) => {
   try {
     const notes = await PrivateNote.find({ userId: req.user.id })

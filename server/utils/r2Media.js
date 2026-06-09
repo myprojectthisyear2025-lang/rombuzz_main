@@ -230,11 +230,73 @@ function isR2Key(value = "") {
   );
 }
 
+function getStoredMediaR2Key(media = {}) {
+  if (!media || typeof media !== "object") return "";
+
+  const candidates = [
+    media.r2Key,
+    media.key,
+    media.url,
+    media.mediaUrl,
+    media.fileUrl,
+    media.secureUrl,
+    media.secure_url,
+    media.imageUrl,
+    media.photoUrl,
+    media.attachmentUrl,
+  ];
+
+  for (const value of candidates) {
+    const clean = String(value || "").trim();
+    if (clean && isR2Key(clean)) return clean;
+  }
+
+  return "";
+}
+
+async function deleteStoredR2ObjectBestEffort(media = {}, context = "") {
+  const key = getStoredMediaR2Key(media);
+
+  if (!key) {
+    return {
+      deleted: false,
+      provider: "",
+      key: "",
+      reason: "no_r2_key",
+    };
+  }
+
+  try {
+    await deleteR2Object(key);
+
+    return {
+      deleted: true,
+      provider: "r2",
+      key,
+    };
+  } catch (err) {
+    console.error(
+      `⚠️ R2 delete failed${context ? ` (${context})` : ""}:`,
+      err?.message || err
+    );
+
+    return {
+      deleted: false,
+      provider: "r2",
+      key,
+      reason: "delete_failed",
+      error: err?.message || String(err),
+    };
+  }
+}
+
 module.exports = {
   buildR2Key,
   cleanupTempFile,
   deleteR2Object,
+  deleteStoredR2ObjectBestEffort,
   getSignedMediaUrl,
+  getStoredMediaR2Key,
   isR2Key,
   uploadFileToR2,
   validateMediaFile,

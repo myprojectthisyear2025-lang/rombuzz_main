@@ -37,7 +37,18 @@ const {
   sendFeatureRestrictionError,
 } = require("../utils/moderation");
 const { baseSanitizeUser } = require("../utils/helpers");
-const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
+const {
+  deleteStoredR2ObjectBestEffort,
+  getSignedMediaUrl,
+  getStoredMediaR2Key,
+  isR2Key,
+} = require("../utils/r2Media");
+
+const {
+  deleteCloudflareStreamVideoBestEffort,
+  normalizeStreamUid,
+} = require("../services/cloudflareStreamService");
+
 const PostModel = require("../models/PostModel"); // Mongo posts
 const User = require("../models/User");           // Mongo users (for user card on each post)
 
@@ -64,6 +75,15 @@ async function signPostForResponse(post = {}, expiresInSeconds = 7200) {
     mediaUrl: await signR2Value(raw.mediaUrl, expiresInSeconds),
     r2Key: isR2Key(raw.mediaUrl) ? raw.mediaUrl : raw.r2Key || "",
   };
+}
+
+function getPostStreamUid(post = {}) {
+  return normalizeStreamUid(
+    post?.streamUid ||
+      post?.uid ||
+      post?.cloudflareStream?.uid ||
+      ""
+  );
 }
 
 async function signUserForPost(user = {}) {
@@ -341,6 +361,115 @@ router.post("/:postId/react", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("❌ Mongo /posts/:postId/react error:", err);
     res.status(500).json({ error: "Failed to toggle like" });
+  }
+});
+
+
+/* ============================================================
+   🗑️ DELETE POST / REEL
+   Route: DELETE /api/posts/:postId
+   Purpose: Owner deletes a LetsBuzz post/reel and its R2 media if stored in R2.
+============================================================ */
+router.delete("/:postId", authMiddleware, async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const myId = String(req.user.id);
+
+    const post = await PostModel.findOne({ id: postId });
+    if (!post) return res.status(404).json({ error: "Post not found" });
+
+    if (String(post.userId) !== myId) {
+      return res.status(403).json({ error: "not owner" });
+    }
+
+    const rawPost =
+      typeof post.toObject === "function"
+        ? post.toObject({ flattenMaps: true })
+        : { ...(post || {}) };
+
+    const storageCandidate = {
+      r2Key: rawPost.r2Key || "",
+      url: rawPost.url || "",
+      mediaUrl: rawPost.mediaUrl || "",
+      fileUrl: rawPost.fileUrl || "",
+      secureUrl: rawPost.secureUrl || "",
+      secure_url: rawPost.secure_url || "",
+    };
+
+     const r2Key = getStoredMediaR2Key(storageCandidate);
+    const streamUid = getPostStreamUid(rawPost);
+
+    const r2StillReferenced = r2Key
+      ? await PostModel.exists({
+          id: { $ne: postId },
+          userId: myId,
+          $or: [
+            { r2Key },
+            { url: r2Key },
+            { mediaUrl: r2Key },
+            { fileUrl: r2Key },
+            { secureUrl: r2Key },
+            { secure_url: r2Key },
+          ],
+        })
+      : false;
+
+    const streamStillReferenced = streamUid
+      ? await PostModel.exists({
+          id: { $ne: postId },
+          userId: myId,
+          $or: [
+            { streamUid },
+            { uid: streamUid },
+            { "cloudflareStream.uid": streamUid },
+          ],
+        })
+      : false;
+
+    await PostModel.deleteOne({ id: postId, userId: myId });
+
+    const storageDelete = r2Key && !r2StillReferenced
+      ? await deleteStoredR2ObjectBestEffort(storageCandidate, `post:${myId}:${postId}`)
+      : {
+          deleted: false,
+          provider: r2Key ? "r2" : "",
+          key: r2Key || "",
+          reason: r2StillReferenced ? "still_referenced" : "no_r2_key",
+        };
+
+    const streamDelete = streamUid && !streamStillReferenced
+      ? await deleteCloudflareStreamVideoBestEffort(streamUid, `post:${myId}:${postId}`)
+      : {
+          deleted: false,
+          provider: streamUid ? "cloudflare_stream" : "",
+          streamUid: streamUid || "",
+          reason: streamStillReferenced ? "still_referenced" : "no_stream_uid",
+        };
+
+    try {
+      const io = global.io;
+      if (io && typeof io.emit === "function") {
+        io.emit("buzz:post:deleted", {
+          postId: String(postId),
+          userId: myId,
+        });
+      }
+    } catch (emitErr) {
+      console.warn("⚠️ buzz post delete emit failed:", emitErr?.message || emitErr);
+    }
+
+    return res.json({
+      success: true,
+      deleted: true,
+      postId: String(postId),
+      deletedFromR2: !!storageDelete.deleted,
+      deletedFromStream: !!streamDelete.deleted,
+      storageDelete,
+      streamDelete,
+    });
+  } catch (err) {
+    console.error("❌ DELETE /posts/:postId error:", err);
+    res.status(500).json({ error: "Failed to delete post" });
   }
 });
 

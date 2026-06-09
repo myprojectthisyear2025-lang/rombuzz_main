@@ -34,9 +34,15 @@ const User = require("../models/User");
 const Match = require("../models/Match");
 const Relationship = require("../models/Relationship");
 const { debitBuzzCoins, creditBuzzCoins } = require("../services/buzzCoinService");
-const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
+const {
+  deleteStoredR2ObjectBestEffort,
+  getSignedMediaUrl,
+  getStoredMediaR2Key,
+  isR2Key,
+} = require("../utils/r2Media");
 const {
   createSignedPlaybackToken,
+  deleteCloudflareStreamVideoBestEffort,
   getStreamVideo,
   normalizeStreamUid,
 } = require("../services/cloudflareStreamService");
@@ -71,6 +77,100 @@ function decodeRbzPayload(text = "") {
   } catch {
     return null;
   }
+}
+
+function getChatMessageStoredMedia(message = {}) {
+  const raw =
+    typeof message?.toObject === "function"
+      ? message.toObject({ flattenMaps: true })
+      : { ...(message || {}) };
+
+  const payload = decodeRbzPayload(raw.text) || {};
+
+  return {
+    r2Key:
+      raw.r2Key ||
+      payload.r2Key ||
+      payload.key ||
+      "",
+    key:
+      raw.key ||
+      payload.key ||
+      "",
+    url:
+      raw.url ||
+      payload.url ||
+      payload.mediaUrl ||
+      payload.fileUrl ||
+      payload.previewUrl ||
+      "",
+    mediaUrl:
+      raw.mediaUrl ||
+      payload.mediaUrl ||
+      "",
+    fileUrl:
+      raw.fileUrl ||
+      payload.fileUrl ||
+      "",
+    imageUrl:
+      raw.imageUrl ||
+      payload.imageUrl ||
+      payload.photoUrl ||
+      "",
+    photoUrl:
+      raw.photoUrl ||
+      payload.photoUrl ||
+      "",
+    attachmentUrl:
+      raw.attachmentUrl ||
+      payload.attachmentUrl ||
+      "",
+  };
+}
+
+function isChatR2KeyStillReferenced(room, key, excludedMsgId = "") {
+  const cleanKey = String(key || "").trim();
+  if (!cleanKey) return false;
+
+  return (room?.messages || []).some((candidate) => {
+    if (String(candidate?.id || "") === String(excludedMsgId || "")) {
+      return false;
+    }
+
+    return getStoredMediaR2Key(getChatMessageStoredMedia(candidate)) === cleanKey;
+  });
+}
+
+function getChatMessageStreamUid(message = {}) {
+  const raw =
+    typeof message?.toObject === "function"
+      ? message.toObject({ flattenMaps: true })
+      : { ...(message || {}) };
+
+  const payload = decodeRbzPayload(raw.text) || {};
+
+  return normalizeStreamUid(
+    raw.streamUid ||
+      raw.uid ||
+      raw.cloudflareStream?.uid ||
+      payload.streamUid ||
+      payload.uid ||
+      payload.cloudflareStream?.uid ||
+      ""
+  );
+}
+
+function isChatStreamUidStillReferenced(room, streamUid, excludedMsgId = "") {
+  const cleanUid = normalizeStreamUid(streamUid);
+  if (!cleanUid) return false;
+
+  return (room?.messages || []).some((candidate) => {
+    if (String(candidate?.id || "") === String(excludedMsgId || "")) {
+      return false;
+    }
+
+    return getChatMessageStreamUid(candidate) === cleanUid;
+  });
 }
 
 function replaceRbzPayloadUrl(text = "", signedUrl = "") {
@@ -849,14 +949,48 @@ router.delete("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => 
       return res.json({ ok: true });
     }
 
-    if (scope === "all") {
+     if (scope === "all") {
       if (String(msg.from) !== String(req.user.id)) {
         return res.status(403).json({ error: "not owner" });
       }
 
-      // ✅ permanently remove from backend storage
+      const storedMedia = getChatMessageStoredMedia(msg);
+      const r2Key = getStoredMediaR2Key(storedMedia);
+      const streamUid = getChatMessageStreamUid(msg);
+
+      const r2StillReferenced = r2Key
+        ? isChatR2KeyStillReferenced(room, r2Key, msgId)
+        : false;
+
+      const streamStillReferenced = streamUid
+        ? isChatStreamUidStillReferenced(room, streamUid, msgId)
+        : false;
+
+      // ✅ permanently remove from MongoDB first
       room.messages.splice(msgIndex, 1);
       await room.save();
+
+      // ✅ best-effort Cloudflare R2 cleanup only for unsend/delete-for-all
+      // Do NOT delete for scope=me because the other user may still need the file.
+      const storageDelete = r2Key && !r2StillReferenced
+        ? await deleteStoredR2ObjectBestEffort(storedMedia, `chat:${roomId}:${msgId}`)
+        : {
+            deleted: false,
+            provider: r2Key ? "r2" : "",
+            key: r2Key || "",
+            reason: r2StillReferenced ? "still_referenced" : "no_r2_key",
+          };
+
+      // ✅ best-effort Cloudflare Stream cleanup for chat videos.
+      // Old Cloudinary videos are skipped safely.
+      const streamDelete = streamUid && !streamStillReferenced
+        ? await deleteCloudflareStreamVideoBestEffort(streamUid, `chat:${roomId}:${msgId}`)
+        : {
+            deleted: false,
+            provider: streamUid ? "cloudflare_stream" : "",
+            streamUid: streamUid || "",
+            reason: streamStillReferenced ? "still_referenced" : "no_stream_uid",
+          };
 
       const io = getIO();
 
@@ -880,7 +1014,12 @@ router.delete("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => 
         });
       }
 
-      return res.json({ ok: true, removedId: String(msgId) });
+       return res.json({
+        ok: true,
+        removedId: String(msgId),
+        storageDelete,
+        streamDelete,
+      });
     }
 
     res.status(400).json({ error: "invalid scope" });

@@ -39,11 +39,18 @@ const {
   buildR2Key,
   cleanupTempFile,
   deleteR2Object,
+  deleteStoredR2ObjectBestEffort,
   getSignedMediaUrl,
+  getStoredMediaR2Key,
   isR2Key,
   uploadFileToR2,
   validateMediaFile,
 } = require("../utils/r2Media");
+
+const {
+  deleteCloudflareStreamVideoBestEffort,
+  normalizeStreamUid,
+} = require("../services/cloudflareStreamService");
 
 async function enforcePostingAllowed(req, res) {
   try {
@@ -236,6 +243,50 @@ async function signMediaItem(item = {}, expiresInSeconds = 3600) {
     fileUrl: signedUrl,
     r2Key: key || item?.r2Key || "",
   };
+}
+
+function isUserR2KeyStillReferenced(user = {}, key = "", excludedMediaId = "") {
+  const cleanKey = normalizeText(key);
+  if (!cleanKey) return false;
+
+  if (normalizeText(user.avatar) === cleanKey) return true;
+  if (normalizeText(user.voiceUrl) === cleanKey) return true;
+
+  if (Array.isArray(user.photos)) {
+    if (user.photos.some((photo) => normalizeText(photo) === cleanKey)) {
+      return true;
+    }
+  }
+
+  return (user.media || []).some((item) => {
+    if (String(item?.id || "") === String(excludedMediaId || "")) {
+      return false;
+    }
+
+    return getStoredMediaR2Key(item) === cleanKey;
+  });
+}
+
+function getMediaStreamUid(media = {}) {
+  return normalizeStreamUid(
+    media?.streamUid ||
+      media?.uid ||
+      media?.cloudflareStream?.uid ||
+      ""
+  );
+}
+
+function isUserStreamUidStillReferenced(user = {}, streamUid = "", excludedMediaId = "") {
+  const cleanUid = normalizeStreamUid(streamUid);
+  if (!cleanUid) return false;
+
+  return (user.media || []).some((item) => {
+    if (String(item?.id || "") === String(excludedMediaId || "")) {
+      return false;
+    }
+
+    return getMediaStreamUid(item) === cleanUid;
+  });
 }
 
 async function signUserForResponse(userDoc) {
@@ -716,24 +767,44 @@ router.delete("/media/:id", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Media not found" });
     }
 
-    const key =
-      normalizeText(mediaItem?.r2Key) ||
-      (isR2Key(mediaItem?.url) ? normalizeText(mediaItem?.url) : "");
+    const key = getStoredMediaR2Key(mediaItem);
+    const streamUid = getMediaStreamUid(mediaItem);
+
+    const stillReferenced = key
+      ? isUserR2KeyStillReferenced(user, key, mediaId)
+      : false;
+
+    const streamStillReferenced = streamUid
+      ? isUserStreamUidStillReferenced(user, streamUid, mediaId)
+      : false;
 
     user.media = user.media.filter((m) => String(m.id) !== mediaId);
     await user.save();
 
-    if (key) {
-      try {
-        await deleteR2Object(key);
-      } catch (deleteErr) {
-        console.error("⚠️ R2 delete failed:", deleteErr);
-      }
-    }
+    const storageDelete = key && !stillReferenced
+      ? await deleteStoredR2ObjectBestEffort(mediaItem, `profile-media:${req.user.id}:${mediaId}`)
+      : {
+          deleted: false,
+          provider: key ? "r2" : "",
+          key: key || "",
+          reason: stillReferenced ? "still_referenced" : "no_r2_key",
+        };
+
+    const streamDelete = streamUid && !streamStillReferenced
+      ? await deleteCloudflareStreamVideoBestEffort(streamUid, `profile-media:${req.user.id}:${mediaId}`)
+      : {
+          deleted: false,
+          provider: streamUid ? "cloudflare_stream" : "",
+          streamUid: streamUid || "",
+          reason: streamStillReferenced ? "still_referenced" : "no_stream_uid",
+        };
 
     return res.json({
       success: true,
-      deletedFromR2: !!key,
+      deletedFromR2: !!storageDelete.deleted,
+      deletedFromStream: !!streamDelete.deleted,
+      storageDelete,
+      streamDelete,
     });
   } catch (err) {
     console.error("❌ DELETE /media/:id error:", err);

@@ -224,6 +224,51 @@ async function getStreamVideo(uid) {
   return normalizeStreamVideo(result);
 }
 
+async function deleteCloudflareStreamVideo(uid) {
+  const cleanUid = normalizeStreamUid(uid);
+  if (!cleanUid) throw new Error("Missing Stream video uid");
+
+  await streamApiFetch(cleanUid, {
+    method: "DELETE",
+  });
+
+  return {
+    deleted: true,
+    provider: "cloudflare_stream",
+    streamUid: cleanUid,
+  };
+}
+
+async function deleteCloudflareStreamVideoBestEffort(uid, context = "") {
+  const cleanUid = normalizeStreamUid(uid);
+
+  if (!cleanUid) {
+    return {
+      deleted: false,
+      provider: "cloudflare_stream",
+      streamUid: "",
+      reason: "no_stream_uid",
+    };
+  }
+
+  try {
+    return await deleteCloudflareStreamVideo(cleanUid);
+  } catch (err) {
+    console.error(
+      `⚠️ Cloudflare Stream delete failed${context ? ` (${context})` : ""}:`,
+      err?.message || err
+    );
+
+    return {
+      deleted: false,
+      provider: "cloudflare_stream",
+      streamUid: cleanUid,
+      reason: "delete_failed",
+      error: err?.message || String(err),
+    };
+  }
+}
+
 async function createSignedPlaybackToken(uid) {
   const cleanUid = normalizeStreamUid(uid);
   if (!cleanUid) throw new Error("Missing Stream video uid");
@@ -246,6 +291,8 @@ module.exports = {
   buildPlaybackUrls,
   createDirectUpload,
   createSignedPlaybackToken,
+  deleteCloudflareStreamVideo,
+  deleteCloudflareStreamVideoBestEffort,
   getStreamVideo,
   normalizePrivacy,
   normalizeStreamUid,
