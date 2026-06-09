@@ -368,8 +368,16 @@ router.delete("/profile/voice-intro", authMiddleware, async (req, res) => {
       ? isUserMediaKeyStillReferenced(user, r2Key)
       : false;
 
-    user.voiceUrl = "";
+     user.voiceUrl = "";
     user.voiceDurationSec = 0;
+
+    if (Array.isArray(user.favorites)) {
+      user.favorites = user.favorites.filter(
+        (item) => !(typeof item === "string" && item.startsWith("voice:"))
+      );
+      user.markModified("favorites");
+    }
+
     user.markModified("voiceUrl");
     user.markModified("voiceDurationSec");
     await user.save();
@@ -390,6 +398,7 @@ router.delete("/profile/voice-intro", authMiddleware, async (req, res) => {
       success: true,
       voiceUrl: "",
       voiceDurationSec: 0,
+      favorites: Array.isArray(user.favorites) ? user.favorites : [],
       deletedFromR2: !!storageDelete.deleted,
       storageDelete,
     });
