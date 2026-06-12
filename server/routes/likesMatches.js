@@ -586,7 +586,7 @@ router.post("/premium-buzz/send", authMiddleware, async (req, res) => {
       });
     }
 
-    global._premiumBuzzCooldown[cooldownKey] = now;
+     global._premiumBuzzCooldown[cooldownKey] = now;
 
     const streakObj = await incMatchStreakOut(fromId, toId);
     const currentStreak = Number(streakObj?.count || 0);
@@ -594,10 +594,25 @@ router.post("/premium-buzz/send", authMiddleware, async (req, res) => {
     const sender = await User.findOne({ id: fromId }).lean();
     const fromName =
       String(sender?.firstName || sender?.name || "").trim() || "Someone";
-    const fromAvatar =
+
+    const rawFromAvatar = normalizeMediaString(
       sender?.avatar ||
-      (Array.isArray(sender?.photos) && sender.photos.length ? sender.photos[0] : "") ||
-      "";
+        sender?.avatarUrl ||
+        sender?.profilePic ||
+        sender?.photoUrl ||
+        (Array.isArray(sender?.photos) && sender.photos.length ? sender.photos[0] : "") ||
+        ""
+    );
+
+    let fromAvatar = "";
+
+    try {
+      fromAvatar = await signR2Value(rawFromAvatar, 21600);
+    } catch {
+      // Do not fail premium buzz just because avatar signing failed.
+      // If it was already a public URL, keep it. If it was a private R2 key, hide it.
+      fromAvatar = rawFromAvatar && !isR2Key(rawFromAvatar) ? rawFromAvatar : "";
+    }
 
     let message = `${premiumBuzz.emoji} ${fromName} sent you a ${premiumBuzz.label}`;
     if (premiumBuzz.notificationBody) {
@@ -632,12 +647,19 @@ router.post("/premium-buzz/send", authMiddleware, async (req, res) => {
     const onlineUsers = getOnlineUsers();
     const receiverSocket = onlineUsers[String(toId)];
 
-    const socketPayload = {
+     const socketPayload = {
       transactionId,
       fromId,
       senderId: fromId,
       senderName: fromName,
+
+      // ✅ Signed avatar URL for receiver overlay.
+      // Never send raw private R2 avatar keys to mobile image components.
       senderAvatar: fromAvatar,
+      senderAvatarUrl: fromAvatar,
+      avatar: fromAvatar,
+      avatarUrl: fromAvatar,
+
       toId,
       buzzType: premiumBuzz.id,
       buzzTypeId: premiumBuzz.id,
