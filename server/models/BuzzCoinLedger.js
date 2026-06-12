@@ -28,10 +28,13 @@ const buzzCoinLedgerSchema = new mongoose.Schema(
         "debit",
         "refund",
 
-        // Existing gift / wallet flows
+             // Existing gift / wallet flows
         "gift_send",
         "gift_receive",
         "premium_buzz_send",
+
+        // Daily BuzzStreak rewards
+        "buzzstreak_reward",
 
         // Video-call BuzzCoin gifting flows
         "video_call_gift_send",

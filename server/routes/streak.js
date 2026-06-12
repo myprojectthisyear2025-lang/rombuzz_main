@@ -30,7 +30,10 @@ const authMiddleware = require("../routes/auth-middleware");
 
 const User = require("../models/User");
 const MatchStreak = require("../models/MatchStreak");
-const DailyStreak = require("../models/DailyStreak");
+const {
+  getDailyBuzzStreak,
+  checkInDailyBuzzStreak,
+} = require("../services/buzzStreakDailyService");
 
 /* ============================================================
    🔥 SECTION 1: MATCH-BASED BUZZSTREAK API (MongoDB)
@@ -185,28 +188,16 @@ router.post("/matchstreak/:toId", authMiddleware, async (req, res) => {
    📅 SECTION 2: DAILY CHECK-IN STREAK API (MongoDB)
 ============================================================ */
 
-// 🗓️ Helper: get today's key
-function todayKey() {
-  return new Date().toISOString().split("T")[0];
-}
-
 // ✅ GET /api/streak/get
 router.get("/streak/get", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
-    const entry =
-      (await DailyStreak.findOne({ userId }).lean()) || {
-        count: 0,
-        lastCheckIn: null,
-      };
+    const payload = await getDailyBuzzStreak(userId);
 
-    const today = todayKey();
-    const checkedToday = entry.lastCheckIn === today;
-
-    res.json({ streak: entry, checkedToday });
+    return res.json(payload);
   } catch (err) {
     console.error("❌ GET /streak/get error:", err);
-    res.status(500).json({ error: "Failed to get streak" });
+    return res.status(500).json({ error: "Failed to get streak" });
   }
 });
 
@@ -214,40 +205,31 @@ router.get("/streak/get", authMiddleware, async (req, res) => {
 router.post("/streak/checkin", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
-    const today = todayKey();
-    const yesterday = new Date(Date.now() - 86400000)
-      .toISOString()
-      .split("T")[0];
+    const payload = await checkInDailyBuzzStreak(userId);
 
-    let streak = await DailyStreak.findOne({ userId });
-
-    if (!streak) {
-      streak = await DailyStreak.create({
-        id: shortid.generate(),
+    if (payload.rewarded) {
+      console.log("🎉 BuzzStreak reward paid:", {
         userId,
-        count: 1,
-        lastCheckIn: today,
+        amountBC: payload.reward?.amountBC,
+        streakDay: payload.reward?.streakDay,
       });
-      console.log("🔥 New daily streak started:", { userId, streak });
-      return res.json({ streak, checkedToday: true });
+    } else {
+      console.log("🔥 BuzzStreak check-in updated:", {
+        userId,
+        count: payload.streak?.count,
+        alreadyCheckedIn: payload.alreadyCheckedIn,
+      });
     }
 
-    if (streak.lastCheckIn === today) {
-      console.log("⏩ Already checked in today:", userId);
-      return res.json({ streak, checkedToday: true });
-    }
-
-    if (streak.lastCheckIn === yesterday) streak.count += 1;
-    else streak.count = 1;
-
-    streak.lastCheckIn = today;
-    await streak.save();
-
-    console.log("🔥 BuzzStreak updated:", { userId, streak });
-    res.json({ streak, checkedToday: true });
+    return res.json(payload);
   } catch (err) {
     console.error("❌ POST /streak/checkin error:", err);
-    res.status(500).json({ error: "Failed to record check-in" });
+
+    const statusCode = Number(err?.statusCode || 500);
+    return res.status(statusCode).json({
+      error: err?.message || "Failed to record check-in",
+      code: err?.code || "STREAK_CHECKIN_FAILED",
+    });
   }
 });
 
