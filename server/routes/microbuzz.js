@@ -25,15 +25,21 @@
 
 const express = require("express");
 const router = express.Router();
-const fs = require("fs");
 const multer = require("multer");
 const upload = multer({ dest: "uploads/" });
-const cloudinary = require("../config/cloudinary");
 const authMiddleware = require("../routes/auth-middleware");
 const {
   ensureFeatureAllowed,
   sendFeatureRestrictionError,
 } = require("../utils/moderation");
+const {
+  buildR2Key,
+  cleanupTempFile,
+  getSignedMediaUrl,
+  isR2Key,
+  uploadFileToR2,
+  validateMediaFile,
+} = require("../utils/r2Media");
 
 // ✅ Correct shared realtime state + socket access
 const { onlineUsers } = require("../models/state");
@@ -61,6 +67,32 @@ async function enforceMicroBuzzAllowed(req, res) {
   }
 }
 
+function normalizeMediaString(value = "") {
+  return String(value || "").trim();
+}
+
+async function signMicroBuzzSelfieValue(value, expiresInSeconds = 21600) {
+  const raw = normalizeMediaString(value);
+  if (!raw) return "";
+
+  // Keep old Cloudinary / public URLs working.
+  if (!isR2Key(raw)) return raw;
+
+  return getSignedMediaUrl(raw, expiresInSeconds);
+}
+
+async function signMicroBuzzPresence(presence = {}, expiresInSeconds = 21600) {
+  if (!presence) return presence;
+
+  return {
+    ...presence,
+    selfieUrl: await signMicroBuzzSelfieValue(
+      presence.selfieUrl,
+      expiresInSeconds
+    ),
+  };
+}
+
 /* ============================================================
    📸 SELFIE UPLOAD
 ============================================================ */
@@ -68,19 +100,42 @@ router.post("/selfie", authMiddleware, upload.single("selfie"), async (req, res)
   try {
     if (!(await enforceMicroBuzzAllowed(req, res))) return;
 
-    if (!req.file) return res.status(400).json({ error: "No selfie provided" });
+    if (!req.file) {
+      return res.status(400).json({ error: "No selfie provided" });
+    }
 
-    const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-      folder: "rombuzz/selfies",
-      resource_type: "image",
-      transformation: [{ width: 320, height: 320, crop: "fill", gravity: "face" }],
+    validateMediaFile(req.file, { kind: "avatar" });
+
+    const key = buildR2Key({
+      folder: "microbuzz-selfies",
+      userId: req.user.id,
+      file: req.file,
     });
 
-    fs.unlink(req.file.path, () => {});
-    res.json({ url: uploadResult.secure_url });
+    const uploaded = await uploadFileToR2({
+      file: req.file,
+      key,
+      contentType: req.file.mimetype || "image/jpeg",
+    });
+
+    const signedUrl = await getSignedMediaUrl(uploaded.key, 21600);
+
+    res.json({
+      success: true,
+      url: signedUrl,
+      signedUrl,
+      key: uploaded.key,
+      r2Key: uploaded.key,
+      storage: "r2",
+      provider: "r2",
+      contentType: uploaded.contentType,
+      size: uploaded.size,
+    });
   } catch (err) {
     console.error("❌ MicroBuzz selfie upload failed:", err);
-    res.status(500).json({ error: "Upload failed" });
+    res.status(500).json({ error: err?.message || "Upload failed" });
+  } finally {
+    cleanupTempFile(req.file?.path);
   }
 });
 
@@ -107,11 +162,13 @@ router.post("/activate", authMiddleware, async (req, res) => {
       offsetLng = (Math.random() - 0.5) * 0.0005;
     }
 
+     const storedSelfieValue = normalizeMediaString(selfieUrl);
+
     await MicroBuzzPresence.findOneAndUpdate(
       { userId },
       {
         userId,
-        selfieUrl,
+        selfieUrl: storedSelfieValue,
         lat: latNum + offsetLat,
         lng: lngNum + offsetLng,
         updatedAt: new Date(),
@@ -119,7 +176,12 @@ router.post("/activate", authMiddleware, async (req, res) => {
       { upsert: true }
     );
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      selfieUrl: await signMicroBuzzSelfieValue(storedSelfieValue, 21600),
+      r2Key: isR2Key(storedSelfieValue) ? storedSelfieValue : "",
+      storage: isR2Key(storedSelfieValue) ? "r2" : "legacy",
+    });
   } catch (err) {
     console.error("❌ /api/microbuzz/activate error:", err);
     res.status(500).json({ error: "Activate failed" });
@@ -181,7 +243,7 @@ router.get("/nearby", authMiddleware, async (req, res) => {
 
     const usersById = new Map(candidateUsers.map((u) => [u.id, u]));
 
-    const users = allActive
+      const rawUsers = allActive
       .map((presence) => {
         const u = usersById.get(presence.userId);
 
@@ -229,8 +291,17 @@ router.get("/nearby", authMiddleware, async (req, res) => {
         const maxAge = prefAgeMax || 120;
         return age >= minAge && age <= maxAge;
       })
-      // 4) Strip internal fields before sending to client
+       // 4) Strip internal fields before sending to client
       .map(({ _user, ...rest }) => rest);
+
+    const users = await Promise.all(
+      rawUsers.map(async (item) => ({
+        ...item,
+        selfieUrl: await signMicroBuzzSelfieValue(item.selfieUrl, 21600),
+        r2Key: isR2Key(item.selfieUrl) ? item.selfieUrl : "",
+        storage: isR2Key(item.selfieUrl) ? "r2" : "legacy",
+      }))
+    );
 
     return res.json({ users });
   } catch (err) {
@@ -310,10 +381,18 @@ if (alreadyMatched) {
   // 🧵 Shared chat room id (sorted for consistency)
   const roomId = [fromId, toId].sort().join("_");
 
+  const [signedFromPresence, signedToPresence] = await Promise.all([
+    signMicroBuzzPresence(fromPresence, 21600),
+    signMicroBuzzPresence(toPresence, 21600),
+  ]);
+
   // 🎉 Live "match" event for BOTH users (with extra data)
   [fromId, toId].forEach((uid) => {
     const other = uid === fromId ? toId : fromId;
-    const otherSelfie = uid === fromId ? toPresence?.selfieUrl : fromPresence?.selfieUrl;
+    const otherSelfie =
+      uid === fromId
+        ? signedToPresence?.selfieUrl
+        : signedFromPresence?.selfieUrl;
     const otherDisplayName = uid === fromId ? toName : fromName;
 
     if (onlineUsers[uid]) {
@@ -402,10 +481,18 @@ if (reverseBuzz) {
     // 🧵 Shared chat room id (same for both sides)
     const roomId = [fromId, toId].sort().join("_");
 
+      const [signedFromPresence, signedToPresence] = await Promise.all([
+      signMicroBuzzPresence(fromPresence, 21600),
+      signMicroBuzzPresence(toPresence, 21600),
+    ]);
+
     // 🎉 Live "match" event for BOTH users (with room + names)
     [fromId, toId].forEach((uid) => {
       const other = uid === fromId ? toId : fromId;
-      const otherSelfie = uid === fromId ? toPresence?.selfieUrl : fromPresence?.selfieUrl;
+      const otherSelfie =
+        uid === fromId
+          ? signedToPresence?.selfieUrl
+          : signedFromPresence?.selfieUrl;
       const otherDisplayName = uid === fromId ? toName : fromName;
 
       if (onlineUsers[uid]) {
@@ -506,11 +593,11 @@ if (confirm === false) {
       console.warn("MicroBuzz one-way notification failed:", e);
     }
 
-  // 📡 Live popup if they are online (existing behavior)
+   // 📡 Live popup if they are online (existing behavior)
 if (onlineUsers[toId]) {
   io.to(onlineUsers[toId]).emit("buzz_request", {
     fromId,
-    selfieUrl: fromPresence?.selfieUrl,
+    selfieUrl: await signMicroBuzzSelfieValue(fromPresence?.selfieUrl, 21600),
     firstName: fromProfile?.firstName || "Someone",
     lastName: fromProfile?.lastName || "",
     dob: fromProfile?.dob || "",

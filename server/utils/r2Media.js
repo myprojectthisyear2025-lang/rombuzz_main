@@ -12,6 +12,7 @@
  * Storage folders:
  *   - avatars/
  *   - gallery-photos/
+ *   - microbuzz-selfies/
  *   - chat-images/
  *   - comment-photo/
  *   - voice-intros/
@@ -33,6 +34,7 @@ const { r2Client, R2_BUCKET_NAME } = require("../config/r2");
 const ALLOWED_FOLDERS = new Set([
   "avatars",
   "gallery-photos",
+  "microbuzz-selfies",
   "chat-images",
   "comment-photo",
   "voice-intros",
@@ -223,6 +225,7 @@ function isR2Key(value = "") {
   return (
     text.startsWith("avatars/") ||
     text.startsWith("gallery-photos/") ||
+    text.startsWith("microbuzz-selfies/") ||
     text.startsWith("chat-images/") ||
     text.startsWith("comment-photo/") ||
     text.startsWith("voice-intros/") ||
