@@ -35,6 +35,7 @@ const {
 const {
   buildR2Key,
   cleanupTempFile,
+  deleteR2Object,
   getSignedMediaUrl,
   isR2Key,
   uploadFileToR2,
@@ -71,7 +72,75 @@ function normalizeMediaString(value = "") {
   return String(value || "").trim();
 }
 
-async function signMicroBuzzSelfieValue(value, expiresInSeconds = 21600) {
+const MICROBUZZ_SELFIE_TTL_MS = 5 * 60 * 1000;
+const MICROBUZZ_SELFIE_SIGN_SECONDS = 5 * 60;
+
+function isMicroBuzzR2SelfieKey(value = "") {
+  return normalizeMediaString(value).startsWith("microbuzz-selfies/");
+}
+
+async function deleteMicroBuzzSelfieBestEffort(key, context = "") {
+  const cleanKey = normalizeMediaString(key);
+
+  if (!isMicroBuzzR2SelfieKey(cleanKey)) {
+    return false;
+  }
+
+  try {
+    await deleteR2Object(cleanKey);
+    return true;
+  } catch (err) {
+    console.warn(
+      `⚠️ MicroBuzz selfie R2 delete failed${context ? ` (${context})` : ""}:`,
+      err?.message || err
+    );
+    return false;
+  }
+}
+
+function scheduleMicroBuzzSelfieDelete(key) {
+  const cleanKey = normalizeMediaString(key);
+
+  if (!isMicroBuzzR2SelfieKey(cleanKey)) {
+    return;
+  }
+
+  const timer = setTimeout(() => {
+    deleteMicroBuzzSelfieBestEffort(cleanKey, "ttl_timer");
+  }, MICROBUZZ_SELFIE_TTL_MS);
+
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+}
+
+async function cleanupExpiredMicroBuzzPresences() {
+  const expiredBefore = new Date(Date.now() - MICROBUZZ_SELFIE_TTL_MS);
+
+  const expired = await MicroBuzzPresence.find({
+    updatedAt: { $lt: expiredBefore },
+    selfieUrl: /^microbuzz-selfies\//,
+  })
+    .select("userId selfieUrl")
+    .lean();
+
+  if (expired.length) {
+    await Promise.all(
+      expired.map((presence) =>
+        deleteMicroBuzzSelfieBestEffort(
+          presence.selfieUrl,
+          `expired_presence:${presence.userId}`
+        )
+      )
+    );
+  }
+
+  await MicroBuzzPresence.deleteMany({
+    updatedAt: { $lt: expiredBefore },
+  });
+}
+
+async function signMicroBuzzSelfieValue(value, expiresInSeconds = MICROBUZZ_SELFIE_SIGN_SECONDS) {
   const raw = normalizeMediaString(value);
   if (!raw) return "";
 
@@ -118,7 +187,12 @@ router.post("/selfie", authMiddleware, upload.single("selfie"), async (req, res)
       contentType: req.file.mimetype || "image/jpeg",
     });
 
-    const signedUrl = await getSignedMediaUrl(uploaded.key, 21600);
+     const signedUrl = await getSignedMediaUrl(
+      uploaded.key,
+      MICROBUZZ_SELFIE_SIGN_SECONDS
+    );
+
+    scheduleMicroBuzzSelfieDelete(uploaded.key);
 
     res.json({
       success: true,
@@ -128,6 +202,8 @@ router.post("/selfie", authMiddleware, upload.single("selfie"), async (req, res)
       r2Key: uploaded.key,
       storage: "r2",
       provider: "r2",
+      expiresAt: new Date(Date.now() + MICROBUZZ_SELFIE_TTL_MS).toISOString(),
+      ttlSeconds: MICROBUZZ_SELFIE_SIGN_SECONDS,
       contentType: uploaded.contentType,
       size: uploaded.size,
     });
@@ -223,7 +299,9 @@ router.get("/nearby", authMiddleware, async (req, res) => {
       maxRadiusKm
     );
 
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    await cleanupExpiredMicroBuzzPresences();
+
+    const fiveMinutesAgo = new Date(Date.now() - MICROBUZZ_SELFIE_TTL_MS);
 
     // 🌐 Raw active presences near me (except myself)
     const allActive = await MicroBuzzPresence.find({
@@ -316,7 +394,19 @@ router.get("/nearby", authMiddleware, async (req, res) => {
 ============================================================ */
 router.post("/deactivate", authMiddleware, async (req, res) => {
   try {
+    const presence = await MicroBuzzPresence.findOne({
+      userId: req.user.id,
+    }).lean();
+
     await MicroBuzzPresence.deleteOne({ userId: req.user.id });
+
+    if (presence?.selfieUrl) {
+      await deleteMicroBuzzSelfieBestEffort(
+        presence.selfieUrl,
+        `deactivate:${req.user.id}`
+      );
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error("❌ /api/microbuzz/deactivate error:", err);
