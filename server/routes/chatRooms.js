@@ -523,99 +523,9 @@ async function getRoomDoc(roomId) {
     }
   }
 
-   if (changed) await room.save();
+  if (changed) await room.save();
 
   return room;
-}
-
-async function ensureRoomForFastSend(roomId) {
-  const existing = await ChatRoom.findOne({ roomId })
-    .select("_id roomId participants")
-    .lean();
-
-  if (existing?._id) return existing;
-
-  const { a, b } = getPeersFromRoomId(roomId);
-  const epoch = new Date(0);
-
-  return ChatRoom.create({
-    roomId,
-    participants: [a, b],
-    lastReadAtByUser: { [a]: epoch, [b]: epoch },
-    chatPrefsByUser: {
-      [a]: {
-        pinned: false,
-        muted: false,
-        alertOnline: false,
-        deletedForMe: false,
-        forceUnread: false,
-        updatedAt: new Date(),
-      },
-      [b]: {
-        pinned: false,
-        muted: false,
-        alertOnline: false,
-        deletedForMe: false,
-        forceUnread: false,
-        updatedAt: new Date(),
-      },
-    },
-    messages: [],
-  });
-}
-
-function buildDirectPreviewFromMessage(message = {}) {
-  const rawText = String(message?.text || "").trim();
-
-  const payload = decodeRbzPayload(rawText);
-  if (payload) {
-    if (payload?.type === "text" && String(payload?.text || "").trim()) {
-      return String(payload.text).trim().slice(0, 80);
-    }
-
-    const mediaType = String(payload?.mediaType || "").toLowerCase();
-
-    if (payload?.type === "chat_gift" || payload?.type === "gift") return "🎁 Sent a gift";
-    if (mediaType === "image") return "📷 Photo";
-    if (mediaType === "video") return "🎥 Video";
-    if (mediaType === "audio") return "🎙 Voice message";
-    if (payload?.type === "share_post") return "🖼 Shared a post";
-    if (payload?.type === "share_reel") return "🎬 Shared a reel";
-    if (payload?.type === "share_profile_media") return "📎 Shared profile media";
-
-    return "📎 Attachment";
-  }
-
-  return rawText.slice(0, 80);
-}
-
-function emitDirectAndUnreadSoon({ io, roomId, fromId, toId, signedMsg }) {
-  setImmediate(async () => {
-    try {
-      const receiverId = String(toId);
-      const sid = onlineUsers?.[receiverId];
-
-      const previewPayload = {
-        id: signedMsg.id,
-        roomId,
-        from: fromId,
-        to: toId,
-        time: signedMsg.time,
-        preview: buildDirectPreviewFromMessage(signedMsg),
-        type: signedMsg.type || "text",
-      };
-
-      // Chat-list preview only. The thread must not listen to this.
-      if (sid) io.to(sid).emit("direct:message", previewPayload);
-      io.to(receiverId).emit("direct:message", previewPayload);
-
-      const summary = await computeUnreadSummaryForUser(receiverId);
-      if (sid) io.to(sid).emit("chat:unread:update", summary);
-      io.to(receiverId).emit("chat:unread:update", summary);
-    } catch (e) {
-      console.warn("direct/unread background emit failed:", e?.message || e);
-    }
-  });
 }
 
 function getMyRoomPrefs(room, userId) {
@@ -907,44 +817,49 @@ const msg = {
   replyTo: safeReplyTo,
 };
 
-const room = await ensureRoomForFastSend(roomId);
+const room = await getRoomDoc(roomId);
+room.messages.push(msg);
+await room.save();
 
-await ChatRoom.updateOne(
-  { _id: room._id },
-  {
-    $push: { messages: msg },
-    $set: { updatedAt: new Date() },
-  }
-);
+const signedMsg = await signChatMessageMedia(msg, 3600);
 
-// Plain text does not need R2/Stream signing.
-// Media still signs before emit because private media needs usable URLs.
-const signedMsg = isRBZ ? await signChatMessageMedia(msg, 3600) : msg;
-
+// ✅ Socket events (room + direct)
 const io = getIO();
-const receiverId = String(toId);
-const sid = onlineUsers?.[receiverId];
 
-// Full thread message first.
+// 🔥 FIX: Emit chat:message (frontend listens for this)
 io.to(roomId).emit("chat:message", signedMsg);
 
-// Private-room fallback for users not currently joined to the chat room.
-if (sid) io.to(sid).emit("chat:message", signedMsg);
-io.to(receiverId).emit("chat:message", signedMsg);
+// 🔥 Also send to peer's private room in case they are not in the chat room
+const sid = onlineUsers?.[toId];
+if (sid) {
+  io.to(sid).emit("chat:message", signedMsg);
+}
 
-// Sender gets HTTP confirmation immediately.
-// Unread summary and direct preview must not block sending.
-res.json({ message: signedMsg });
+// ✅ NEW: emit unread summary update to receiver (server-accurate)
+try {
+  const summary = await computeUnreadSummaryForUser(String(toId));
+  if (sid) io.to(sid).emit("chat:unread:update", summary);
+  io.to(String(toId)).emit("chat:unread:update", summary);
+} catch (e) {
+  console.warn("unread summary emit failed:", e?.message || e);
+}
 
-emitDirectAndUnreadSoon({
-  io,
-  roomId,
-  fromId,
-  toId,
-  signedMsg,
-});
 
-return;
+// 🔥 Navbar/unread bubble handler
+if (sid) {
+  io.to(sid).emit("direct:message", {
+    id: signedMsg.id,
+    roomId,
+    from: fromId,
+    to: toId,
+    time: signedMsg.time,
+    preview: (signedMsg.text || "").slice(0, 80),
+    type: signedMsg.type || "text",
+  });
+}
+
+
+    res.json({ message: signedMsg });
   } catch (err) {
     console.error("❌ POST message error:", err);
     res.status(500).json({ error: "Failed to send message" });
