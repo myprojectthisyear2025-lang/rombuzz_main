@@ -891,18 +891,44 @@ router.post("/unmatch/:id", authMiddleware, async (req, res) => {
 ====================== */
 router.get("/social-stats", authMiddleware, async (req, res) => {
   try {
-    const userId = req.user.id;
-    const likes = await Relationship.find({ type: "like" }).lean();
-    const matches = await Match.find({}).lean();
+    const userId = String(req.user.id || "");
 
-    const liked = likes.filter((l) => l.from === userId).map((l) => l.to);
-    const likedYou = likes.filter((l) => l.to === userId).map((l) => l.from);
-    const matched = matches.filter((m) => m.users.includes(userId));
+    const [likedCount, likedYouCount, matchCount, me] = await Promise.all([
+      Relationship.countDocuments({
+        from: userId,
+        type: "like",
+      }),
+
+      Relationship.countDocuments({
+        to: userId,
+        type: "like",
+      }),
+
+      Match.countDocuments({
+        $or: [
+          { users: userId },
+          { users: { $in: [userId] } },
+          { status: "matched", user1: userId },
+          { status: "matched", user2: userId },
+        ],
+      }),
+
+      User.findOne({ id: userId }).select("profileViews").lean(),
+    ]);
+
+    const viewsToday = Number(me?.profileViews?.today || 0);
+    const viewsTotal = Number(me?.profileViews?.total || 0);
 
     res.json({
-      likedCount: liked.length,
-      likedYouCount: likedYou.length,
-      matchCount: matched.length,
+      likedCount,
+      likedYouCount,
+      matchCount,
+      viewsToday,
+      viewsTotal,
+      profileViews: {
+        today: viewsToday,
+        total: viewsTotal,
+      },
     });
   } catch (e) {
     console.error("Social stats error:", e);
@@ -912,28 +938,75 @@ router.get("/social-stats", authMiddleware, async (req, res) => {
 
 router.get("/social/:type", authMiddleware, async (req, res) => {
   try {
-    const userId = req.user.id;
-    const type = req.params.type;
-
-    const likes = await Relationship.find({ type: "like" }).lean();
-    const matches = await Match.find({}).lean();
-    const users = await User.find({}).lean();
+    const userId = String(req.user.id || "");
+    const type = String(req.params.type || "");
 
     let targetIds = [];
-    if (type === "liked") {
-      targetIds = likes.filter((l) => l.from === userId).map((l) => l.to);
-    } else if (type === "likedYou") {
-      targetIds = likes.filter((l) => l.to === userId).map((l) => l.from);
-    } else if (type === "matches") {
-      targetIds = matches
-        .filter((m) => m.users.includes(userId))
-        .map((m) => m.users.find((id) => id !== userId));
-    } else return res.status(400).json({ error: "Invalid type" });
 
-      const idSet = new Set(targetIds);
+    if (type === "liked") {
+      const likes = await Relationship.find({
+        from: userId,
+        type: "like",
+      })
+        .select("to createdAt")
+        .sort({ createdAt: -1 })
+        .lean();
+
+      targetIds = likes.map((l) => String(l.to || "")).filter(Boolean);
+    } else if (type === "likedYou") {
+      const likes = await Relationship.find({
+        to: userId,
+        type: "like",
+      })
+        .select("from createdAt")
+        .sort({ createdAt: -1 })
+        .lean();
+
+      targetIds = likes.map((l) => String(l.from || "")).filter(Boolean);
+    } else if (type === "matches") {
+      const matches = await Match.find({
+        $or: [
+          { users: userId },
+          { users: { $in: [userId] } },
+          { status: "matched", user1: userId },
+          { status: "matched", user2: userId },
+        ],
+      })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .lean();
+
+      targetIds = matches
+        .map((m) => {
+          if (Array.isArray(m.users)) {
+            return m.users.map(String).find((id) => id !== userId);
+          }
+
+          const user1 = String(m.user1 || "");
+          const user2 = String(m.user2 || "");
+
+          return user1 === userId ? user2 : user1;
+        })
+        .filter(Boolean);
+    } else {
+      return res.status(400).json({ error: "Invalid type" });
+    }
+
+    const uniqueIds = [...new Set(targetIds.map(String).filter(Boolean))];
+
+    if (!uniqueIds.length) {
+      return res.json([]);
+    }
+
+    const users = await User.find({ id: { $in: uniqueIds } })
+      .select("id firstName lastName avatar bio gender city country dob isVerified verified")
+      .lean();
+
+    const byId = new Map(users.map((u) => [String(u.id), u]));
+
     const result = await Promise.all(
-      users
-        .filter((u) => idSet.has(u.id))
+      uniqueIds
+        .map((id) => byId.get(id))
+        .filter(Boolean)
         .map(async (u) => {
           const signedAvatar =
             (await signR2Value(u.avatar, 21600)) ||
@@ -946,7 +1019,8 @@ router.get("/social/:type", authMiddleware, async (req, res) => {
             avatar: signedAvatar,
             bio: u.bio || "",
             gender: u.gender || "",
-            verified: !!u.verified,
+            location: [u.city, u.country].filter(Boolean).join(", "),
+            verified: !!(u.isVerified || u.verified),
           };
         })
     );
