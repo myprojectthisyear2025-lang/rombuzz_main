@@ -451,6 +451,181 @@ function dedupeMessagesById(messages) {
   return deduped.reverse();
 }
 
+const DEFAULT_CHAT_PAGE_SIZE = 40;
+const MAX_CHAT_PAGE_SIZE = 80;
+
+function wantsPaginatedChatResponse(query = {}) {
+  return (
+    query?.limit !== undefined ||
+    query?.before !== undefined ||
+    String(query?.paginated || "") === "1"
+  );
+}
+
+function parseChatPageSize(value) {
+  const parsed = Math.floor(Number(value) || DEFAULT_CHAT_PAGE_SIZE);
+  return Math.max(10, Math.min(MAX_CHAT_PAGE_SIZE, parsed));
+}
+
+async function getPaginatedVisibleMessages(roomId, userId, options = {}) {
+  const limit = parseChatPageSize(options?.limit);
+  const before = String(options?.before || "").trim();
+  const cursorRequested = !!before;
+  const fetchCount = limit + 1;
+
+  const [page] = await ChatRoom.aggregate([
+    {
+      $match: {
+        roomId: String(roomId || ""),
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        messages: {
+          $filter: {
+            input: {
+              $ifNull: ["$messages", []],
+            },
+            as: "message",
+            cond: {
+              $eq: [
+                {
+                  $indexOfArray: [
+                    {
+                      $ifNull: ["$$message.hiddenFor", []],
+                    },
+                    String(userId || ""),
+                  ],
+                },
+                -1,
+              ],
+            },
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        messages: 1,
+        messageCount: {
+          $size: "$messages",
+        },
+        reverseCursorIndex: cursorRequested
+          ? {
+              $indexOfArray: [
+                {
+                  $reverseArray: {
+                    $map: {
+                      input: "$messages",
+                      as: "message",
+                      in: "$$message.id",
+                    },
+                  },
+                },
+                before,
+              ],
+            }
+          : -1,
+      },
+    },
+    {
+      $project: {
+        messages: 1,
+        cursorFound: cursorRequested
+          ? {
+              $gte: ["$reverseCursorIndex", 0],
+            }
+          : true,
+        eligibleCount: cursorRequested
+          ? {
+              $cond: [
+                {
+                  $gte: ["$reverseCursorIndex", 0],
+                },
+                {
+                  $subtract: [
+                    {
+                      $subtract: ["$messageCount", 1],
+                    },
+                    "$reverseCursorIndex",
+                  ],
+                },
+                0,
+              ],
+            }
+          : "$messageCount",
+      },
+    },
+    {
+      $project: {
+        messages: 1,
+        cursorFound: 1,
+        eligibleCount: 1,
+        startIndex: {
+          $max: [
+            0,
+            {
+              $subtract: ["$eligibleCount", fetchCount],
+            },
+          ],
+        },
+        sliceCount: {
+          $min: ["$eligibleCount", fetchCount],
+        },
+      },
+    },
+    {
+      $project: {
+        cursorFound: 1,
+        eligibleCount: 1,
+        startIndex: 1,
+        messages: {
+          $cond: [
+            {
+              $gt: ["$sliceCount", 0],
+            },
+            {
+              $slice: ["$messages", "$startIndex", "$sliceCount"],
+            },
+            [],
+          ],
+        },
+      },
+    },
+  ]);
+
+  if (!page) return null;
+
+  if (cursorRequested && !page.cursorFound) {
+    return {
+      messages: [],
+      hasMore: false,
+      nextCursor: null,
+      cursorInvalid: true,
+    };
+  }
+
+  const deduped = dedupeMessagesById(page.messages || []);
+  const hasExtraFetchedMessage = deduped.length > limit;
+
+  const messages = hasExtraFetchedMessage
+    ? deduped.slice(-limit)
+    : deduped;
+
+  const hasMore =
+    messages.length > 0 &&
+    (hasExtraFetchedMessage || Number(page.startIndex || 0) > 0);
+
+  return {
+    messages,
+    hasMore,
+    nextCursor: hasMore
+      ? String(messages[0]?.id || "") || null
+      : null,
+    cursorInvalid: false,
+  };
+}
 
 async function getRoomDoc(roomId) {
   let room = await ChatRoom.findOne({ roomId });
@@ -598,25 +773,74 @@ router.get("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
 
     if (!(await enforceChatAllowed(req, res))) return;
 
+    // ✅ Paginated requests are used by the main mobile chat thread.
+    // Existing requests without limit/before still receive the original
+    // complete message array, preserving older clients and feature screens.
+    if (wantsPaginatedChatResponse(req.query)) {
+      let page = await getPaginatedVisibleMessages(roomId, userId, {
+        limit: req.query?.limit,
+        before: req.query?.before,
+      });
+
+      // Preserve the existing behavior for a brand-new conversation:
+      // opening it creates an empty room instead of returning 404.
+      if (!page) {
+        const room = await getRoomDoc(roomId);
+
+        if (!room) {
+          return res.status(404).json({
+            error: "Room not found",
+          });
+        }
+
+        page = {
+          messages: [],
+          hasMore: false,
+          nextCursor: null,
+          cursorInvalid: false,
+        };
+      }
+
+      // Only media belonging to this page is signed.
+      const signedPage = await signChatMessages(page.messages, 3600);
+
+      return res.json({
+        paginated: true,
+        messages: signedPage,
+        hasMore: !!page.hasMore,
+        nextCursor: page.nextCursor || null,
+        cursorInvalid: !!page.cursorInvalid,
+      });
+    }
+
+    // ✅ Legacy full-history response remains unchanged.
+    // Shared Media, Purchased Media, Pinned Messages and older clients
+    // continue receiving the original array response.
     const room = await getRoomDoc(roomId);
-    if (!room) return res.status(404).json({ error: "Room not found" });
 
-   // ✅ Return messages that are NOT hidden for me
-// ✅ Ephemeral messages are NOT deleted on fetch.
-// ✅ They are deleted ONLY after receiver views (via /viewed endpoint).
-const visible = (room.messages || []).filter((m) => {
-  if (m.hiddenFor?.includes(userId)) return false;
-  return true;
-});
+    if (!room) {
+      return res.status(404).json({
+        error: "Room not found",
+      });
+    }
 
-const dedupedVisible = dedupeMessagesById(visible);
-const signedVisible = await signChatMessages(dedupedVisible, 3600);
+    // ✅ Ephemeral messages are not deleted while fetching.
+    // They are deleted only after the receiver views them.
+    const visible = (room.messages || []).filter((message) => {
+      if (message.hiddenFor?.includes(userId)) return false;
+      return true;
+    });
 
-res.json(signedVisible);
+    const dedupedVisible = dedupeMessagesById(visible);
+    const signedVisible = await signChatMessages(dedupedVisible, 3600);
 
+    return res.json(signedVisible);
   } catch (err) {
     console.error("❌ GET chat room error:", err);
-    res.status(500).json({ error: "Failed to load messages" });
+
+    return res.status(500).json({
+      error: "Failed to load messages",
+    });
   }
 });
 
