@@ -110,11 +110,22 @@ function mergeSignupPhotosIntoMedia(existingMedia = [], photos = []) {
 // =======================
 router.use("/", require("./auth/otp"));
 
-
-
+// ============================================================
+// REGISTER-FULL — MODULAR MIGRATION
+// ============================================================
+// IMPORTANT:
+// The original /register-full implementation remains below
+// untouched during migration.
+//
+// Express will hit the modular route first.
+// If rollback is ever needed during testing, remove/comment ONLY
+// this router.use line and the original route becomes active again.
+// ============================================================
+router.use("/", require("./auth/registerFull"));
 
 // =======================
 // REGISTER-FULL (Hybrid: Mongo + fallback LowDB)
+// LEGACY IMPLEMENTATION — KEEP UNTOUCHED DURING MIGRATION
 // =======================
 router.post("/register-full", async (req, res) => {
   try {

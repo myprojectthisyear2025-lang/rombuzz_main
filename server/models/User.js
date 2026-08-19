@@ -1,3 +1,17 @@
+/**
+ * ============================================================
+ * 📁 File: server/models/User.js
+ * 🎯 Purpose: MongoDB schema for RomBuzz user accounts.
+ *
+ * LOCATION:
+ *   server/models/User.js
+ *
+ * USED BY:
+ *   Authentication, profiles, discovery, chat, moderation,
+ *   social features, and account-management services.
+ * ============================================================
+ */
+
 const mongoose = require("mongoose");
 
 const pushTokenSchema = new mongoose.Schema(
@@ -23,6 +37,7 @@ const userSchema = new mongoose.Schema(
     lastName: { type: String, default: "" },
     passwordHash: { type: String, default: "" },
     googleId: { type: String, default: "" },
+    appleId: { type: String, default: "", index: true },
     gender: { type: String, default: "" },
     genderVisibility: { type: String, default: "public" },
     pronouns: { type: String, default: "" },
