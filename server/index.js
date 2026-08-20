@@ -219,6 +219,9 @@ app.use('/api/video-calls', require('./routes/videoCalls'));
 // 🎥🎁 VIDEO CALL BUZZCOIN GIFTS + REQUESTS
 app.use('/api/video-call-gifts', require('./routes/videoCallGifts'));
 
+// 🔎 Protected Sentry verification route
+app.use('/api/sentry-test', require('./routes/sentryTest'));
+
 // ðŸ§© DEBUG ROUTES
 app.use('/api', require('./routes/debug'));
 

@@ -11,6 +11,9 @@
  */
 
 const Sentry = require("@sentry/node");
+const {
+  sanitizeSentryEvent,
+} = require("./modules/sentryPrivacy");
 
 const dsn = process.env.SENTRY_DSN;
 
@@ -45,6 +48,11 @@ if (dsn) {
 
     // Never opt into Sentry's default collection of PII.
     sendDefaultPii: false,
+
+    // Final privacy gate before an error event leaves RomBuzz.
+    beforeSend(event) {
+      return sanitizeSentryEvent(event);
+    },
   });
 }
 
