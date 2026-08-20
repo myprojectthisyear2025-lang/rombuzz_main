@@ -32,6 +32,7 @@ const express = require("express");
 const router = express.Router();
 const db = require("../models/db.lowdb");
 const { Resend } = require("resend");
+const { randomInt } = require("crypto");
 const authMiddleware = require("./auth-middleware");
 const { baseSanitizeUser } = require("../utils/helpers");
 const {
@@ -42,6 +43,9 @@ const {
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
+
+const EMAIL_CHANGE_RESEND_COOLDOWN_MS = 60 * 1000;
+const EMAIL_CHANGE_MAX_ATTEMPTS = 5;
 
 /* ============================================================
    🔒 PATCH /api/account/deactivate  (MongoDB version)
@@ -166,15 +170,44 @@ router.post("/request-email-change", authMiddleware, async (req, res) => {
     const user = await User.findOne({ id: req.user.id });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-      // 🔢 Generate 6-digit verification code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expires = Date.now() + 10 * 60 * 1000; // 10 minutes
+    const now = new Date();
+    const lastSentAt = user.pendingEmailChange?.lastSentAt;
 
-    user.pendingEmailChange = { email: emailLower, code, expires };
+    if (lastSentAt) {
+      const elapsedMs =
+        now.getTime() - new Date(lastSentAt).getTime();
+
+      if (elapsedMs < EMAIL_CHANGE_RESEND_COOLDOWN_MS) {
+        return res.status(429).json({
+          error:
+            "Please wait before requesting another email-change code.",
+          retryAfter: Math.ceil(
+            (EMAIL_CHANGE_RESEND_COOLDOWN_MS - elapsedMs) / 1000
+          ),
+        });
+      }
+    }
+
+    // 🔢 Generate cryptographically secure 6-digit verification code
+    const code = randomInt(100000, 1000000).toString();
+    const expires = now.getTime() + 10 * 60 * 1000; // 10 minutes
+
+    user.pendingEmailChange = {
+      email: emailLower,
+      code,
+      expires,
+      attempts: 0,
+      lastSentAt: now,
+    };
     await user.save();
 
     // ✉️ Send via Resend or log in dev
     if (!resend) {
+      if (process.env.NODE_ENV === "production") {
+        console.error("❌ RESEND_API_KEY missing in production");
+        return res.status(503).json({ error: "Email service unavailable" });
+      }
+
       console.log(`📧 [DEV] Email-change code for ${emailLower}: ${code}`);
       return res.json({ success: true, dev: true });
     }
@@ -222,9 +255,33 @@ router.post("/confirm-email-change", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "Verification code expired" });
     }
 
+    if (Number(pending.attempts || 0) >= EMAIL_CHANGE_MAX_ATTEMPTS) {
+      return res.status(400).json({
+        error:
+          "Too many incorrect attempts. Please request a new verification code.",
+      });
+    }
+
     // 3️⃣ Invalid code check
-    if (pending.code !== code)
+    if (pending.code !== code) {
+      const attempts = Number(pending.attempts || 0) + 1;
+
+      user.pendingEmailChange = {
+        ...pending,
+        attempts,
+      };
+      user.markModified("pendingEmailChange");
+      await user.save();
+
+      if (attempts >= EMAIL_CHANGE_MAX_ATTEMPTS) {
+        return res.status(400).json({
+          error:
+            "Too many incorrect attempts. Please request a new verification code.",
+        });
+      }
+
       return res.status(400).json({ error: "Invalid code" });
+    }
 
     // 4️⃣ Apply new email
     user.email = pending.email;

@@ -20,6 +20,8 @@ const PasswordResetSchema = new mongoose.Schema({
   email: { type: String, required: true, lowercase: true, index: true },
   code: { type: String, required: true },
   expiresAt: { type: Date, required: true, index: { expires: 0 } }, // ⏳ TTL auto-expiry
+  attempts: { type: Number, default: 0 },
+  lastSentAt: { type: Date, default: null },
 });
 
 

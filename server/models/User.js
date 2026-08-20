@@ -135,6 +135,9 @@ const userSchema = new mongoose.Schema(
 
     verificationCode: { type: String, default: "" },
     codeExpiresAt: { type: Date, default: null },
+    verificationAttempts: { type: Number, default: 0 },
+    verificationLastSentAt: { type: Date, default: null },
+    pendingEmailChange: { type: Object, default: null },
   },
   {
     timestamps: true,

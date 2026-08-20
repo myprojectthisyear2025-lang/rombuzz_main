@@ -722,7 +722,7 @@ const handleSave = async () => {
           body: JSON.stringify({
             fileUrl: uploaded.secure_url,
             type: "image",
-            caption: "facebuzz",
+           // caption: "facebuzz",
           }),
         }).catch(() => {});
         // 3) Auto-create MyBuzz post for avatar change

@@ -26,6 +26,9 @@
  */
 
 const helmet = require("helmet");
+const {
+  setupAuthRateLimits,
+} = require("../middleware/authRateLimit");
 
 /**
  * Applies core security middleware (Helmet) to the given Express app.
@@ -41,7 +44,11 @@ function setupSecurity(app) {
   })
 );
 
-  console.log("🔐 Helmet security initialized successfully");
+  setupAuthRateLimits(app);
+
+  console.log(
+    "🔐 Helmet + auth rate limits initialized successfully"
+  );
 }
 
 module.exports = { setupSecurity };

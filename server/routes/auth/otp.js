@@ -24,6 +24,7 @@
 const express = require("express");
 const router = express.Router();
 const { Resend } = require("resend");
+const { randomInt } = require("crypto");
 const resend = new Resend(process.env.RESEND_API_KEY);
 const bcrypt = require("bcrypt");
 const shortid = require("shortid");
@@ -32,6 +33,9 @@ const { signToken } = require("../../utils/jwt");
 const { JWT_SECRET, TOKEN_EXPIRES_IN } = require("../../config/env");
 const { baseSanitizeUser } = require("../../utils/helpers");
 const { isPendingDeleteUser } = require("../../services/accountDeletionService");
+
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
 
 function sendPendingDeleteOtpResponse(res, user) {
   return res.status(423).json({
@@ -51,15 +55,31 @@ router.post("/send-code", async (req, res) => {
     if (!email) return res.status(400).json({ error: "Email required" });
 
     const emailLower = String(email).trim().toLowerCase();
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    const now = new Date();
 
-     // 1️⃣ Upsert user record with OTP
+    // 1️⃣ Find existing OTP state before generating/sending a fresh code.
     let user = await User.findOne({ email: emailLower });
 
     if (user && isPendingDeleteUser(user)) {
       return sendPendingDeleteOtpResponse(res, user);
     }
+
+    if (user?.verificationLastSentAt) {
+      const elapsedMs =
+        now.getTime() - new Date(user.verificationLastSentAt).getTime();
+
+      if (elapsedMs < OTP_RESEND_COOLDOWN_MS) {
+        return res.status(429).json({
+          error: "Please wait before requesting another verification code.",
+          retryAfter: Math.ceil(
+            (OTP_RESEND_COOLDOWN_MS - elapsedMs) / 1000
+          ),
+        });
+      }
+    }
+
+    const code = randomInt(100000, 1000000).toString();
+    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
 
     if (!user) {
       user = await User.create({
@@ -67,18 +87,27 @@ router.post("/send-code", async (req, res) => {
         email: emailLower,
         verificationCode: code,
         codeExpiresAt: expiresAt,
+        verificationAttempts: 0,
+        verificationLastSentAt: now,
         createdAt: new Date(),
       });
       console.log(`📧 Created new Mongo user + stored OTP for ${emailLower}`);
     } else {
       user.verificationCode = code;
       user.codeExpiresAt = expiresAt;
+      user.verificationAttempts = 0;
+      user.verificationLastSentAt = now;
       await user.save();
       console.log(`📧 Updated existing Mongo user OTP for ${emailLower}`);
     }
 
     // 2️⃣ Send via Resend (or dev-log)
 if (!process.env.RESEND_API_KEY) {
+  if (process.env.NODE_ENV === "production") {
+    console.error("❌ RESEND_API_KEY missing in production");
+    return res.status(503).json({ error: "Email service unavailable" });
+  }
+
   console.log(`📧 [DEV] OTP for ${emailLower}: ${code}`);
   return res.json({ success: true, dev: true });
 }
@@ -191,22 +220,12 @@ router.post("/verify-code", async (req, res) => {
 
     const emailLower = String(email).trim().toLowerCase();
     const codeTrimmed = String(code).trim();
-    
-    console.log(`🔍 Verifying OTP for ${emailLower}, code: ${codeTrimmed}`);
 
-    // Find user with OTP fields
+    // Find user with OTP fields.
+    // Never log submitted or stored verification codes.
     let user = await User.findOne({ email: emailLower });
-    
-    // Debug logging
-    console.log("DEBUG OTP Check:", {
-      userFound: !!user,
-      storedCode: user?.verificationCode,
-      codeExpiresAt: user?.codeExpiresAt,
-      currentTime: new Date(),
-      isExpired: user?.codeExpiresAt ? user.codeExpiresAt < new Date() : 'no expiry'
-    });
 
-      if (!user)
+    if (!user)
       return res.status(404).json({ error: "No OTP request found" });
 
     if (isPendingDeleteUser(user)) {
@@ -223,18 +242,35 @@ router.post("/verify-code", async (req, res) => {
       // Clear expired OTP
       user.verificationCode = "";
       user.codeExpiresAt = null;
+      user.verificationAttempts = 0;
       await user.save();
       return res.status(400).json({ error: "Verification code expired" });
     }
 
     // Compare codes (both as strings, trimmed)
     if (user.verificationCode.trim() !== codeTrimmed) {
+      user.verificationAttempts =
+        Number(user.verificationAttempts || 0) + 1;
+
+      if (user.verificationAttempts >= OTP_MAX_ATTEMPTS) {
+        user.verificationCode = "";
+        user.codeExpiresAt = null;
+        await user.save();
+
+        return res.status(400).json({
+          error:
+            "Too many incorrect attempts. Please request a new verification code.",
+        });
+      }
+
+      await user.save();
       return res.status(400).json({ error: "Invalid verification code" });
     }
 
     // Clear OTP after successful verification
     user.verificationCode = "";
     user.codeExpiresAt = null;
+    user.verificationAttempts = 0;
     user.isVerified = true;
     await user.save();
 

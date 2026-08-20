@@ -9,6 +9,7 @@
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcrypt");
+const { randomInt } = require("crypto");
 const { Resend } = require("resend");
 
 // ✅ STANDARDIZED RESEND INSTANCE (USED EVERYWHERE)
@@ -17,6 +18,9 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const User = require("../../models/User");
 const PasswordReset = require("../../models/PasswordReset");
 const { isPendingDeleteUser } = require("../../services/accountDeletionService");
+
+const RESET_RESEND_COOLDOWN_MS = 60 * 1000;
+const RESET_MAX_ATTEMPTS = 5;
 
 function sendPendingDeletePasswordResponse(res, user) {
   return res.status(423).json({
@@ -49,17 +53,42 @@ router.post("/forgot-password", async (req, res) => {
       return sendPendingDeletePasswordResponse(res, user);
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    const now = new Date();
+    const existingReset = await PasswordReset.findOne({
+      email: emailLower,
+    }).lean();
+
+    if (existingReset?.lastSentAt) {
+      const elapsedMs =
+        now.getTime() - new Date(existingReset.lastSentAt).getTime();
+
+      if (elapsedMs < RESET_RESEND_COOLDOWN_MS) {
+        // Keep the response generic so account existence is not exposed.
+        return res.json({ success: true });
+      }
+    }
+
+    const code = randomInt(100000, 1000000).toString();
+    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000); // 10 min
 
     await PasswordReset.findOneAndUpdate(
       { email: emailLower },
-      { code, expiresAt },
+      {
+        code,
+        expiresAt,
+        attempts: 0,
+        lastSentAt: now,
+      },
       { upsert: true, new: true }
     );
 
     // DEV fallback
     if (!process.env.RESEND_API_KEY) {
+      if (process.env.NODE_ENV === "production") {
+        console.error("❌ RESEND_API_KEY missing in production");
+        return res.status(503).json({ error: "Email service unavailable" });
+      }
+
       console.log(`📧 [DEV] Password reset code for ${emailLower}: ${code}`);
       return res.json({ success: true, dev: true });
     }
@@ -141,8 +170,28 @@ router.post("/verify-reset-code", async (req, res) => {
       return res.status(400).json({ error: "Reset code expired" });
     }
 
-    if (reset.code !== code)
+    if (Number(reset.attempts || 0) >= RESET_MAX_ATTEMPTS) {
+      return res.status(400).json({
+        error:
+          "Too many incorrect attempts. Please request a new reset code.",
+      });
+    }
+
+    if (reset.code !== code) {
+      reset.attempts = Number(reset.attempts || 0) + 1;
+
+      if (reset.attempts >= RESET_MAX_ATTEMPTS) {
+        await reset.save();
+
+        return res.status(400).json({
+          error:
+            "Too many incorrect attempts. Please request a new reset code.",
+        });
+      }
+
+      await reset.save();
       return res.status(400).json({ error: "Invalid reset code" });
+    }
 
     res.json({ success: true });
   } catch (err) {
@@ -171,8 +220,28 @@ router.post("/reset-password", async (req, res) => {
       return res.status(400).json({ error: "Reset code expired" });
     }
 
-    if (reset.code !== code)
+    if (Number(reset.attempts || 0) >= RESET_MAX_ATTEMPTS) {
+      return res.status(400).json({
+        error:
+          "Too many incorrect attempts. Please request a new reset code.",
+      });
+    }
+
+    if (reset.code !== code) {
+      reset.attempts = Number(reset.attempts || 0) + 1;
+
+      if (reset.attempts >= RESET_MAX_ATTEMPTS) {
+        await reset.save();
+
+        return res.status(400).json({
+          error:
+            "Too many incorrect attempts. Please request a new reset code.",
+        });
+      }
+
+      await reset.save();
       return res.status(400).json({ error: "Invalid reset code" });
+    }
 
       const user = await User.findOne({ email: emailLower });
     if (!user) return res.status(404).json({ error: "User not found" });
