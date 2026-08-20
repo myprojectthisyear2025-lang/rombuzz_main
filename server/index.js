@@ -6,6 +6,10 @@
 // =====================================================
 
 require('dotenv').config();
+
+// Sentry must initialize before Express and other instrumented modules.
+const Sentry = require('./instrument');
+
 const express = require('express');
 const helmet = require('helmet');
 const multer = require('multer');
@@ -250,6 +254,12 @@ registerMeetMiddleSockets(io);
 // ðŸ§¾ System Startup Summary
 const { logStartupSummary } = require('./modules/system');
 logStartupSummary({ PORT, FEATURE_TOGGLES });
+
+// =======================
+// 🔎 SENTRY ERROR CAPTURE
+// =======================
+// Must be after all routes, but before RomBuzz's own error handler.
+Sentry.setupExpressErrorHandler(app);
 
 // =======================
 // ðŸ›¡ï¸ GLOBAL ERROR HANDLER
