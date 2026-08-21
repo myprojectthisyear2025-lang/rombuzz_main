@@ -4,21 +4,18 @@
  * 🎯 Purpose: Remove sensitive RomBuzz data from Sentry events.
  *
  * Protects:
- *   - auth/session headers
- *   - request bodies
- *   - query strings
- *   - cookies
- *   - email/phone/IP user fields
- *   - signed/private URLs
+ *   - all request headers except a tiny safe allowlist
+ *   - request bodies, cookies, and query strings
+ *   - user email, phone, IP, username, and other PII
+ *   - query parameters from captured URLs
+ *   - console breadcrumbs that may contain private app data
  * ============================================================
  */
 
-const SENSITIVE_HEADERS = new Set([
-  "authorization",
-  "cookie",
-  "set-cookie",
-  "x-api-key",
-  "x-auth-token",
+const SAFE_HEADERS = new Set([
+  "content-type",
+  "content-length",
+  "accept",
 ]);
 
 function stripUrlQuery(value) {
@@ -29,38 +26,41 @@ function stripUrlQuery(value) {
 }
 
 function sanitizeHeaders(headers) {
-  if (!headers || typeof headers !== "object") return headers;
+  if (!headers || typeof headers !== "object") return undefined;
 
-  return Object.fromEntries(
-    Object.entries(headers).map(([key, value]) => [
-      key,
-      SENSITIVE_HEADERS.has(key.toLowerCase()) ? "[Filtered]" : value,
-    ])
+  const safeHeaders = Object.entries(headers).filter(([key]) =>
+    SAFE_HEADERS.has(key.toLowerCase())
   );
+
+  return safeHeaders.length
+    ? Object.fromEntries(safeHeaders)
+    : undefined;
 }
 
 function sanitizeUser(user) {
-  if (!user || typeof user !== "object") return user;
+  if (!user || typeof user !== "object") return undefined;
 
-  return {
-    ...(user.id ? { id: user.id } : {}),
-  };
+  return user.id
+    ? { id: String(user.id) }
+    : undefined;
 }
 
 function sanitizeBreadcrumbs(breadcrumbs) {
   if (!Array.isArray(breadcrumbs)) return breadcrumbs;
 
-  return breadcrumbs.map((breadcrumb) => {
-    if (!breadcrumb?.data) return breadcrumb;
+  return breadcrumbs
+    .filter((breadcrumb) => breadcrumb?.category !== "console")
+    .map((breadcrumb) => {
+      if (!breadcrumb?.data) return breadcrumb;
 
-    return {
-      ...breadcrumb,
-      data: {
-        ...breadcrumb.data,
-        url: stripUrlQuery(breadcrumb.data.url),
-      },
-    };
-  });
+      return {
+        ...breadcrumb,
+        data: {
+          ...breadcrumb.data,
+          url: stripUrlQuery(breadcrumb.data.url),
+        },
+      };
+    });
 }
 
 function sanitizeSentryEvent(event) {
@@ -73,6 +73,7 @@ function sanitizeSentryEvent(event) {
     delete event.request.data;
     delete event.request.cookies;
     delete event.request.query_string;
+    delete event.request.env;
   }
 
   event.user = sanitizeUser(event.user);
