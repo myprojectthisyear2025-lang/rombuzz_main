@@ -1,185 +1,231 @@
 /**
  * ============================================================
- * 📁 File: server/routes/auth/registerFull.js
- * 🎯 Purpose: Route entry for completing verified RomBuzz signup.
+ * 📁 File: server/routes/auth/registerFullHelpers.js
+ * 🎯 Purpose: Shared helpers for completing RomBuzz signup.
  *
  * LOCATION:
- *   server/routes/auth/registerFull.js
+ *   server/routes/auth/registerFullHelpers.js
  *
  * USED BY:
- *   server/routes/auth.js
+ *   server/routes/auth/registerFull.js
+ *   server/routes/auth/registerFullPersistence.js
  *
  * RESPONSIBILITIES:
- *   - Preserve the existing /register-full request flow.
- *   - Delegate unchanged persistence behavior to focused helpers.
- *   - Validate Apple signup proof only for Apple onboarding.
+ *   - Sanitize signup photo URLs.
+ *   - Merge signup photos into existing media.
+ *   - Preserve pending-deletion signup response behavior.
+ *   - Validate trusted Apple signup proof.
  * ============================================================
  */
 
-const express = require("express");
-const router = express.Router();
-
-const User = require("../../models/User");
-const {
-  isPendingDeleteUser,
-} = require("../../services/accountDeletionService");
+const shortid = require("shortid");
 
 const {
-  getTrustedAppleId,
-  sanitizeSignupPhotos,
-  sendPendingDeleteSignupResponse,
-} = require("./registerFullHelpers");
+  verifyAppleSignupTicket,
+} = require("./appleSignupTicket");
 
 const {
-  completeExistingUser,
-  createNewUser,
-} = require("./registerFullPersistence");
+  verifySignupVerificationTicket,
+} = require("./signupVerificationTicket");
 
-router.post("/register-full", async (req, res) => {
-  try {
-    const {
-      email,
-      firstName,
-      lastName,
-      password,
-      gender,
-      dob,
-      lookingFor,
-      interestedIn,
+function sendPendingDeleteSignupResponse(
+  res,
+  user
+) {
+  return res.status(423).json({
+    status: "",
+    error:
+      "This email is on a 7-day deletion hold. You can create a fresh account with this email after the hold ends.",
+    reusableAfter:
+      user?.deletion?.purgeAfter || null,
+  });
+}
 
-      city,
-      height,
+function sanitizeSignupPhotos(photos = []) {
+  const list =
+    Array.isArray(photos) ? photos : [];
 
-      likes,
-      dislikes,
+  const seenUrls = new Set();
+  const cleanPhotos = [];
 
-      preferences,
-      visibilityMode,
-      interests,
-      avatar,
-      photos,
-      phone,
-      voiceUrl,
-      voiceDurationSec,
-    } = req.body || {};
+  for (const photo of list) {
+    const url =
+      String(photo || "").trim();
 
-    if (!email || !firstName || !lastName) {
-      return res.status(400).json({
-        error: "Missing required fields.",
-      });
+    if (!url || seenUrls.has(url)) {
+      continue;
     }
 
-    const emailLower = String(email || "")
+    seenUrls.add(url);
+    cleanPhotos.push(url);
+  }
+
+  return cleanPhotos;
+}
+
+function mergeSignupPhotosIntoMedia(
+  existingMedia = [],
+  photos = []
+) {
+  const mediaList =
+    Array.isArray(existingMedia)
+      ? [...existingMedia]
+      : [];
+
+  const photoUrls =
+    sanitizeSignupPhotos(photos);
+
+  const seenUrls = new Set(
+    mediaList
+      .map((item) =>
+        String(item?.url || "").trim()
+      )
+      .filter(Boolean)
+  );
+
+  for (const photo of photoUrls) {
+    const url =
+      String(photo || "").trim();
+
+    if (!url || seenUrls.has(url)) {
+      continue;
+    }
+
+    mediaList.push({
+      id: shortid.generate(),
+      url,
+      type: "image",
+      caption:
+        "kind:photo scope:public intent:letsbuzz",
+      privacy: "public",
+      createdAt: Date.now(),
+      comments: [],
+      reactions: {},
+    });
+
+    seenUrls.add(url);
+  }
+
+  return mediaList;
+}
+
+function signupProofError(message) {
+  return Object.assign(
+    new Error(message),
+    { statusCode: 401 }
+  );
+}
+
+function getTrustedSignupIdentity(
+  body,
+  emailLower
+) {
+  const provider =
+    String(body?.authProvider || "")
       .trim()
       .toLowerCase();
 
-    const signupPhotos =
-      sanitizeSignupPhotos(photos);
-
-    const appleId = getTrustedAppleId(
-      req.body || {},
-      emailLower
+  if (
+    !["email", "google", "apple"].includes(
+      provider
+    )
+  ) {
+    throw signupProofError(
+      "Verified signup proof is required."
     );
+  }
 
-    let user = await User.findOne({
-      email: emailLower,
-    });
+  if (provider === "apple") {
+    const ticket =
+      String(
+        body?.appleSignupTicket || ""
+      ).trim();
 
-    if (
-      user &&
-      isPendingDeleteUser(user)
-    ) {
-      return sendPendingDeleteSignupResponse(
-        res,
-        user
+    if (!ticket) {
+      throw signupProofError(
+        "Apple signup verification is required."
       );
     }
 
-    if (user) {
-      if (
-        appleId &&
-        user.appleId &&
-        user.appleId !== appleId
-      ) {
-        return res.status(409).json({
-          error:
-            "This email is linked to a different Apple account.",
-        });
-      }
+    const verified =
+      verifyAppleSignupTicket(ticket);
 
-      return completeExistingUser({
-        res,
-        user,
-        signupPhotos,
-        appleId,
-        data: {
-          firstName,
-          lastName,
-          password,
-          gender,
-          dob,
-          lookingFor,
-          interestedIn,
-          city,
-          height,
-          likes,
-          dislikes,
-          preferences,
-          visibilityMode,
-          interests,
-          avatar,
-          phone,
-          voiceUrl,
-          voiceDurationSec,
-        },
-      });
+    if (verified.email !== emailLower) {
+      throw signupProofError(
+        "Apple signup email does not match the verified Apple account."
+      );
     }
 
-    return createNewUser({
-      res,
-      emailLower,
-      signupPhotos,
-      appleId,
-      data: {
-        firstName,
-        lastName,
-        password,
-        gender,
-        dob,
-        lookingFor,
-        interestedIn,
-        city,
-        height,
-        likes,
-        dislikes,
-        preferences,
-        visibilityMode,
-        interests,
-        avatar,
-        phone,
-        voiceUrl,
-        voiceDurationSec,
-      },
-    });
-  } catch (err) {
-    console.error(
-      "❌ /register-full hybrid error:",
-      err
+    return {
+      provider,
+      appleId: verified.appleId,
+      googleId: "",
+    };
+  }
+
+  const ticket =
+    String(
+      body?.signupVerificationTicket || ""
+    ).trim();
+
+  if (!ticket) {
+    throw signupProofError(
+      provider === "google"
+        ? "Google signup verification is required."
+        : "Email signup verification is required."
+    );
+  }
+
+  const verified =
+    verifySignupVerificationTicket(
+      ticket
     );
 
-    if (err?.statusCode) {
-      return res
-        .status(err.statusCode)
-        .json({
-          error: err.message,
-        });
-    }
-
-    return res.status(500).json({
-      error:
-        "Server error completing profile",
-    });
+  if (verified.provider !== provider) {
+    throw signupProofError(
+      "Signup verification provider does not match the requested signup method."
+    );
   }
-});
 
-module.exports = router;
+  if (verified.email !== emailLower) {
+    throw signupProofError(
+      "Signup email does not match the verified account."
+    );
+  }
+
+  return {
+    provider,
+    appleId: "",
+    googleId:
+      provider === "google"
+        ? verified.providerId
+        : "",
+  };
+}
+
+function getTrustedAppleId(
+  body,
+  emailLower
+) {
+  const provider =
+    String(body?.authProvider || "")
+      .trim()
+      .toLowerCase();
+
+  if (provider !== "apple") {
+    return "";
+  }
+
+  return getTrustedSignupIdentity(
+    body,
+    emailLower
+  ).appleId;
+}
+
+module.exports = {
+  getTrustedSignupIdentity,
+  getTrustedAppleId,
+  sanitizeSignupPhotos,
+  mergeSignupPhotosIntoMedia,
+  sendPendingDeleteSignupResponse,
+};

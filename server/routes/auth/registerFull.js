@@ -25,7 +25,7 @@ const {
 } = require("../../services/accountDeletionService");
 
 const {
-  getTrustedAppleId,
+  getTrustedSignupIdentity,
   sanitizeSignupPhotos,
   sendPendingDeleteSignupResponse,
 } = require("./registerFullHelpers");
@@ -76,10 +76,17 @@ router.post("/register-full", async (req, res) => {
     const signupPhotos =
       sanitizeSignupPhotos(photos);
 
-    const appleId = getTrustedAppleId(
-      req.body || {},
-      emailLower
-    );
+    const signupIdentity =
+      getTrustedSignupIdentity(
+        req.body || {},
+        emailLower
+      );
+
+    const {
+      provider: authProvider,
+      appleId,
+      googleId,
+    } = signupIdentity;
 
     let user = await User.findOne({
       email: emailLower,
@@ -95,15 +102,33 @@ router.post("/register-full", async (req, res) => {
       );
     }
 
-    if (user) {
+    // Email OTP signup already owns a temporary Mongo user
+    // created by /send-code. Only that verified placeholder
+    // may be completed.
+    if (authProvider === "email") {
+      if (!user) {
+        return res.status(401).json({
+          error:
+            "Email verification record not found. Please verify your email again.",
+        });
+      }
+
+      if (!user.isVerified) {
+        return res.status(401).json({
+          error:
+            "Email verification is required before signup can be completed.",
+        });
+      }
+
       if (
-        appleId &&
-        user.appleId &&
-        user.appleId !== appleId
+        user.profileComplete ||
+        user.hasOnboarded ||
+        user.passwordHash
       ) {
         return res.status(409).json({
+          status: "account_exists",
           error:
-            "This email is linked to a different Apple account.",
+            "An account already exists with this email. Try logging in.",
         });
       }
 
@@ -135,11 +160,22 @@ router.post("/register-full", async (req, res) => {
       });
     }
 
+    // Google/Apple signup only issues a ticket after proving that
+    // no account currently exists for that verified identity.
+    if (user) {
+      return res.status(409).json({
+        status: "account_exists",
+        error:
+          "An account already exists with this email. Try logging in.",
+      });
+    }
+
     return createNewUser({
       res,
       emailLower,
       signupPhotos,
       appleId,
+      googleId,
       data: {
         firstName,
         lastName,

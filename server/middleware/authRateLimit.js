@@ -264,6 +264,33 @@ function setupAuthRateLimits(app) {
     resetVerifyIp
   );
 
+  app.use(
+    "/api/auth/register-full",
+    ipLimit(
+      "register-full-ip",
+      30,
+      "Too many signup-completion attempts. Please try again later."
+    )
+  );
+
+  app.use(
+    "/api/auth/register",
+    ipLimit(
+      "register-ip",
+      20,
+      "Too many registration attempts. Please try again later."
+    )
+  );
+
+  app.use(
+    "/api/auth/direct-signup",
+    ipLimit(
+      "direct-signup-ip",
+      20,
+      "Too many registration attempts. Please try again later."
+    )
+  );
+
   const socialAuthIp = ipLimit(
     "social-auth-ip",
     30,

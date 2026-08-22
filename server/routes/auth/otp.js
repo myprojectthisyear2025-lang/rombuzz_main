@@ -33,6 +33,10 @@ const { signToken } = require("../../utils/jwt");
 const { JWT_SECRET, TOKEN_EXPIRES_IN } = require("../../config/env");
 const { baseSanitizeUser } = require("../../utils/helpers");
 const { isPendingDeleteUser } = require("../../services/accountDeletionService");
+const {
+  createSignupVerificationTicket,
+  verifySignupVerificationTicket,
+} = require("./signupVerificationTicket");
 
 const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
@@ -274,8 +278,16 @@ router.post("/verify-code", async (req, res) => {
     user.isVerified = true;
     await user.save();
 
+    const emailSignupTicket = createSignupVerificationTicket({
+      provider: "email",
+      email: emailLower,
+    });
+
     console.log(`✅ OTP verified successfully for ${emailLower}`);
-    return res.json({ success: true });
+    return res.json({
+      success: true,
+      emailSignupTicket,
+    });
   } catch (err) {
     console.error("❌ verify-code error:", err);
     return res.status(500).json({ error: "Server error verifying code" });
@@ -292,18 +304,68 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "Email required" });
 
     const emailLower = String(email).trim().toLowerCase();
-       let user = await User.findOne({ email: emailLower });
+
+    let verifiedSignup;
+
+    try {
+      verifiedSignup =
+        verifySignupVerificationTicket(
+          req.body?.signupVerificationTicket
+        );
+    } catch (proofError) {
+      return res
+        .status(proofError?.statusCode || 401)
+        .json({
+          error:
+            proofError?.message ||
+            "Email signup verification is required.",
+        });
+    }
+
+    if (
+      verifiedSignup.provider !== "email" ||
+      verifiedSignup.email !== emailLower
+    ) {
+      return res.status(401).json({
+        error:
+          "Email signup verification does not match this account.",
+      });
+    }
+
+    let user = await User.findOne({
+      email: emailLower,
+    });
 
     if (!user)
-      return res.status(404).json({ error: "No OTP request found" });
+      return res.status(404).json({
+        error: "No OTP request found",
+      });
 
     if (isPendingDeleteUser(user)) {
-      return sendPendingDeleteOtpResponse(res, user);
+      return sendPendingDeleteOtpResponse(
+        res,
+        user
+      );
+    }
+
+    if (
+      user.profileComplete ||
+      user.hasOnboarded ||
+      user.passwordHash
+    ) {
+      return res.status(409).json({
+        status: "account_exists",
+        error:
+          "This account is already registered. Try logging in.",
+      });
     }
 
     // ✅ CRITICAL: Verify OTP is already validated
     if (!user.isVerified) {
-      return res.status(400).json({ error: "Email not verified. Please verify your email first." });
+      return res.status(400).json({
+        error:
+          "Email not verified. Please verify your email first.",
+      });
     }
 
     // 1️⃣ Set password (optional)

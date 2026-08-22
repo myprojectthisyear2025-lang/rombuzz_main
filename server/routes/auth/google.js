@@ -28,6 +28,10 @@ const {
   sendPendingDeleteAuthResponse,
 } = require("./authShared");
 
+const {
+  createSignupVerificationTicket,
+} = require("./signupVerificationTicket");
+
 router.post("/google", async (req, res) => {
   const { token, mode = "login" } = req.body || {};
 
@@ -94,8 +98,15 @@ router.post("/google", async (req, res) => {
         });
       }
 
+      const googleSignupTicket = createSignupVerificationTicket({
+        provider: "google",
+        email,
+        providerId: googleId,
+      });
+
       return res.json({
         status: "google_signup_ready",
+        googleSignupTicket,
         googleProfile: {
           email,
           googleId,

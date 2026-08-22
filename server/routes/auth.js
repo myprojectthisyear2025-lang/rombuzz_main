@@ -51,6 +51,9 @@ const { googleClient } = require("../config/config");
 const User = require("../models/User");
 const PasswordReset = require("../models/PasswordReset");
 const { isPendingDeleteUser } = require("../services/accountDeletionService");
+const {
+  getTrustedSignupIdentity,
+} = require("./auth/registerFullHelpers");
 
 function sendPendingDeleteSignupResponse(res, user) {
   return res.status(423).json({
@@ -165,10 +168,57 @@ router.post("/register-full", async (req, res) => {
     const emailLower = String(email || "").trim().toLowerCase();
     const signupPhotos = sanitizeSignupPhotos(photos);
 
+    const signupIdentity =
+      getTrustedSignupIdentity(
+        req.body || {},
+        emailLower
+      );
+
+    const {
+      provider: authProvider,
+      appleId,
+      googleId,
+    } = signupIdentity;
+
       // 🧩 Try Mongo first — upgrade if already verified
     let user = await User.findOne({ email: emailLower });
+
     if (user && isPendingDeleteUser(user)) {
       return sendPendingDeleteSignupResponse(res, user);
+    }
+
+    if (authProvider === "email") {
+      if (!user) {
+        return res.status(401).json({
+          error:
+            "Email verification record not found. Please verify your email again.",
+        });
+      }
+
+      if (!user.isVerified) {
+        return res.status(401).json({
+          error:
+            "Email verification is required before signup can be completed.",
+        });
+      }
+
+      if (
+        user.profileComplete ||
+        user.hasOnboarded ||
+        user.passwordHash
+      ) {
+        return res.status(409).json({
+          status: "account_exists",
+          error:
+            "An account already exists with this email. Try logging in.",
+        });
+      }
+    } else if (user) {
+      return res.status(409).json({
+        status: "account_exists",
+        error:
+          "An account already exists with this email. Try logging in.",
+      });
     }
 
     if (user) {
@@ -194,6 +244,8 @@ if (dislikes !== undefined) user.dislikes = dislikes;
       user.voiceUrl = voiceUrl || "";
       user.voiceDurationSec = Number(voiceDurationSec || 0);
       if (password) user.passwordHash = await bcrypt.hash(password, 10);
+      if (appleId) user.appleId = appleId;
+      if (googleId) user.googleId = googleId;
       user.isVerified = true;
       user.profileComplete = true;
       user.hasOnboarded = true;
@@ -237,6 +289,9 @@ if (dislikes !== undefined) user.dislikes = dislikes;
   voiceUrl,
   voiceDurationSec: Number(voiceDurationSec || 0),
 
+  ...(appleId ? { appleId } : {}),
+  ...(googleId ? { googleId } : {}),
+
   isVerified: true,
   profileComplete: true,
   hasOnboarded: true,
@@ -273,6 +328,13 @@ if (welcomeMedia.length > 0) {
     res.json({ token, user: baseSanitizeUser(newUser) });
   } catch (err) {
     console.error("❌ /register-full hybrid error:", err);
+
+    if (err?.statusCode) {
+      return res
+        .status(err.statusCode)
+        .json({ error: err.message });
+    }
+
     res.status(500).json({ error: "Server error completing profile" });
   }
 });
@@ -289,72 +351,17 @@ router.use("/", require("./auth/password"));
 
 
 // =======================
-// DIRECT EMAIL SIGNUP
+// DIRECT EMAIL SIGNUP — DISABLED
 // =======================
-router.post("/direct-signup", async (req, res) => {
-  try {
-    const { email, firstName, lastName, dob, gender, password } = req.body;
-    if (!email || !firstName || !lastName || !dob || !gender || !password) {
-      return res.status(400).json({ error: "All fields are required" });
-    }
-const emailLower = String(email || "").trim().toLowerCase();
-
-// 🔎 Mongo duplicate check
-const exists = await User.findOne({ email: emailLower }).lean();
-if (exists && isPendingDeleteUser(exists)) {
-  return sendPendingDeleteSignupResponse(res, exists);
-}
-
-if (exists) return res.status(400).json({ error: "User already exists" });
-
-const hash = await bcrypt.hash(password, 10);
-const newUser = {
-  id: shortid.generate(),
-  firstName,
-  lastName,
-  dob,
-  gender,
-  email: emailLower,
-  passwordHash: hash,
-  bio: "",
-  avatar: "",
-  location: null,
-  visibility: "active",
-  media: [],
-  posts: [],
-  interests: [],
-  hobbies: [],
-  favorites: [],
-  createdAt: Date.now(),
-  visibilityMode: "auto",
-  fieldVisibility: {
-    age: "public",
-    height: "public",
-    city: "public",
-    orientation: "public",
-    interests: "public",
-    hobbies: "public",
-    likes: "public",
-    dislikes: "public",
-    lookingFor: "public",
-    voiceIntro: "public",
-    photos: "matches",
-  },
-  nameChangedAt: 0,
-  pendingEmailChange: null,
-};
-
-// 🟢 Create in Mongo only
-await User.create(newUser);
-
-// 🔏 JWT
-const token = signToken({ id: newUser.id, email: newUser.email }, JWT_SECRET, TOKEN_EXPIRES_IN);
-return res.json({ token, user: baseSanitizeUser(newUser) });
-
-  } catch (err) {
-    console.error("❌ direct-signup error:", err);
-    res.status(500).json({ error: "Failed to register directly" });
-  }
+// Security: all new accounts must complete a verified Email,
+// Google, or Apple signup flow before account creation.
+router.post("/direct-signup", (_req, res) => {
+  return res.status(410).json({
+    status: "direct_signup_disabled",
+    error:
+      "Direct signup is disabled. Use the verified signup flow.",
+  });
 });
+
 console.log("✅ Auth routes initialized (login + register + google + password + otp)");
 module.exports = router;

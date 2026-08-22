@@ -139,6 +139,7 @@ async function createNewUser({
   emailLower,
   signupPhotos,
   appleId,
+  googleId,
 }) {
   const passwordHash = data.password
     ? await bcrypt.hash(
@@ -191,6 +192,10 @@ async function createNewUser({
 
     ...(appleId
       ? { appleId }
+      : {}),
+
+    ...(googleId
+      ? { googleId }
       : {}),
 
     isVerified: true,
