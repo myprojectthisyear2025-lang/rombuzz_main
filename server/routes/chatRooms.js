@@ -391,6 +391,109 @@ async function isChatBlocked(userA, userB) {
   return !!block;
 }
 
+async function findActiveChatUser(userId) {
+  const id = String(userId || "").trim();
+  if (!id) return null;
+
+  return User.findOne({
+    id,
+    visibility: { $ne: "pending_delete" },
+    deleteStatus: { $ne: "pending_delete" },
+  })
+    .select("id")
+    .lean();
+}
+
+async function isChatMatchActive(userA, userB) {
+  const a = String(userA || "").trim();
+  const b = String(userB || "").trim();
+
+  if (!a || !b || a === b) return false;
+
+  const match = await Match.exists({
+    $or: [
+      { users: { $all: [a, b] } },
+
+      {
+        status: "matched",
+        user1: a,
+        user2: b,
+      },
+
+      {
+        status: "matched",
+        user1: b,
+        user2: a,
+      },
+    ],
+  });
+
+  return !!match;
+}
+
+// ✅ Authorize the current user, require an active peer,
+// and require that both users are still matched.
+async function enforceActiveRoomPeer(req, res, roomId) {
+  const me = String(req.user?.id || "");
+  const { a, b } = getPeersFromRoomId(roomId);
+
+  const aId = String(a || "");
+  const bId = String(b || "");
+
+  if (
+    !me ||
+    !aId ||
+    !bId ||
+    (me !== aId && me !== bId)
+  ) {
+    res.status(403).json({ error: "forbidden" });
+    return null;
+  }
+
+  const peerId = me === aId ? bId : aId;
+
+  const [peer, matched] = await Promise.all([
+    findActiveChatUser(peerId),
+    isChatMatchActive(me, peerId),
+  ]);
+
+  if (!peer) {
+    res.status(404).json({
+      error: "user_not_found",
+      message: "This user is no longer available.",
+    });
+    return null;
+  }
+
+  if (!matched) {
+    res.status(409).json({
+      error: "not_matched",
+      message: "This conversation is no longer available.",
+    });
+    return null;
+  }
+
+  return { peerId };
+}
+
+// ✅ Existing-room actions must never create a brand-new empty room.
+async function getExistingActiveRoom(req, res, roomId) {
+  const activePeer = await enforceActiveRoomPeer(req, res, roomId);
+  if (!activePeer) return null;
+
+  const room = await ChatRoom.findOne({ roomId });
+
+  if (!room) {
+    res.status(404).json({ error: "Room not found" });
+    return null;
+  }
+
+  return {
+    room,
+    peerId: activePeer.peerId,
+  };
+}
+
 function sanitizeReplyToSnapshot(input) {
   if (!input || typeof input !== "object") return null;
 
@@ -773,6 +876,9 @@ router.get("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
 
     if (!(await enforceChatAllowed(req, res))) return;
 
+    const activePeer = await enforceActiveRoomPeer(req, res, roomId);
+    if (!activePeer) return;
+
     // ✅ Paginated requests are used by the main mobile chat thread.
     // Existing requests without limit/before still receive the original
     // complete message array, preserving older clients and feature screens.
@@ -855,12 +961,11 @@ router.post("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const { a, b } = getPeersFromRoomId(roomId);
-    if (![a, b].includes(req.user.id))
-      return res.status(403).json({ error: "forbidden" });
+    const activePeer = await enforceActiveRoomPeer(req, res, roomId);
+    if (!activePeer) return;
 
-      const fromId = req.user.id;
-    const toId = fromId === a ? b : a;
+    const fromId = String(req.user.id);
+    const toId = String(activePeer.peerId);
 
     const blocked = await isChatBlocked(fromId, toId);
     if (blocked) {
@@ -1101,7 +1206,10 @@ router.patch("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => {
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const room = await getRoomDoc(roomId);
+    const activeRoom = await getExistingActiveRoom(req, res, roomId);
+    if (!activeRoom) return;
+
+    const room = activeRoom.room;
     const msg = (room.messages || []).find((m) => String(m.id) === String(msgId));
     if (!msg) return res.status(404).json({ error: "not_found" });
 
@@ -1161,7 +1269,10 @@ router.delete("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => 
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const room = await getRoomDoc(roomId);
+    const activeRoom = await getExistingActiveRoom(req, res, roomId);
+    if (!activeRoom) return;
+
+    const room = activeRoom.room;
     const msgIndex = room.messages.findIndex((m) => String(m.id) === String(msgId));
     if (msgIndex === -1) return res.status(404).json({ error: "not found" });
 
@@ -1263,9 +1374,10 @@ router.delete("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const room = await getRoomDoc(roomId);
+    const activeRoom = await getExistingActiveRoom(req, res, roomId);
+    if (!activeRoom) return;
 
-    if (!room) return res.status(404).json({ error: "not found" });
+    const room = activeRoom.room;
 
     const myId = req.user.id;
     room.messages.forEach((m) => {
@@ -1291,7 +1403,10 @@ router.post("/chat/rooms/:roomId/:msgId/react", authMiddleware, async (req, res)
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const room = await getRoomDoc(roomId);
+    const activeRoom = await getExistingActiveRoom(req, res, roomId);
+    if (!activeRoom) return;
+
+    const room = activeRoom.room;
     const msg = room.messages.find((m) => String(m.id) === String(msgId));
     if (!msg) return res.status(404).json({ error: "not found" });
 
@@ -1386,7 +1501,10 @@ router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) =
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const room = await getRoomDoc(roomId);
+    const activeRoom = await getExistingActiveRoom(req, res, roomId);
+    if (!activeRoom) return;
+
+    const room = activeRoom.room;
     const msg = room.messages.find((m) => String(m.id) === String(msgId));
     if (!msg) return res.status(404).json({ error: "not_found" });
     if (msg.deleted) return res.status(400).json({ error: "cannot_pin_deleted" });
@@ -1460,26 +1578,6 @@ router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) =
 });
 
 // ============================================================
-// 🧹 DEBUG — DELETE BROKEN CHAT ROOM (no auth)
-// URL: /api/chat/debug/room/<roomId>
-// ============================================================
-router.delete("/debug/room/:roomId", async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const result = await ChatRoom.deleteOne({ roomId });
-
-    res.json({
-      ok: true,
-      roomId,
-      deleted: result.deletedCount,
-    });
-  } catch (err) {
-    console.error("❌ Debug delete error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
 // 👁️ EPHEMERAL VIEW TRACK (ON OPEN)
 // POST /api/chat/rooms/:roomId/:msgId/viewed
 // - Only receiver can call
@@ -1493,7 +1591,10 @@ router.post("/chat/rooms/:roomId/:msgId/viewed", authMiddleware, async (req, res
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const room = await getRoomDoc(roomId);
+    const activeRoom = await getExistingActiveRoom(req, res, roomId);
+    if (!activeRoom) return;
+
+    const room = activeRoom.room;
     const idx = (room.messages || []).findIndex((m) => String(m.id) === String(msgId));
     if (idx === -1) return res.status(404).json({ error: "not_found" });
 
@@ -1586,7 +1687,10 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
     if (!(await enforceChatAllowed(req, res))) return;
     if (!(await enforceGiftsAllowed(req, res))) return;
 
-    const room = await getRoomDoc(roomId);
+    const activeRoom = await getExistingActiveRoom(req, res, roomId);
+    if (!activeRoom) return;
+
+    const room = activeRoom.room;
     const participants = (room?.participants || []).map((x) => String(x));
 
     if (!participants.includes(me)) {
@@ -1790,16 +1894,89 @@ async function computeUnreadSummaryForUser(userId) {
   const me = String(userId);
   const rooms = await ChatRoom.find({ participants: me }).lean(false);
 
+  const roomPeerIds = [
+    ...new Set(
+      rooms
+        .map((room) => {
+          const participants = room?.participants || [];
+          return String(
+            participants.find((p) => String(p) !== me) || ""
+          );
+        })
+        .filter(Boolean)
+    ),
+  ];
+
+  if (!roomPeerIds.length) {
+    return { total: 0, byPeer: {} };
+  }
+
+  const [activeUsers, matchDocs] = await Promise.all([
+    User.find({
+      id: { $in: roomPeerIds },
+      visibility: { $ne: "pending_delete" },
+      deleteStatus: { $ne: "pending_delete" },
+    })
+      .select("id")
+      .lean(),
+
+    Match.find({
+      $or: [
+        { users: me },
+        { status: "matched", user1: me },
+        { status: "matched", user2: me },
+      ],
+    })
+      .select("users user1 user2 status")
+      .lean(),
+  ]);
+
+  const activePeerIds = new Set(
+    activeUsers.map((user) => String(user.id || ""))
+  );
+
+  const matchedPeerIds = new Set();
+
+  for (const match of matchDocs) {
+    let peerId = "";
+
+    if (Array.isArray(match?.users)) {
+      peerId =
+        match.users
+          .map(String)
+          .find((id) => id !== me) || "";
+    } else {
+      const user1 = String(match?.user1 || "");
+      const user2 = String(match?.user2 || "");
+
+      if (user1 === me) peerId = user2;
+      if (user2 === me) peerId = user1;
+    }
+
+    if (peerId) {
+      matchedPeerIds.add(peerId);
+    }
+  }
+
   const byPeer = {};
   let total = 0;
 
   for (const room of rooms) {
     const participants = room.participants || [];
-    const peerId = String(participants.find((p) => String(p) !== me) || "");
+    const peerId = String(
+      participants.find((p) => String(p) !== me) || ""
+    );
 
     if (!peerId) continue;
+    if (!activePeerIds.has(peerId)) continue;
+    if (!matchedPeerIds.has(peerId)) continue;
+
     const c = countUnreadForRoom(room, me);
-    if (c > 0) byPeer[peerId] = c;
+
+    if (c > 0) {
+      byPeer[peerId] = c;
+    }
+
     total += c;
   }
 
@@ -1837,8 +2014,29 @@ router.post("/chat/mark-read", authMiddleware, async (req, res) => {
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const rid = buildRoomId(me, peerId);
-    const ridLegacy = legacyRoomId(me, peerId);
+    const cleanPeerId = String(peerId || "").trim();
+
+    const [peer, matched] = await Promise.all([
+      findActiveChatUser(cleanPeerId),
+      isChatMatchActive(me, cleanPeerId),
+    ]);
+
+    if (!peer) {
+      return res.status(404).json({
+        error: "user_not_found",
+        message: "This user is no longer available.",
+      });
+    }
+
+    if (!matched) {
+      return res.status(409).json({
+        error: "not_matched",
+        message: "This conversation is no longer available.",
+      });
+    }
+
+    const rid = buildRoomId(me, cleanPeerId);
+    const ridLegacy = legacyRoomId(me, cleanPeerId);
 
     const room =
       (await ChatRoom.findOne({ roomId: rid })) ||
@@ -1915,7 +2113,10 @@ router.post("/chat/rooms/:roomId/reply-suggestions", authMiddleware, async (req,
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const room = await getRoomDoc(roomId);
+    const activeRoom = await getExistingActiveRoom(req, res, roomId);
+    if (!activeRoom) return;
+
+    const room = activeRoom.room;
     const participants = (room?.participants || []).map((x) => String(x));
 
     if (!participants.includes(me)) {
@@ -1952,7 +2153,10 @@ router.patch("/chat/rooms/:roomId/prefs", authMiddleware, async (req, res) => {
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const room = await getRoomDoc(roomId);
+    const activeRoom = await getExistingActiveRoom(req, res, roomId);
+    if (!activeRoom) return;
+
+    const room = activeRoom.room;
 
     const participants = (room.participants || []).map((x) => String(x));
     if (!participants.includes(me)) {
@@ -2010,7 +2214,10 @@ router.post("/chat/rooms/:roomId/unmatch", authMiddleware, async (req, res) => {
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const room = await getRoomDoc(roomId);
+    const activeRoom = await getExistingActiveRoom(req, res, roomId);
+    if (!activeRoom) return;
+
+    const room = activeRoom.room;
 
     const participants = (room.participants || []).map((x) => String(x));
     if (!participants.includes(me)) {
@@ -2020,9 +2227,13 @@ router.post("/chat/rooms/:roomId/unmatch", authMiddleware, async (req, res) => {
     const peerId = participants.find((x) => String(x) !== me);
     if (!peerId) return res.status(400).json({ error: "peer_not_found" });
 
-    // ✅ Use match/unmatch logic: remove match relationship immediately.
+    // ✅ Remove both current and legacy match document shapes.
     await Match.deleteMany({
-      users: { $all: [me, peerId] },
+      $or: [
+        { users: { $all: [me, peerId] } },
+        { user1: me, user2: peerId },
+        { user1: peerId, user2: me },
+      ],
     });
 
     // ✅ Hide conversation from current user.

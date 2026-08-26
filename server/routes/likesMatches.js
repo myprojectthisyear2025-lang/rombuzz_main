@@ -100,11 +100,24 @@ async function findUserByAnyId(userId) {
   const raw = String(userId || "").trim();
   if (!raw) return null;
 
-  let user = await User.findOne({ id: raw }).lean();
+  const activeUserQuery = {
+    visibility: { $ne: "pending_delete" },
+    deleteStatus: { $ne: "pending_delete" },
+  };
+
+  let user = await User.findOne({
+    id: raw,
+    ...activeUserQuery,
+  }).lean();
+
   if (user) return user;
 
   if (mongoose.Types.ObjectId.isValid(raw)) {
-    user = await User.findById(raw).lean();
+    user = await User.findOne({
+      _id: raw,
+      ...activeUserQuery,
+    }).lean();
+
     if (user) return user;
   }
 
@@ -449,6 +462,11 @@ router.post("/buzz", authMiddleware, async (req, res) => {
   buzzLocks.add(pairKey);
 
   try {
+    const targetUser = await findUserByAnyId(to);
+    if (!targetUser) {
+      return res.status(404).json({ error: "target_not_found" });
+    }
+
     // Ensure match
     const matched = await Match.findOne({ users: { $all: [fromId, to] } });
     if (!matched) return res.status(409).json({ error: "not_matched" });
@@ -530,6 +548,11 @@ router.post("/premium-buzz/send", authMiddleware, async (req, res) => {
   buzzLocks.add(lockKey);
 
   try {
+    const targetUser = await findUserByAnyId(toId);
+    if (!targetUser) {
+      return res.status(404).json({ error: "target_not_found" });
+    }
+
     const matched = await Match.findOne({ users: { $all: [fromId, toId] } });
     if (!matched) return res.status(409).json({ error: "not_matched" });
 
@@ -766,7 +789,11 @@ router.get("/matches", authMiddleware, async (req, res) => {
       .filter(Boolean)
       .map(String);
 
-    const users = await User.find({ id: { $in: ids } }).lean();
+    const users = await User.find({
+      id: { $in: ids },
+      visibility: { $ne: "pending_delete" },
+      deleteStatus: { $ne: "pending_delete" },
+    }).lean();
 
         const result = await Promise.all(
       users.map(async (u) => {
@@ -893,27 +920,71 @@ router.get("/social-stats", authMiddleware, async (req, res) => {
   try {
     const userId = String(req.user.id || "");
 
-    const [likedCount, likedYouCount, matchCount, me] = await Promise.all([
-      Relationship.countDocuments({
+    const [likedIds, likedYouIds, matchDocs, me] = await Promise.all([
+      Relationship.distinct("to", {
         from: userId,
         type: "like",
       }),
 
-      Relationship.countDocuments({
+      Relationship.distinct("from", {
         to: userId,
         type: "like",
       }),
 
-      Match.countDocuments({
+      Match.find({
         $or: [
           { users: userId },
           { users: { $in: [userId] } },
           { status: "matched", user1: userId },
           { status: "matched", user2: userId },
         ],
-      }),
+      })
+        .select("users user1 user2")
+        .lean(),
 
       User.findOne({ id: userId }).select("profileViews").lean(),
+    ]);
+
+    const matchIds = matchDocs
+      .map((match) => {
+        if (Array.isArray(match.users)) {
+          return (
+            match.users
+              .map(String)
+              .find((id) => id !== userId) || ""
+          );
+        }
+
+        const user1 = String(match.user1 || "");
+        const user2 = String(match.user2 || "");
+
+        if (user1 === userId) return user2;
+        if (user2 === userId) return user1;
+
+        return "";
+      })
+      .filter(Boolean);
+
+    const activeUserFilter = {
+      visibility: { $ne: "pending_delete" },
+      deleteStatus: { $ne: "pending_delete" },
+    };
+
+    const [likedCount, likedYouCount, matchCount] = await Promise.all([
+      User.countDocuments({
+        id: { $in: [...new Set(likedIds.map(String))] },
+        ...activeUserFilter,
+      }),
+
+      User.countDocuments({
+        id: { $in: [...new Set(likedYouIds.map(String))] },
+        ...activeUserFilter,
+      }),
+
+      User.countDocuments({
+        id: { $in: [...new Set(matchIds.map(String))] },
+        ...activeUserFilter,
+      }),
     ]);
 
     const viewsToday = Number(me?.profileViews?.today || 0);
@@ -997,7 +1068,11 @@ router.get("/social/:type", authMiddleware, async (req, res) => {
       return res.json([]);
     }
 
-    const users = await User.find({ id: { $in: uniqueIds } })
+    const users = await User.find({
+      id: { $in: uniqueIds },
+      visibility: { $ne: "pending_delete" },
+      deleteStatus: { $ne: "pending_delete" },
+    })
       .select("id firstName lastName avatar bio gender city country dob isVerified verified")
       .lean();
 

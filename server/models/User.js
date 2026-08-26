@@ -83,12 +83,24 @@ const userSchema = new mongoose.Schema(
     likes: { type: String, default: "" },
     dislikes: { type: String, default: "" },
     favorites: { type: [String], default: [] },
-    avatar: { type: String, default: "" },
+       avatar: { type: String, default: "" },
     photos: { type: [String], default: [] },
     media: { type: [Object], default: [] },
     visibilityMode: { type: String, default: "full" },
     fieldVisibility: { type: Object, default: {} },
     visibility: { type: String, default: "active" },
+
+    // Account lifecycle / irreversible deletion hold metadata.
+    deleteStatus: {
+      type: String,
+      enum: ["active", "pending_delete"],
+      default: "active",
+    },
+    deleteRequestedAt: { type: Date, default: null },
+    deleteAfter: { type: Date, default: null },
+    originalEmail: { type: String, default: "" },
+    deactivatedAt: { type: Date, default: null },
+
     preferences: { type: Object, default: {} },
     settings: { type: Object, default: {} },
     pushTokens: { type: [pushTokenSchema], default: [] },

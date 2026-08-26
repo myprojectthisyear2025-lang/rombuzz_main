@@ -137,35 +137,63 @@ router.get("/feed", authMiddleware, async (req, res) => {
 
     if (!myMatches.length) return res.json({ users: [] });
 
-    // fetch active stories from mongo
+    // 🚫 Deleted / pending-delete users must never appear in Stories.
+    const owners = await User.find({
+      id: { $in: myMatches },
+      visibility: { $ne: "pending_delete" },
+      deleteStatus: { $ne: "pending_delete" },
+    }).lean();
+
+    if (!owners.length) return res.json({ users: [] });
+
+    const ownersMap = new Map(
+      owners.map((user) => [
+        String(user.id),
+        baseSanitizeUser(user),
+      ])
+    );
+
+    const activeOwnerIds = [...ownersMap.keys()];
+
+    // Only load stories belonging to users who still actively exist.
     const stories = await StoryModel.find(
-      onlyActiveQuery({ userId: { $in: myMatches } })
+      onlyActiveQuery({
+        userId: { $in: activeOwnerIds },
+      })
     )
       .sort({ createdAt: 1 })
       .lean();
 
     if (!stories.length) return res.json({ users: [] });
 
-    // fetch owners for user cards
-    const owners = await User.find({ id: { $in: myMatches } }).lean();
-    const ownersMap = new Map(owners.map((u) => [u.id, baseSanitizeUser(u)]));
-
-    // group by userId
+    // group by active owner only
     const grouped = new Map();
-    for (const s of stories) {
-      if (!grouped.has(s.userId)) grouped.set(s.userId, []);
-      grouped.get(s.userId).push(s);
+
+    for (const story of stories) {
+      const ownerId = String(story.userId || "");
+
+      if (!ownersMap.has(ownerId)) continue;
+
+      if (!grouped.has(ownerId)) {
+        grouped.set(ownerId, []);
+      }
+
+      grouped.get(ownerId).push(story);
     }
 
-    // build response list
+    // Never create a fallback identity for a missing/deleted owner.
     const users = Array.from(grouped.entries()).map(([userId, list]) => ({
-      user: ownersMap.get(userId) || { id: userId, firstName: "", lastName: "", avatar: "" },
+      user: ownersMap.get(userId),
       stories: list,
       latestCreatedAt: list[list.length - 1]?.createdAt || 0,
     }));
 
     // show newest story owners first (like IG)
-    users.sort((a, b) => new Date(b.latestCreatedAt).getTime() - new Date(a.latestCreatedAt).getTime());
+    users.sort(
+      (a, b) =>
+        new Date(b.latestCreatedAt).getTime() -
+        new Date(a.latestCreatedAt).getTime()
+    );
 
     return res.json({ users });
   } catch (err) {
@@ -181,18 +209,61 @@ router.get("/feed", authMiddleware, async (req, res) => {
 router.post("/:id/view", authMiddleware, async (req, res) => {
   try {
     const storyId = req.params.id;
-    const myId = req.user.id;
+    const myId = String(req.user.id);
 
-    const story = await StoryModel.findOne(onlyActiveQuery({ id: storyId }));
-    if (!story) return res.status(404).json({ error: "Story not found" });
+    const story = await StoryModel.findOne(
+      onlyActiveQuery({ id: storyId })
+    );
 
-    if (!Array.isArray(story.views)) story.views = [];
+    if (!story) {
+      return res.status(404).json({ error: "Story not found" });
+    }
+
+    const ownerId = String(story.userId || "");
+
+    // 🚫 Story owner must still be an active RomBuzz account.
+    const owner = await User.findOne({
+      id: ownerId,
+      visibility: { $ne: "pending_delete" },
+      deleteStatus: { $ne: "pending_delete" },
+    })
+      .select("id")
+      .lean();
+
+    if (!owner) {
+      return res.status(404).json({ error: "Story not found" });
+    }
+
+    // Owner may view their own story.
+    // Everyone else must still be matched with the owner.
+    if (ownerId !== myId) {
+      await db.read();
+
+      const stillMatched = (db.data.matches || []).some(
+        (match) =>
+          Array.isArray(match.users) &&
+          match.users.includes(myId) &&
+          match.users.includes(ownerId)
+      );
+
+      if (!stillMatched) {
+        return res.status(403).json({ error: "forbidden" });
+      }
+    }
+
+    if (!Array.isArray(story.views)) {
+      story.views = [];
+    }
+
     if (!story.views.includes(myId)) {
       story.views.push(myId);
       await story.save();
     }
 
-    return res.json({ success: true, views: story.views.length });
+    return res.json({
+      success: true,
+      views: story.views.length,
+    });
   } catch (err) {
     console.error("❌ POST /api/stories/:id/view error:", err);
     return res.status(500).json({ error: "Failed to mark viewed" });

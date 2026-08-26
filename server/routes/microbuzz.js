@@ -313,9 +313,13 @@ router.get("/nearby", authMiddleware, async (req, res) => {
       return res.json({ users: [] });
     }
 
-    // 🔎 Load user profiles for these presences (to get gender + dob)
+    // 🔎 Load only profiles that are still visible/active in the product.
     const candidateIds = [...new Set(allActive.map((u) => u.userId))];
-    const candidateUsers = await User.find({ id: { $in: candidateIds } })
+    const candidateUsers = await User.find({
+      id: { $in: candidateIds },
+      visibility: { $ne: "pending_delete" },
+      deleteStatus: { $ne: "pending_delete" },
+    })
       .select("id gender dob")
       .lean();
 
@@ -338,15 +342,16 @@ router.get("/nearby", authMiddleware, async (req, res) => {
           _user: u || null, // attach for filtering only
         };
       })
-      // 1) Distance cap: MicroBuzz hard-locked to ~0–100m in prod
+      // 1) Drop orphaned / pending-delete presences before any user-facing filtering.
+      .filter((item) => Boolean(item._user))
+      // 2) Distance cap: MicroBuzz hard-locked to ~0–100m in prod
       .filter((item) => {
         if (process.env.NODE_ENV !== "production") return true;
         return item.distanceMeters <= radiusKm * 1000;
       })
-      // 2) Gender preference filter
+      // 3) Gender preference filter
       .filter((item) => {
         const u = item._user;
-        if (!u) return true; // no profile -> keep (we just don't know)
         if (!prefGender || prefGender === "everyone") return true;
 
         const g = (u.gender || "").toLowerCase();
@@ -427,6 +432,19 @@ const { toId, confirm } = req.body || {};
 const fromId = req.user.id;
 
 if (!toId) return res.status(400).json({ error: "toId required" });
+
+// 🚫 Never allow stale MicroBuzz actions against a deleted account.
+const targetUser = await User.findOne({
+  id: toId,
+  visibility: { $ne: "pending_delete" },
+  deleteStatus: { $ne: "pending_delete" },
+})
+  .select("id")
+  .lean();
+
+if (!targetUser) {
+  return res.status(404).json({ error: "User not found" });
+}
 
 // 🚫 Ignore check (permanent MicroBuzz ignore)
 const ignored = await MicroBuzzIgnore.findOne({

@@ -1,40 +1,36 @@
 /**
  * ============================================================
- * 📁 File: routes/account.js
- * 🧩 Purpose: Manage account lifecycle and verification actions.
+ * 📁 File: server/routes/account.js
+ * 🎯 Purpose: Manage RomBuzz account lifecycle and verification.
  *
  * Endpoints:
- *   PATCH  /api/account/deactivate           → Soft deactivate current user
- *   DELETE /api/account/delete               → Permanently delete account
- *   POST   /api/account/request-email-change → Send verification code to new email
- *   POST   /api/account/confirm-email-change → Confirm code & update email
+ *   PATCH  /api/account/deactivate
+ *   GET    /api/account/delete-preview
+ *   DELETE /api/account/delete
+ *   POST   /api/account/request-email-change
+ *   POST   /api/account/confirm-email-change
  *
- * 🧠 Features:
- *   - Deactivate or permanently delete accounts
- *   - Cleanly removes all associated data (posts, matches, likes, etc.)
- *   - 2-step secure email change with SendGrid (or dev console)
- *   - Authenticated via JWT (authMiddleware)
- *     
- *     Notes:
- *   - Used by Settings.jsx → “Deactivate” and “Delete Account” actions
- *   - Emits console logs for permanent deletions
- *   - Safe for both Render and local environments
- * ⚙️ Dependencies:
- *   - db.lowdb.js          → Persistent user data
- *   - auth-middleware.js   → JWT token validation
- *   - resend          → Email dispatch
- *   - utils/helpers.js     → baseSanitizeUser()
+ * Responsibilities:
+ *   - Soft-deactivate accounts
+ *   - Start irreversible account deletion through MongoDB services
+ *   - Preview BuzzCoin forfeiture before deletion
+ *   - Handle secure two-step email changes with Resend
  *
+ * Datastore:
+ *   - MongoDB is the source of truth
  * ============================================================
  */
 
 const express = require("express");
-const router = express.Router();
-const db = require("../models/db.lowdb");
-const { Resend } = require("resend");
 const { randomInt } = require("crypto");
+const { Resend } = require("resend");
+
+const router = express.Router();
+
+const User = require("../models/User");
 const authMiddleware = require("./auth-middleware");
 const { baseSanitizeUser } = require("../utils/helpers");
+
 const {
   getDeleteAccountPreview,
   startAccountDeletion,
@@ -48,11 +44,9 @@ const EMAIL_CHANGE_RESEND_COOLDOWN_MS = 60 * 1000;
 const EMAIL_CHANGE_MAX_ATTEMPTS = 5;
 
 /* ============================================================
-   🔒 PATCH /api/account/deactivate  (MongoDB version)
-   ------------------------------------------------------------
-   Soft-deactivates the current user account by toggling visibility.
+   🔒 PATCH /api/account/deactivate
+   Soft-deactivate the authenticated user's account.
 ============================================================ */
-const User = require("../models/User"); // 🧩 add near the top if missing
 
 router.patch("/deactivate", authMiddleware, async (req, res) => {
   try {
@@ -67,243 +61,440 @@ router.patch("/deactivate", authMiddleware, async (req, res) => {
       { new: true }
     ).lean();
 
-    if (!updatedUser)
-      return res.status(404).json({ error: "User not found" });
+    if (!updatedUser) {
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
 
-    res.json({
+    return res.json({
       success: true,
       message: "Account deactivated",
       user: baseSanitizeUser(updatedUser),
     });
   } catch (err) {
-    console.error("❌ Error deactivating account:", err);
-    res.status(500).json({ error: "Failed to deactivate account" });
+    console.error(
+      "❌ Error deactivating account:",
+      err
+    );
+
+    return res.status(500).json({
+      error: "Failed to deactivate account",
+    });
   }
 });
-
 
 /* ============================================================
    🧾 GET /api/account/delete-preview
-   ------------------------------------------------------------
-   Returns wallet/forfeiture info before account deletion.
+   Return wallet/forfeiture information before deletion.
 ============================================================ */
-router.get("/delete-preview", authMiddleware, async (req, res) => {
-  try {
-    const preview = await getDeleteAccountPreview(req.user?.id);
-    return res.json({
-      success: true,
-      ...preview,
-    });
-  } catch (err) {
-    console.error("❌ delete-preview error:", err);
 
-    return res.status(err.statusCode || 500).json({
-      error: err.code || "DELETE_PREVIEW_FAILED",
-      message: err.message || "Failed to preview account deletion.",
-    });
+router.get(
+  "/delete-preview",
+  authMiddleware,
+  async (req, res) => {
+    try {
+      const preview =
+        await getDeleteAccountPreview(
+          req.user?.id
+        );
+
+      return res.json({
+        success: true,
+        ...preview,
+      });
+    } catch (err) {
+      console.error(
+        "❌ delete-preview error:",
+        err
+      );
+
+      return res
+        .status(err.statusCode || 500)
+        .json({
+          error:
+            err.code ||
+            "DELETE_PREVIEW_FAILED",
+
+          message:
+            err.message ||
+            "Failed to preview account deletion.",
+        });
+    }
   }
-});
+);
 
 /* ============================================================
    🗑️ DELETE /api/account/delete
-   ------------------------------------------------------------
-   Starts irreversible deletion:
-   - user disappears immediately
-   - email is held for 7 days
-   - expired hold record is wiped by cleanup job
-============================================================ */
-router.delete("/delete", authMiddleware, async (req, res) => {
-  try {
-    const uid = req.user?.id;
-    if (!uid) {
-      return res.status(401).json({ error: "Unauthorized: missing user ID" });
-    }
+   Start irreversible account deletion.
 
-    const confirmForfeit =
-      req.body?.confirmForfeit === true ||
-      req.body?.confirmForfeit === "true";
-
-    const result = await startAccountDeletion(uid, {
-      confirmForfeit,
-    });
-
-    return res.json(result);
-  } catch (err) {
-    console.error("❌ Error starting account deletion:", err);
-
-    if (err?.code === "BUZZCOIN_FORFEIT_CONFIRMATION_REQUIRED") {
-      return res.status(409).json({
-        error: err.code,
-        code: err.code,
-        message:
-          "You still have BuzzCoins or Creator balance. Confirm forfeiture before deleting your account.",
-        wallet: err.wallet,
-        holdDays: err.holdDays,
-      });
-    }
-
-    return res.status(err.statusCode || 500).json({
-      error: err.code || "DELETE_ACCOUNT_FAILED",
-      message: err.message || "Server error deleting account",
-    });
-  }
-});
-
-
-/* ============================================================
-   📬 POST /api/account/request-email-change  (MongoDB version)
-   ------------------------------------------------------------
-   Step 1: Send verification code to new email (10 min expiry)
+   - User disappears from normal RomBuzz surfaces immediately
+   - Email enters the configured 7-day hold
+   - Cleanup retries run while the account is pending deletion
+   - Final pending-delete User record is wiped after the hold
 ============================================================ */
 
-router.post("/request-email-change", authMiddleware, async (req, res) => {
-  try {
-    const { newEmail } = req.body || {};
-    if (!newEmail) return res.status(400).json({ error: "newEmail is required" });
+router.delete(
+  "/delete",
+  authMiddleware,
+  async (req, res) => {
+    try {
+      const uid = req.user?.id;
 
-    const emailLower = newEmail.toLowerCase();
-
-    // 🚫 Prevent duplicate email usage
-    const exists = await User.exists({ email: emailLower });
-    if (exists) return res.status(409).json({ error: "Email already in use" });
-
-    const user = await User.findOne({ id: req.user.id });
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const now = new Date();
-    const lastSentAt = user.pendingEmailChange?.lastSentAt;
-
-    if (lastSentAt) {
-      const elapsedMs =
-        now.getTime() - new Date(lastSentAt).getTime();
-
-      if (elapsedMs < EMAIL_CHANGE_RESEND_COOLDOWN_MS) {
-        return res.status(429).json({
+      if (!uid) {
+        return res.status(401).json({
           error:
-            "Please wait before requesting another email-change code.",
-          retryAfter: Math.ceil(
-            (EMAIL_CHANGE_RESEND_COOLDOWN_MS - elapsedMs) / 1000
-          ),
+            "Unauthorized: missing user ID",
         });
       }
-    }
 
-    // 🔢 Generate cryptographically secure 6-digit verification code
-    const code = randomInt(100000, 1000000).toString();
-    const expires = now.getTime() + 10 * 60 * 1000; // 10 minutes
+      const confirmForfeit =
+        req.body?.confirmForfeit === true ||
+        req.body?.confirmForfeit ===
+          "true";
 
-    user.pendingEmailChange = {
-      email: emailLower,
-      code,
-      expires,
-      attempts: 0,
-      lastSentAt: now,
-    };
-    await user.save();
+      const result =
+        await startAccountDeletion(
+          uid,
+          {
+            confirmForfeit,
+          }
+        );
 
-    // ✉️ Send via Resend or log in dev
-    if (!resend) {
-      if (process.env.NODE_ENV === "production") {
-        console.error("❌ RESEND_API_KEY missing in production");
-        return res.status(503).json({ error: "Email service unavailable" });
+      return res.json(result);
+    } catch (err) {
+      console.error(
+        "❌ Error starting account deletion:",
+        err
+      );
+
+      if (
+        err?.code ===
+        "BUZZCOIN_FORFEIT_CONFIRMATION_REQUIRED"
+      ) {
+        return res.status(409).json({
+          error: err.code,
+          code: err.code,
+
+          message:
+            "You still have BuzzCoins or Creator balance. Confirm forfeiture before deleting your account.",
+
+          wallet: err.wallet,
+          holdDays: err.holdDays,
+        });
       }
 
-      console.log(`📧 [DEV] Email-change code for ${emailLower}: ${code}`);
-      return res.json({ success: true, dev: true });
+      return res
+        .status(err.statusCode || 500)
+        .json({
+          error:
+            err.code ||
+            "DELETE_ACCOUNT_FAILED",
+
+          message:
+            err.message ||
+            "Server error deleting account",
+        });
     }
-
-    await resend.emails.send({
-      to: emailLower,
-      from: process.env.FROM_EMAIL || "RomBuzz <onboarding@resend.dev>",
-      subject: "Confirm your new email",
-      text: `Your verification code is ${code}. It expires in 10 minutes.`,
-      html: `<p>Your verification code is <strong>${code}</strong>. It expires in 10 minutes.</p>`,
-    });
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("❌ request-email-change error:", err);
-    res.status(500).json({ error: "Failed to send verification email" });
   }
-});
-
+);
 
 /* ============================================================
-   ✅ POST /api/account/confirm-email-change (MongoDB version)
-   ------------------------------------------------------------
-   Step 2: Confirm the code and update the user’s email.
+   📬 POST /api/account/request-email-change
+   Send a verification code to a new email address.
 ============================================================ */
 
+router.post(
+  "/request-email-change",
+  authMiddleware,
+  async (req, res) => {
+    try {
+      const { newEmail } =
+        req.body || {};
 
-router.post("/confirm-email-change", authMiddleware, async (req, res) => {
-  try {
-    const { code } = req.body || {};
-    if (!code) return res.status(400).json({ error: "code required" });
+      if (!newEmail) {
+        return res.status(400).json({
+          error:
+            "newEmail is required",
+        });
+      }
 
-    // 1️⃣ Find user
-    const user = await User.findOne({ id: req.user.id });
-    if (!user) return res.status(404).json({ error: "User not found" });
+      const emailLower = String(
+        newEmail
+      )
+        .trim()
+        .toLowerCase();
 
-    const pending = user.pendingEmailChange;
-    if (!pending)
-      return res.status(400).json({ error: "No email change pending" });
-
-    // 2️⃣ Expiration check
-    if (pending.expires < Date.now()) {
-      user.pendingEmailChange = null;
-      await user.save();
-      return res.status(400).json({ error: "Verification code expired" });
-    }
-
-    if (Number(pending.attempts || 0) >= EMAIL_CHANGE_MAX_ATTEMPTS) {
-      return res.status(400).json({
-        error:
-          "Too many incorrect attempts. Please request a new verification code.",
+      const exists = await User.exists({
+        email: emailLower,
       });
-    }
 
-    // 3️⃣ Invalid code check
-    if (pending.code !== code) {
-      const attempts = Number(pending.attempts || 0) + 1;
+      if (exists) {
+        return res.status(409).json({
+          error:
+            "Email already in use",
+        });
+      }
+
+      const user =
+        await User.findOne({
+          id: req.user.id,
+        });
+
+      if (!user) {
+        return res.status(404).json({
+          error: "User not found",
+        });
+      }
+
+      const now = new Date();
+
+      const lastSentAt =
+        user.pendingEmailChange
+          ?.lastSentAt;
+
+      if (lastSentAt) {
+        const elapsedMs =
+          now.getTime() -
+          new Date(
+            lastSentAt
+          ).getTime();
+
+        if (
+          elapsedMs <
+          EMAIL_CHANGE_RESEND_COOLDOWN_MS
+        ) {
+          return res
+            .status(429)
+            .json({
+              error:
+                "Please wait before requesting another email-change code.",
+
+              retryAfter: Math.ceil(
+                (
+                  EMAIL_CHANGE_RESEND_COOLDOWN_MS -
+                  elapsedMs
+                ) / 1000
+              ),
+            });
+        }
+      }
+
+      const code = randomInt(
+        100000,
+        1000000
+      ).toString();
+
+      const expires =
+        now.getTime() +
+        10 * 60 * 1000;
 
       user.pendingEmailChange = {
-        ...pending,
-        attempts,
+        email: emailLower,
+        code,
+        expires,
+        attempts: 0,
+        lastSentAt: now,
       };
-      user.markModified("pendingEmailChange");
+
       await user.save();
 
-      if (attempts >= EMAIL_CHANGE_MAX_ATTEMPTS) {
+      if (!resend) {
+        if (
+          process.env.NODE_ENV ===
+          "production"
+        ) {
+          console.error(
+            "❌ RESEND_API_KEY missing in production"
+          );
+
+          return res
+            .status(503)
+            .json({
+              error:
+                "Email service unavailable",
+            });
+        }
+
+        console.log(
+          `📧 [DEV] Email-change code for ${emailLower}: ${code}`
+        );
+
+        return res.json({
+          success: true,
+          dev: true,
+        });
+      }
+
+      await resend.emails.send({
+        to: emailLower,
+
+        from:
+          process.env.FROM_EMAIL ||
+          "RomBuzz <onboarding@resend.dev>",
+
+        subject:
+          "Confirm your new email",
+
+        text:
+          `Your verification code is ${code}. ` +
+          "It expires in 10 minutes.",
+
+        html:
+          `<p>Your verification code is ` +
+          `<strong>${code}</strong>. ` +
+          `It expires in 10 minutes.</p>`,
+      });
+
+      return res.json({
+        success: true,
+      });
+    } catch (err) {
+      console.error(
+        "❌ request-email-change error:",
+        err
+      );
+
+      return res.status(500).json({
+        error:
+          "Failed to send verification email",
+      });
+    }
+  }
+);
+
+/* ============================================================
+   ✅ POST /api/account/confirm-email-change
+   Verify the code and apply the new email.
+============================================================ */
+
+router.post(
+  "/confirm-email-change",
+  authMiddleware,
+  async (req, res) => {
+    try {
+      const { code } =
+        req.body || {};
+
+      if (!code) {
+        return res.status(400).json({
+          error: "code required",
+        });
+      }
+
+      const user =
+        await User.findOne({
+          id: req.user.id,
+        });
+
+      if (!user) {
+        return res.status(404).json({
+          error: "User not found",
+        });
+      }
+
+      const pending =
+        user.pendingEmailChange;
+
+      if (!pending) {
+        return res.status(400).json({
+          error:
+            "No email change pending",
+        });
+      }
+
+      if (
+        pending.expires <
+        Date.now()
+      ) {
+        user.pendingEmailChange =
+          null;
+
+        await user.save();
+
+        return res.status(400).json({
+          error:
+            "Verification code expired",
+        });
+      }
+
+      if (
+        Number(
+          pending.attempts || 0
+        ) >=
+        EMAIL_CHANGE_MAX_ATTEMPTS
+      ) {
         return res.status(400).json({
           error:
             "Too many incorrect attempts. Please request a new verification code.",
         });
       }
 
-      return res.status(400).json({ error: "Invalid code" });
+      if (
+        String(pending.code) !==
+        String(code)
+      ) {
+        const attempts =
+          Number(
+            pending.attempts || 0
+          ) + 1;
+
+        user.pendingEmailChange = {
+          ...pending,
+          attempts,
+        };
+
+        user.markModified(
+          "pendingEmailChange"
+        );
+
+        await user.save();
+
+        if (
+          attempts >=
+          EMAIL_CHANGE_MAX_ATTEMPTS
+        ) {
+          return res
+            .status(400)
+            .json({
+              error:
+                "Too many incorrect attempts. Please request a new verification code.",
+            });
+        }
+
+        return res.status(400).json({
+          error: "Invalid code",
+        });
+      }
+
+      user.email =
+        pending.email;
+
+      user.pendingEmailChange =
+        null;
+
+      await user.save();
+
+      console.log(
+        `📧 Email updated successfully for user ${user.id}`
+      );
+
+      return res.json({
+        success: true,
+        email: user.email,
+      });
+    } catch (err) {
+      console.error(
+        "❌ confirm-email-change error:",
+        err
+      );
+
+      return res.status(500).json({
+        error:
+          "Failed to confirm email change",
+      });
     }
-
-    // 4️⃣ Apply new email
-    user.email = pending.email;
-    user.pendingEmailChange = null;
-    await user.save();
-
-    console.log(`📧 Email updated successfully for user ${user.id}`);
-
-    res.json({ success: true, email: user.email });
-  } catch (err) {
-    console.error("❌ confirm-email-change (Mongo) error:", err);
-    res.status(500).json({ error: "Failed to confirm email change" });
   }
-});
-
+);
 
 module.exports = router;
-
-
-
-
-
-
-
-

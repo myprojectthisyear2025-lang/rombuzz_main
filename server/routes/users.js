@@ -49,6 +49,7 @@ const Relationship = require("../models/Relationship"); // for likes/blocks
 const Match = require("../models/Match");
 const { onlineUsers } = require("../models/state");
 const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
+const { requireAdultDob } = require("../utils/ageGate");
 
 function normalizeMediaString(value = "") {
   return String(value || "").trim();
@@ -716,7 +717,11 @@ router.post("/:id/view", authMiddleware, async (req, res) => {
 
     const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
-    const target = await User.findOne({ id: targetId });
+    const target = await User.findOne({
+      id: targetId,
+      visibility: { $ne: "pending_delete" },
+      deleteStatus: { $ne: "pending_delete" },
+    });
     if (!target)
       return res.status(404).json({ error: "User not found" });
 
@@ -973,6 +978,11 @@ router.put("/me", authMiddleware, async (req, res) => {
       if (req.body[k] !== undefined) updates[k] = req.body[k];
     }
 
+    if (updates.dob !== undefined) {
+      const { dob: verifiedDob } = requireAdultDob(updates.dob);
+      updates.dob = verifiedDob;
+    }
+
     if (updates.likes !== undefined) {
       updates.likes = toCsvString(updates.likes);
     }
@@ -998,6 +1008,13 @@ router.put("/me", authMiddleware, async (req, res) => {
     const signedUser = await signR2UserMedia(user);
     res.json({ user: baseSanitizeUser(signedUser) });
   } catch (err) {
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({
+        error: err.message,
+        code: err.code || "PROFILE_UPDATE_REJECTED",
+      });
+    }
+
     console.error("❌ PUT /users/me error:", err);
     res.status(500).json({ error: "Failed to update profile" });
   }
@@ -1039,7 +1056,11 @@ router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const [viewer, user] = await Promise.all([
       User.findOne({ id: req.user.id }).lean(),
-      User.findOne({ id: req.params.id }).lean(),
+      User.findOne({
+        id: req.params.id,
+        visibility: { $ne: "pending_delete" },
+        deleteStatus: { $ne: "pending_delete" },
+      }).lean(),
     ]);
 
       if (!viewer) return res.status(404).json({ error: "Viewer not found" });

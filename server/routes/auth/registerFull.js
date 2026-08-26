@@ -11,6 +11,7 @@
  *
  * RESPONSIBILITIES:
  *   - Preserve the existing /register-full request flow.
+ *   - Enforce server-side RomBuzz 18+ DOB requirements.
  *   - Delegate unchanged persistence behavior to focused helpers.
  *   - Validate Apple signup proof only for Apple onboarding.
  * ============================================================
@@ -19,130 +20,185 @@
 const express = require("express");
 const router = express.Router();
 
-const User = require("../../models/User");
-const {
-  isPendingDeleteUser,
-} = require("../../services/accountDeletionService");
+const User =
+  require("../../models/User");
 
 const {
-  getTrustedSignupIdentity,
+  isPendingDeleteUser,
+} = require(
+  "../../services/accountDeletionService"
+);
+
+const {
+  requireAdultDob,
+} = require(
+  "../../utils/ageGate"
+);
+
+const {
+  getTrustedAppleId,
   sanitizeSignupPhotos,
   sendPendingDeleteSignupResponse,
-} = require("./registerFullHelpers");
+} = require(
+  "./registerFullHelpers"
+);
 
 const {
   completeExistingUser,
   createNewUser,
-} = require("./registerFullPersistence");
+} = require(
+  "./registerFullPersistence"
+);
 
-router.post("/register-full", async (req, res) => {
-  try {
-    const {
-      email,
-      firstName,
-      lastName,
-      password,
-      gender,
-      dob,
-      lookingFor,
-      interestedIn,
+router.post(
+  "/register-full",
+  async (req, res) => {
+    try {
+      const {
+        email,
+        firstName,
+        lastName,
+        password,
+        gender,
+        dob,
+        lookingFor,
+        interestedIn,
 
-      city,
-      height,
+        city,
+        height,
 
-      likes,
-      dislikes,
+        likes,
+        dislikes,
 
-      preferences,
-      visibilityMode,
-      interests,
-      avatar,
-      photos,
-      phone,
-      voiceUrl,
-      voiceDurationSec,
-    } = req.body || {};
-
-    if (!email || !firstName || !lastName) {
-      return res.status(400).json({
-        error: "Missing required fields.",
-      });
-    }
-
-    const emailLower = String(email || "")
-      .trim()
-      .toLowerCase();
-
-    const signupPhotos =
-      sanitizeSignupPhotos(photos);
-
-    const signupIdentity =
-      getTrustedSignupIdentity(
-        req.body || {},
-        emailLower
-      );
-
-    const {
-      provider: authProvider,
-      appleId,
-      googleId,
-    } = signupIdentity;
-
-    let user = await User.findOne({
-      email: emailLower,
-    });
-
-    if (
-      user &&
-      isPendingDeleteUser(user)
-    ) {
-      return sendPendingDeleteSignupResponse(
-        res,
-        user
-      );
-    }
-
-    // Email OTP signup already owns a temporary Mongo user
-    // created by /send-code. Only that verified placeholder
-    // may be completed.
-    if (authProvider === "email") {
-      if (!user) {
-        return res.status(401).json({
-          error:
-            "Email verification record not found. Please verify your email again.",
-        });
-      }
-
-      if (!user.isVerified) {
-        return res.status(401).json({
-          error:
-            "Email verification is required before signup can be completed.",
-        });
-      }
+        preferences,
+        visibilityMode,
+        interests,
+        avatar,
+        photos,
+        phone,
+        voiceUrl,
+        voiceDurationSec,
+      } = req.body || {};
 
       if (
-        user.profileComplete ||
-        user.hasOnboarded ||
-        user.passwordHash
+        !email ||
+        !firstName ||
+        !lastName
       ) {
-        return res.status(409).json({
-          status: "account_exists",
-          error:
-            "An account already exists with this email. Try logging in.",
-        });
+        return res
+          .status(400)
+          .json({
+            error:
+              "Missing required fields.",
+          });
       }
 
-      return completeExistingUser({
+      /*
+       * Never trust the mobile
+       * 18+ check by itself.
+       */
+      const {
+        dob: verifiedDob,
+      } =
+        requireAdultDob(dob);
+
+      const emailLower =
+        String(email || "")
+          .trim()
+          .toLowerCase();
+
+      const signupPhotos =
+        sanitizeSignupPhotos(
+          photos
+        );
+
+      const appleId =
+        getTrustedAppleId(
+          req.body || {},
+          emailLower
+        );
+
+      let user =
+        await User.findOne({
+          email: emailLower,
+        });
+
+      if (
+        user &&
+        isPendingDeleteUser(
+          user
+        )
+      ) {
+        return sendPendingDeleteSignupResponse(
+          res,
+          user
+        );
+      }
+
+      if (user) {
+        if (
+          appleId &&
+          user.appleId &&
+          user.appleId !==
+            appleId
+        ) {
+          return res
+            .status(409)
+            .json({
+              error:
+                "This email is linked to a different Apple account.",
+            });
+        }
+
+        return completeExistingUser(
+          {
+            res,
+            user,
+            signupPhotos,
+            appleId,
+
+            data: {
+              firstName,
+              lastName,
+              password,
+              gender,
+
+              dob:
+                verifiedDob,
+
+              lookingFor,
+              interestedIn,
+              city,
+              height,
+              likes,
+              dislikes,
+              preferences,
+              visibilityMode,
+              interests,
+              avatar,
+              phone,
+              voiceUrl,
+              voiceDurationSec,
+            },
+          }
+        );
+      }
+
+      return createNewUser({
         res,
-        user,
+        emailLower,
         signupPhotos,
         appleId,
+
         data: {
           firstName,
           lastName,
           password,
           gender,
-          dob,
+
+          dob:
+            verifiedDob,
+
           lookingFor,
           interestedIn,
           city,
@@ -158,64 +214,39 @@ router.post("/register-full", async (req, res) => {
           voiceDurationSec,
         },
       });
-    }
+    } catch (err) {
+      console.error(
+        "❌ /register-full hybrid error:",
+        err?.code ||
+          err?.message ||
+          err
+      );
 
-    // Google/Apple signup only issues a ticket after proving that
-    // no account currently exists for that verified identity.
-    if (user) {
-      return res.status(409).json({
-        status: "account_exists",
-        error:
-          "An account already exists with this email. Try logging in.",
-      });
-    }
+      if (
+        err?.statusCode
+      ) {
+        return res
+          .status(
+            err.statusCode
+          )
+          .json({
+            error:
+              err.message,
 
-    return createNewUser({
-      res,
-      emailLower,
-      signupPhotos,
-      appleId,
-      googleId,
-      data: {
-        firstName,
-        lastName,
-        password,
-        gender,
-        dob,
-        lookingFor,
-        interestedIn,
-        city,
-        height,
-        likes,
-        dislikes,
-        preferences,
-        visibilityMode,
-        interests,
-        avatar,
-        phone,
-        voiceUrl,
-        voiceDurationSec,
-      },
-    });
-  } catch (err) {
-    console.error(
-      "❌ /register-full hybrid error:",
-      err
-    );
+            code:
+              err.code ||
+              "REGISTER_FULL_REJECTED",
+          });
+      }
 
-    if (err?.statusCode) {
       return res
-        .status(err.statusCode)
+        .status(500)
         .json({
-          error: err.message,
+          error:
+            "Server error completing profile",
         });
     }
-
-    return res.status(500).json({
-      error:
-        "Server error completing profile",
-    });
   }
-});
+);
 
 module.exports = router;

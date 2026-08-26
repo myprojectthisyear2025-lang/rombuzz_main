@@ -76,6 +76,46 @@ async function signMessageMedia(message = {}, expiresInSeconds = 3600) {
   };
 }
 
+async function findActiveMessageUser(userId) {
+  const id = String(userId || "").trim();
+  if (!id) return null;
+
+  return User.findOne({
+    id,
+    visibility: { $ne: "pending_delete" },
+    deleteStatus: { $ne: "pending_delete" },
+  })
+    .select("id firstName lastName settings pushTokens pushToken")
+    .lean();
+}
+
+async function isMessageMatchActive(userA, userB) {
+  const a = String(userA || "").trim();
+  const b = String(userB || "").trim();
+
+  if (!a || !b || a === b) return false;
+
+  const match = await Match.exists({
+    $or: [
+      { users: { $all: [a, b] } },
+
+      {
+        status: "matched",
+        user1: a,
+        user2: b,
+      },
+
+      {
+        status: "matched",
+        user1: b,
+        user2: a,
+      },
+    ],
+  });
+
+  return !!match;
+}
+
 router.post("/", authMiddleware, async (req, res) => {
   try {
     const { to, text, type, url, ephemeral } = req.body || {};
@@ -92,27 +132,39 @@ router.post("/", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "either text or media url required" });
     }
 
-    if (await isBlocked(from, to)) {
+    const toId = String(to || "").trim();
+    const fromId = String(from || "").trim();
+
+    if (await isBlocked(fromId, toId)) {
       return res.status(403).json({ error: "blocked" });
     }
 
-    const [sender, recipient] = await Promise.all([
-      User.findOne({ id: from })
-        .select("id firstName lastName settings pushTokens pushToken")
-        .lean(),
-      User.findOne({ id: to })
-        .select("id firstName lastName settings pushTokens pushToken")
-        .lean(),
+    const [sender, recipient, matched] = await Promise.all([
+      findActiveMessageUser(fromId),
+      findActiveMessageUser(toId),
+      isMessageMatchActive(fromId, toId),
     ]);
 
-    if (!recipient) return res.status(404).json({ error: "recipient not found" });
+    if (!recipient) {
+      return res.status(404).json({
+        error: "user_not_found",
+        message: "This user is no longer available.",
+      });
+    }
+
+    if (!matched) {
+      return res.status(409).json({
+        error: "not_matched",
+        message: "This conversation is no longer available.",
+      });
+    }
 
     const msgType = type || (url ? "photo" : "text");
     const createdAt = new Date();
     const msg = await Message.create({
       id: shortid.generate(),
-      from,
-      to,
+      from: fromId,
+      to: toId,
       text: text || "",
       type: msgType,
       url: url || null,
@@ -132,13 +184,13 @@ router.post("/", authMiddleware, async (req, res) => {
       type: msgType,
     };
 
-    const receiverSocket = onlineUsers?.[to];
+    const receiverSocket = onlineUsers?.[toId];
     if (receiverSocket) {
       io?.to(receiverSocket).emit("message", signedMsg);
-      io?.to(String(to)).emit("direct:message", livePayload);
+      io?.to(toId).emit("direct:message", livePayload);
     }
 
-      const senderSocket = onlineUsers?.[from];
+      const senderSocket = onlineUsers?.[fromId];
     if (senderSocket) {
       io?.to(senderSocket).emit("message", signedMsg);
     }
@@ -175,13 +227,34 @@ router.get("/", authMiddleware, async (req, res) => {
     if (![user1, user2].includes(self)) {
       return res.status(403).json({ error: "forbidden" });
     }
-    if (await isBlocked(user1, user2)) {
+
+    const peerId =
+      String(user1) === String(self)
+        ? String(user2)
+        : String(user1);
+
+    const [peer, matched, blocked] = await Promise.all([
+      findActiveMessageUser(peerId),
+      isMessageMatchActive(user1, user2),
+      isBlocked(user1, user2),
+    ]);
+
+    if (!peer) {
+      return res.status(404).json({
+        error: "user_not_found",
+        message: "This user is no longer available.",
+      });
+    }
+
+    if (blocked) {
       return res.status(403).json({ error: "blocked" });
     }
 
-    const matched = await Match.exists({ users: { $all: [user1, user2] } });
     if (!matched) {
-      return res.status(403).json({ error: "No match yet" });
+      return res.status(409).json({
+        error: "not_matched",
+        message: "This conversation is no longer available.",
+      });
     }
 
     const convo = await Message.find({
@@ -229,6 +302,8 @@ router.get("/", authMiddleware, async (req, res) => {
 router.post("/viewed", authMiddleware, async (req, res) => {
   try {
     const { messageId } = req.body || {};
+    const me = String(req.user.id);
+
     if (!messageId) {
       return res.status(400).json({ error: "messageId required" });
     }
@@ -238,13 +313,50 @@ router.post("/viewed", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Message not found" });
     }
 
+    // 🚫 Only the actual receiver can mark this message viewed.
+    if (String(msg.to || "") !== me) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    const peerId = String(msg.from || "");
+
+    const [peer, matched, blocked] = await Promise.all([
+      findActiveMessageUser(peerId),
+      isMessageMatchActive(me, peerId),
+      isBlocked(me, peerId),
+    ]);
+
+    if (!peer) {
+      return res.status(404).json({
+        error: "user_not_found",
+        message: "This user is no longer available.",
+      });
+    }
+
+    if (blocked) {
+      return res.status(403).json({ error: "blocked" });
+    }
+
+    if (!matched) {
+      return res.status(409).json({
+        error: "not_matched",
+        message: "This conversation is no longer available.",
+      });
+    }
+
     if (msg.ephemeral === "once") {
       await Message.deleteOne({ id: messageId });
 
       const socketTo = onlineUsers?.[msg.to];
       const socketFrom = onlineUsers?.[msg.from];
-      if (socketTo) io?.to(socketTo).emit("message:removed", { id: messageId });
-      if (socketFrom) io?.to(socketFrom).emit("message:removed", { id: messageId });
+
+      if (socketTo) {
+        io?.to(socketTo).emit("message:removed", { id: messageId });
+      }
+
+      if (socketFrom) {
+        io?.to(socketFrom).emit("message:removed", { id: messageId });
+      }
     }
 
     res.json({ success: true });

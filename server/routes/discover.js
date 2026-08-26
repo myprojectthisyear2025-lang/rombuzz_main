@@ -357,7 +357,8 @@ router.get("/", authMiddleware, async (req, res) => {
     --------------------------- */
       const baseQuery = {
       id: { $nin: excludeIds },
-      visibility: { $ne: "invisible" },
+      visibility: { $nin: ["invisible", "pending_delete"] },
+      deleteStatus: { $ne: "pending_delete" },
       "moderation.restrictions.discover": { $ne: true },
     };
 

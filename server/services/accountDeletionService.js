@@ -22,18 +22,15 @@ const HOLD_DAYS = 7;
 const HOLD_MS = HOLD_DAYS * 24 * 60 * 60 * 1000;
 
 const User = require("../models/User");
-const PostModel = require("../models/PostModel");
-const Notification = require("../models/Notification");
-const Match = require("../models/Match");
-const ChatRoom = require("../models/ChatRoom");
-const Relationship = require("../models/Relationship");
-
-const Message = require("../models/Message");
 const BuzzCoinWallet = require("../models/BuzzCoinWallet");
-const GiftTransaction = require("../models/GiftTransaction");
-const BuzzCoinLedger = require("../models/BuzzCoinLedger");
-const MeetMiddleSession = require("../models/MeetMiddleSession");
-const VideoCallSession = require("../models/VideoCallSession");
+
+const {
+  removeDatabaseUserDataNow,
+} = require("./accountDeletionDatabaseCleanup");
+const {
+  buildStorageRetryManifest,
+  deleteExternalStorageNow,
+} = require("./accountDeletionStorageCleanup");
 
 function normalizeId(value) {
   return String(value || "").trim();
@@ -99,156 +96,147 @@ async function getDeleteAccountPreview(userId) {
   };
 }
 
-async function removeUserFacingDataNow(userId) {
+async function removeUserFacingDataNow(userId, options = {}) {
   const uid = normalizeId(userId);
   if (!uid) return {};
 
-  const results = {};
+  const storage = await deleteExternalStorageNow(uid);
+  const database = await removeDatabaseUserDataNow(uid, options);
 
-  const settled = await Promise.allSettled([
-    PostModel.deleteMany({ userId: uid }),
-    PostModel.updateMany(
-      {},
-      {
-        $pull: {
-          comments: {
-            $or: [
-              { userId: uid },
-              { visibleTo: uid },
-            ],
-          },
-        },
-        $unset: {
-          [`comments.$[].reactions.${uid}`]: "",
-        },
-      }
-    ),
-    Notification.deleteMany({
-      $or: [{ toId: uid }, { fromId: uid }],
-    }),
-    Match.deleteMany({
-      $or: [
-        { user1: uid },
-        { user2: uid },
-        { users: uid },
-      ],
-    }),
-    ChatRoom.deleteMany({
-      $or: [
-        { participants: uid },
-        { "messages.from": uid },
-        { "messages.to": uid },
-      ],
-    }),
-    Message.deleteMany({
-      $or: [{ from: uid }, { to: uid }],
-    }),
-    Relationship.deleteMany({
-      $or: [{ from: uid }, { to: uid }],
-    }),
-    MeetMiddleSession.deleteMany({
-      $or: [
-        { users: uid },
-        { requestedBy: uid },
-        { peerId: uid },
-        { selectedBy: uid },
-        { confirmedBy: uid },
-        { cancelledBy: uid },
-        { completedBy: uid },
-      ],
-    }),
-    VideoCallSession.deleteMany({
-      $or: [
-        { callerId: uid },
-        { receiverId: uid },
-        { caller: uid },
-        { receiver: uid },
-        { participants: uid },
-      ],
-    }),
-    BuzzCoinWallet.deleteOne({ userId: uid }),
-    GiftTransaction.deleteMany({
-      $or: [{ senderId: uid }, { receiverId: uid }],
-    }),
-    BuzzCoinLedger.deleteMany({ userId: uid }),
-  ]);
+  const failedCount =
+    Number(storage?.failedCount || 0) +
+    Number(database?.failedCount || 0);
 
-  settled.forEach((item, index) => {
-    results[`operation_${index}`] =
-      item.status === "fulfilled"
-        ? {
-            ok: true,
-            deletedCount: item.value?.deletedCount,
-            modifiedCount: item.value?.modifiedCount,
-          }
-        : {
-            ok: false,
-            error: item.reason?.message || String(item.reason),
-          };
-  });
-
-  return results;
+  return {
+    storage,
+    database,
+    failedCount,
+    hasFailures: failedCount > 0,
+  };
 }
 
-function buildScrubbedPendingDeletePatch(user, now, deleteAfter) {
-  const uid = normalizeId(user?.id);
+function buildScrubbedPendingDeletePatch(
+  user,
+  now,
+  deleteAfter,
+  cleanup = {}
+) {
   const email = normalizeEmail(user?.email);
 
   return {
+    // Account deletion lifecycle.
     visibility: "pending_delete",
     deleteStatus: "pending_delete",
     deleteRequestedAt: now,
     deleteAfter,
     originalEmail: email,
-    deactivatedAt: null,
+    deactivatedAt: now,
 
-    // Keep id + email during 7-day hold.
-    // Keeping email blocks instant re-signup because User.email is unique.
+    // Keep email only during the 7-day anti-abuse hold.
     email,
 
-    // Scrub account access.
-    password: "",
+    // Authentication identities.
     passwordHash: "",
     googleId: "",
+    appleId: "",
     verificationCode: "",
     codeExpiresAt: null,
-    pendingEmailChange: null,
 
-    // Scrub profile identity.
+    // Profile identity.
     firstName: "",
     lastName: "",
-    name: "Deleted User",
     bio: "",
     avatar: "",
     photos: [],
-    media: [],
-    reels: [],
+
+    // Keep ONLY failed external-storage references here so the
+    // six-hour cleanup worker can retry them.
+    media: buildStorageRetryManifest(cleanup?.storage),
+
     voiceUrl: "",
+
+    // Location.
     city: "",
     country: "",
     hometown: "",
     latitude: null,
     longitude: null,
     location: null,
+    distanceVisibility: "",
+    travelMode: false,
 
-    // Scrub dating/profile fields.
+    // Identity / dating profile.
     gender: "",
-    dob: null,
-    interestedIn: "",
+    genderVisibility: "",
+    pronouns: "",
+    orientation: "",
+    orientationVisibility: "",
+    dob: "",
     lookingFor: "",
+    relationshipStyle: "",
+    interestedIn: [],
+
+    // Body / lifestyle.
+    height: "",
+    bodyType: "",
+    fitnessLevel: "",
+    smoking: "",
+    drinking: "",
+    workoutFrequency: "",
+    diet: "",
+    sleepSchedule: "",
+
+    // Background / beliefs.
+    educationLevel: "",
+    school: "",
+    jobTitle: "",
+    company: "",
+    languages: [],
+    religion: "",
+    politicalViews: "",
+    zodiac: "",
+
+    // Interests.
     interests: [],
     hobbies: [],
+    favoriteMusic: [],
+    favoriteMovies: [],
+    travelStyle: "",
+    petsPreference: "",
     vibeTags: [],
 
-    // Scrub device/session traces.
-    pushTokens: [],
-    expoPushToken: "",
-    notificationTokens: [],
+    // Legacy profile fields.
+    likes: "",
+    dislikes: "",
+    favorites: [],
 
-    // Make it impossible to treat as active/onboarded.
+    // Preferences / visibility.
+    visibilityMode: "",
+    fieldVisibility: {},
+    preferences: {},
+    settings: {},
+    matchPref: {},
+    locationRadius: 0,
+    ageRange: {},
+    blockedUsers: [],
+
+    // Device/session traces.
+    pushTokens: [],
+    lastActive: null,
+
+    // Profile activity.
+    profileViews: {
+      total: 0,
+      today: 0,
+      lastViewDate: "",
+    },
+
+    // Account state.
     profileComplete: false,
     hasOnboarded: false,
-    isOnline: false,
+    premiumTier: "free",
+    isPremium: false,
+    isVerified: false,
 
     updatedAt: now,
   };
@@ -296,13 +284,20 @@ async function startAccountDeletion(userId, options = {}) {
     throw err;
   }
 
-  const now = new Date();
+   const now = new Date();
   const deleteAfter = getHoldUntilDate(now);
   const emailLower = normalizeEmail(user.email);
 
-  const cleanup = await removeUserFacingDataNow(uid);
+  const cleanup = await removeUserFacingDataNow(uid, {
+    email: emailLower,
+  });
 
-  const scrubPatch = buildScrubbedPendingDeletePatch(user, now, deleteAfter);
+  const scrubPatch = buildScrubbedPendingDeletePatch(
+    user,
+    now,
+    deleteAfter,
+    cleanup
+  );
 
   await User.updateOne(
     { id: uid },
@@ -320,18 +315,106 @@ async function startAccountDeletion(userId, options = {}) {
     pendingDelete: true,
     holdDays: HOLD_DAYS,
     deleteAfter: deleteAfter.toISOString(),
-    message:
+      message:
       "Account deleted from RomBuzz. Email is held for 7 days before final wipe.",
     walletForfeited: walletSummary,
+    cleanupPending: !!cleanup?.hasFailures,
     cleanup,
   };
 }
+async function retryPendingDeletionCleanupBeforeExpiry() {
+  const now = new Date();
 
+  const pendingUsers = await User.find({
+    $and: [
+      {
+        $or: [
+          { visibility: "pending_delete" },
+          { deleteStatus: "pending_delete" },
+        ],
+      },
+      {
+        $or: [
+          { deleteAfter: { $gt: now } },
+          { deleteAfter: null },
+        ],
+      },
+    ],
+  })
+    .select("id email")
+    .lean();
+
+  let retried = 0;
+  let failed = 0;
+
+  for (const user of pendingUsers) {
+    const cleanup = await removeUserFacingDataNow(user.id, {
+      email: normalizeEmail(user.email),
+    });
+
+    await User.updateOne(
+      { id: user.id },
+      {
+        $set: {
+          media: buildStorageRetryManifest(cleanup?.storage),
+        },
+      }
+    );
+
+    retried += 1;
+
+    if (cleanup?.hasFailures) {
+      failed += 1;
+    }
+  }
+
+  return {
+    retried,
+    failed,
+  };
+}
 async function permanentlyWipeDeletedUser(userId) {
   const uid = normalizeId(userId);
   if (!uid) return { success: false, error: "Missing user id" };
 
-  const cleanup = await removeUserFacingDataNow(uid);
+  const user = await User.findOne({ id: uid })
+    .select("id email media")
+    .lean();
+
+  if (!user) {
+    return {
+      success: true,
+      alreadyMissing: true,
+      userId: uid,
+    };
+  }
+
+  const cleanup = await removeUserFacingDataNow(uid, {
+    email: normalizeEmail(user.email),
+  });
+
+  if (cleanup?.hasFailures) {
+    await User.updateOne(
+      { id: uid },
+      {
+        $set: {
+          media: buildStorageRetryManifest(cleanup?.storage),
+        },
+      }
+    );
+
+    console.warn(
+      `⚠️ Permanent wipe postponed for ${uid}; cleanup still has failures.`
+    );
+
+    return {
+      success: false,
+      pendingCleanup: true,
+      userId: uid,
+      cleanup,
+    };
+  }
+
   await User.deleteOne({ id: uid });
 
   console.log(`🔥 Permanently wiped pending-delete account: ${uid}`);
@@ -347,7 +430,10 @@ async function permanentlyWipeExpiredDeletedAccounts() {
   const now = new Date();
 
   const expiredUsers = await User.find({
-    visibility: "pending_delete",
+    $or: [
+      { visibility: "pending_delete" },
+      { deleteStatus: "pending_delete" },
+    ],
     deleteAfter: { $lte: now },
   })
     .select("id email deleteAfter")
@@ -357,6 +443,7 @@ async function permanentlyWipeExpiredDeletedAccounts() {
     return {
       success: true,
       count: 0,
+      attempted: 0,
       wiped: [],
     };
   }
@@ -366,10 +453,11 @@ async function permanentlyWipeExpiredDeletedAccounts() {
   for (const user of expiredUsers) {
     try {
       const result = await permanentlyWipeDeletedUser(user.id);
+
       wiped.push({
         userId: user.id,
         email: user.email || "",
-        ok: true,
+        ok: !!result?.success,
         result,
       });
     } catch (err) {
@@ -387,9 +475,12 @@ async function permanentlyWipeExpiredDeletedAccounts() {
     }
   }
 
+  const count = wiped.filter((item) => item.ok).length;
+
   return {
-    success: true,
-    count: wiped.length,
+    success: wiped.every((item) => item.ok),
+    count,
+    attempted: wiped.length,
     wiped,
   };
 }
@@ -397,7 +488,15 @@ async function permanentlyWipeExpiredDeletedAccounts() {
 function startPendingDeletionCleanupJob() {
   const run = async () => {
     try {
+      const retry = await retryPendingDeletionCleanupBeforeExpiry();
       const result = await permanentlyWipeExpiredDeletedAccounts();
+
+      if (retry.failed > 0) {
+        console.warn(
+          `⚠️ Pending-delete cleanup still has ${retry.failed} account(s) with retryable failures.`
+        );
+      }
+
       if (result.count > 0) {
         console.log(
           `🧹 Pending-delete cleanup wiped ${result.count} expired account(s).`
