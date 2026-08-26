@@ -132,14 +132,14 @@ module.exports = async function authMiddleware(req, res, next) {
       });
     }
 
-    if (accountStatus === "pending_delete") {
-      return res.status(403).json({
-        error: "Account scheduled for deletion",
-        message:
-          "This account has been deleted and is waiting for permanent cleanup.",
-        reusableAfter: user?.deletion?.purgeAfter || null,
-      });
-    }
+  if (accountStatus === "pending_delete") {
+  return res.status(403).json({
+    error: "Account scheduled for deletion",
+    message:
+      "This account has been deleted and is waiting for permanent cleanup.",
+    reusableAfter: user?.deleteAfter || null,
+  });
+}
 
     if (accountStatus === "suspended") {
       const until = getSuspensionUntil(user);

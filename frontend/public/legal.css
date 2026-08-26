@@ -1,0 +1,305 @@
+/*
+ * ============================================================
+ * 📁 File: frontend/public/legal.css
+ * 🎯 Purpose: Shared styling for RomBuzz public legal pages.
+ *
+ * Used by:
+ *   /privacy
+ *   /terms
+ *   /delete-account
+ * ============================================================
+ */
+
+:root {
+  --bg: #fff8fa;
+  --surface: #ffffff;
+  --text: #231f20;
+  --muted: #6f6367;
+  --brand: #df315f;
+  --brand-dark: #b91f49;
+  --line: #f0dce2;
+  --soft: #fff0f4;
+  --danger: #a81842;
+  --shadow: 0 16px 45px rgba(83, 35, 53, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(
+      circle at top right,
+      rgba(255, 202, 216, 0.3),
+      transparent 34rem
+    ),
+    var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  line-height: 1.68;
+}
+
+a {
+  color: var(--brand);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.shell {
+  width: min(920px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.site-header {
+  padding: 26px 0 10px;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.brand:hover {
+  text-decoration: none;
+}
+
+.brand img {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 16px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.hero {
+  padding: 58px 0 34px;
+}
+
+.eyebrow {
+  margin: 0 0 9px;
+  color: var(--brand);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  max-width: 760px;
+  font-size: clamp(38px, 7vw, 64px);
+  line-height: 1.04;
+  letter-spacing: -0.045em;
+}
+
+.hero-copy {
+  max-width: 690px;
+  margin: 20px 0 0;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.updated {
+  margin-top: 19px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.card {
+  margin: 0 0 28px;
+  padding: clamp(24px, 5vw, 42px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+}
+
+section + section {
+  margin-top: 34px;
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-size: 24px;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  margin: 24px 0 8px;
+  font-size: 18px;
+}
+
+p {
+  margin: 0 0 15px;
+}
+
+ul {
+  margin: 10px 0 18px;
+  padding-left: 22px;
+}
+
+li {
+  margin: 7px 0;
+}
+
+.notice {
+  padding: 18px 20px;
+  background: var(--soft);
+  border: 1px solid #f5ccd8;
+  border-radius: 18px;
+}
+
+.notice strong {
+  color: var(--brand-dark);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.button {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border-radius: 15px;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.button:hover {
+  background: var(--brand-dark);
+  text-decoration: none;
+}
+
+.button-secondary {
+  background: #fff;
+  color: var(--brand);
+  border: 1px solid var(--line);
+}
+
+.button-secondary:hover {
+  background: var(--soft);
+}
+
+.steps {
+  counter-reset: legal-step;
+  display: grid;
+  gap: 14px;
+  margin: 20px 0;
+}
+
+.step {
+  position: relative;
+  padding: 18px 18px 18px 62px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+
+.step::before {
+  counter-increment: legal-step;
+  content: counter(legal-step);
+  position: absolute;
+  top: 16px;
+  left: 17px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--soft);
+  color: var(--brand);
+  font-weight: 900;
+}
+
+.footer {
+  padding: 16px 0 50px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 15px;
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+@media (max-width: 640px) {
+  .nav {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nav-links {
+    justify-content: flex-start;
+  }
+
+  .hero {
+    padding-top: 38px;
+  }
+
+  .hero-copy {
+    font-size: 16px;
+  }
+
+  .card {
+    border-radius: 22px;
+  }
+
+  .button {
+    width: 100%;
+  }
+}

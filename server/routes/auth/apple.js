@@ -38,12 +38,20 @@ const {
 const { createAppleSignupTicket } =
   require("./appleSignupTicket");
 
+const {
+  captureAppleAuthorization,
+} = require("../../services/appleAuthorizationService");
+
 function isVerifiedEmail(value) {
   return value === true || value === "true";
 }
 
 router.post("/apple", async (req, res) => {
-  const { token, mode = "login" } = req.body || {};
+  const {
+    token,
+    authorizationCode,
+    mode = "login",
+  } = req.body || {};
 
   if (!token) {
     return res.status(400).json({
@@ -51,7 +59,17 @@ router.post("/apple", async (req, res) => {
     });
   }
 
-  const flowMode = String(mode).trim().toLowerCase();
+  if (!authorizationCode) {
+    return res.status(400).json({
+      error:
+        "Apple authorization code required",
+    });
+  }
+
+  const flowMode =
+    String(mode)
+      .trim()
+      .toLowerCase();
 
   if (!["login", "signup"].includes(flowMode)) {
     return res.status(400).json({
@@ -115,8 +133,18 @@ router.post("/apple", async (req, res) => {
         });
       }
 
+      await captureAppleAuthorization({
+        authorizationCode,
+        identityPayload: payload,
+        appleId,
+        pendingSignup: true,
+      });
+
       const appleSignupTicket =
-        createAppleSignupTicket({ email, appleId });
+        createAppleSignupTicket({
+          email,
+          appleId,
+        });
 
       return res.json({
         status: "apple_signup_ready",
@@ -142,13 +170,24 @@ router.post("/apple", async (req, res) => {
       user.appleId !== appleId
     ) {
       return res.status(409).json({
-        status: "apple_account_mismatch",
+        status:
+          "apple_account_mismatch",
         error:
           "This email is already linked to a different Apple account.",
       });
     }
 
-    const complete = computeProfileComplete(user);
+    await captureAppleAuthorization({
+      authorizationCode,
+      identityPayload: payload,
+      appleId,
+      userId: user.id,
+      pendingSignup: false,
+    });
+
+    const complete =
+      computeProfileComplete(user);
+
     const patch = {};
 
     if (!user.appleId) {
@@ -190,10 +229,17 @@ router.post("/apple", async (req, res) => {
       err?.message || err
     );
 
-    return res.status(401).json({
-      status: "apple_auth_failed",
-      error: "Apple authentication failed.",
-    });
+      return res
+      .status(
+        err?.statusCode || 401
+      )
+      .json({
+        status:
+          "apple_auth_failed",
+
+        error:
+          "Apple authentication failed.",
+      });
   }
 });
 

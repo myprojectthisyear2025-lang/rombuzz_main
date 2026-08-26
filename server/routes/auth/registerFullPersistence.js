@@ -38,6 +38,10 @@ const {
   mergeSignupPhotosIntoMedia,
 } = require("./registerFullHelpers");
 
+const {
+  activateAppleCredential,
+} = require("../../services/appleAuthorizationService");
+
 async function completeExistingUser({
   res,
   user,
@@ -205,6 +209,21 @@ async function createNewUser({
   };
 
   await User.create(newUser);
+
+  if (appleId) {
+    try {
+      await activateAppleCredential({
+        appleId,
+        userId: newUser.id,
+      });
+    } catch (err) {
+      await User.deleteOne({
+        id: newUser.id,
+      }).catch(() => {});
+
+      throw err;
+    }
+  }
 
   // Preserve existing welcome-post behavior.
   const PostModel =

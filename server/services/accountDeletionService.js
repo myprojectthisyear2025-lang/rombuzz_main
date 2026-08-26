@@ -32,6 +32,10 @@ const {
   deleteExternalStorageNow,
 } = require("./accountDeletionStorageCleanup");
 
+const {
+  revokeAppleAuthorizationForUser,
+} = require("./appleAuthorizationService");
+
 function normalizeId(value) {
   return String(value || "").trim();
 }
@@ -100,18 +104,42 @@ async function removeUserFacingDataNow(userId, options = {}) {
   const uid = normalizeId(userId);
   if (!uid) return {};
 
-  const storage = await deleteExternalStorageNow(uid);
-  const database = await removeDatabaseUserDataNow(uid, options);
+  const apple =
+    await revokeAppleAuthorizationForUser({
+      userId: uid,
+      appleId:
+        options.appleId || "",
+    });
+
+  const storage =
+    await deleteExternalStorageNow(
+      uid
+    );
+
+  const database =
+    await removeDatabaseUserDataNow(
+      uid,
+      options
+    );
 
   const failedCount =
-    Number(storage?.failedCount || 0) +
-    Number(database?.failedCount || 0);
+    Number(
+      apple?.failedCount || 0
+    ) +
+    Number(
+      storage?.failedCount || 0
+    ) +
+    Number(
+      database?.failedCount || 0
+    );
 
   return {
+    apple,
     storage,
     database,
     failedCount,
-    hasFailures: failedCount > 0,
+    hasFailures:
+      failedCount > 0,
   };
 }
 
@@ -288,11 +316,18 @@ async function startAccountDeletion(userId, options = {}) {
   const deleteAfter = getHoldUntilDate(now);
   const emailLower = normalizeEmail(user.email);
 
-  const cleanup = await removeUserFacingDataNow(uid, {
-    email: emailLower,
-  });
+   const cleanup =
+    await removeUserFacingDataNow(
+      uid,
+      {
+        email: emailLower,
+        appleId:
+          user.appleId || "",
+      }
+    );
 
-  const scrubPatch = buildScrubbedPendingDeletePatch(
+  const scrubPatch =
+    buildScrubbedPendingDeletePatch(
     user,
     now,
     deleteAfter,

@@ -27,7 +27,7 @@ function sendPendingDeletePasswordResponse(res, user) {
     status: "Account scheduled for deletion",
     error:
       "This account was deleted and cannot reset password during the 7-day hold.",
-    reusableAfter: user?.deletion?.purgeAfter || null,
+    reusableAfter: user?.deleteAfter || null,
   });
 }
 

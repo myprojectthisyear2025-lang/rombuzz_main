@@ -20,7 +20,7 @@ function sendPendingDeleteAuthResponse(res, user) {
     status: "Account scheduled for deletion",
     error:
       "This account was deleted and cannot be used right now. You can create a fresh account with this email after the 7-day hold ends.",
-    reusableAfter: user?.deletion?.purgeAfter || null,
+    reusableAfter: user?.deleteAfter || null,
   });
 }
 

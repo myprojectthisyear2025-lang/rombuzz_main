@@ -37,7 +37,7 @@ function sendPendingDeleteSignupResponse(
     error:
       "This email is on a 7-day deletion hold. You can create a fresh account with this email after the hold ends.",
     reusableAfter:
-      user?.deletion?.purgeAfter || null,
+      user?.deleteAfter || null,
   });
 }
 
