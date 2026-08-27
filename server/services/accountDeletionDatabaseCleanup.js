@@ -1,11 +1,11 @@
 /**
  * ============================================================
- * 📁 File: services/accountDeletionDatabaseCleanup.js
+ * 📁 File: server/services/accountDeletionDatabaseCleanup.js
  * 🎯 Purpose: Remove user-facing MongoDB data for deleted accounts.
  * Used for:
  *  - Deleting feature records that should disappear immediately
  *  - Removing deleted-user references from active MongoDB documents
- *  - Pseudonymizing retained BuzzCoin/gift audit records
+ *  - Pseudonymizing retained safety/support and BuzzCoin/gift audit records
  * ============================================================
  */
 
@@ -35,6 +35,8 @@ const UserModels = {
 };
 
 const AuditModels = {
+  ReportModel: require("../models/ReportModel"),
+  SupportTicket: require("../models/SupportTicket"),
   GiftTransaction: require("../models/GiftTransaction"),
   BuzzCoinLedger: require("../models/BuzzCoinLedger"),
   GiftSummary: require("../models/GiftSummary"),
@@ -90,6 +92,8 @@ async function removeDatabaseUserDataNow(userId, options = {}) {
   } = UserModels;
 
   const {
+    ReportModel,
+    SupportTicket,
     GiftTransaction,
     BuzzCoinLedger,
     GiftSummary,
@@ -315,7 +319,162 @@ async function removeDatabaseUserDataNow(userId, options = {}) {
         : Promise.resolve({ deletedCount: 0 }),
     ],
 
-    // Retain financial/audit history while removing the live account ID.
+    // ========================================================
+    // RETAINED SAFETY / MODERATION REPORTS
+    // ========================================================
+    // Reports may contain important abuse, fraud, harassment,
+    // safety, dispute, or moderator evidence.
+    //
+    // Keep the report itself, but detach the deleted account
+    // from the live RomBuzz user identity.
+    // ========================================================
+
+    [
+      "report_from",
+      ReportModel.updateMany(
+        { from: uid },
+        {
+          $set: {
+            from: deletedId,
+          },
+        }
+      ),
+    ],
+
+    [
+      "report_reporter",
+      ReportModel.updateMany(
+        { reporterId: uid },
+        {
+          $set: {
+            reporterId: deletedId,
+          },
+        }
+      ),
+    ],
+
+    [
+      "report_reported_user",
+      ReportModel.updateMany(
+        { reportedUserId: uid },
+        {
+          $set: {
+            reportedUserId: deletedId,
+          },
+        }
+      ),
+    ],
+
+    [
+      "report_target_owner",
+      ReportModel.updateMany(
+        { targetOwnerId: uid },
+        {
+          $set: {
+            targetOwnerId: deletedId,
+          },
+        }
+      ),
+    ],
+
+    // targetId can represent either a user OR another object
+    // such as a message, post, reel, call, or transaction.
+    //
+    // Only replace it when it exactly equals this user's ID.
+    [
+      "report_target",
+      ReportModel.updateMany(
+        { targetId: uid },
+        {
+          $set: {
+            targetId: deletedId,
+          },
+        }
+      ),
+    ],
+
+    // Normally this is an admin ID. If an admin account itself
+    // is ever deleted, do not leave its live user ID behind.
+    [
+      "report_reviewer",
+      ReportModel.updateMany(
+        { reviewedBy: uid },
+        {
+          $set: {
+            reviewedBy: deletedId,
+          },
+        }
+      ),
+    ],
+
+    // ========================================================
+    // RETAINED CUPID SUPPORT HISTORY
+    // ========================================================
+    // Keep support history where it may be needed for safety,
+    // fraud, disputes, moderation, or legal/account support.
+    //
+    // Remove direct identity fields from tickets belonging to
+    // the deleted account.
+    // ========================================================
+
+    [
+      "support_user",
+      SupportTicket.updateMany(
+        { userId: uid },
+        {
+          $set: {
+            userId: deletedId,
+            userEmail: "",
+            userName: "Deleted user",
+            emailError: "",
+          },
+        }
+      ),
+    ],
+
+    // Older tickets may have been associated by email.
+    // Remove the email/name without assuming their userId
+    // belongs to the current account.
+    [
+      "support_email",
+      email
+        ? SupportTicket.updateMany(
+            { userEmail: email },
+            {
+              $set: {
+                userEmail: "",
+                userName: "Deleted user",
+                emailError: "",
+              },
+            }
+          )
+        : Promise.resolve({
+            modifiedCount: 0,
+          }),
+    ],
+
+    // Normally an admin ID.
+    [
+      "support_admin_actor",
+      SupportTicket.updateMany(
+        {
+          lastAdminActionBy: uid,
+        },
+        {
+          $set: {
+            lastAdminActionBy: deletedId,
+          },
+        }
+      ),
+    ],
+
+    // ========================================================
+    // RETAINED FINANCIAL / AUDIT HISTORY
+    // ========================================================
+    // Preserve existing financial/audit behavior while
+    // removing the deleted user's live account ID.
+    // ========================================================
+
     [
       "gift_tx_sender",
       GiftTransaction.updateMany(

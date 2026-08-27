@@ -1,25 +1,25 @@
 <!doctype html>
+<!--
+============================================================================
+📁 File: frontend/public/delete-account.html
+🎯 Purpose: Public RomBuzz account deletion and data-erasure information.
+   Provides in-app and external deletion-request paths and explains the
+   irreversible 7-day deletion lifecycle, retention, and virtual balances.
+============================================================================
+-->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1"
-  />
-
-  <title>Delete Your RomBuzz Account</title>
+  <title>Account Deletion & Data Erasure | RomBuzz</title>
 
   <meta
     name="description"
-    content="Request deletion of your RomBuzz account and associated personal data."
+    content="How to permanently delete a RomBuzz account and associated personal data, including the seven-day deletion hold and limited lawful retention."
   />
 
-  <link
-    rel="canonical"
-    href="https://rombuzz.com/delete-account"
-  />
-
+  <link rel="canonical" href="https://rombuzz.com/delete-account" />
   <link rel="icon" href="/logo.png" />
   <link rel="stylesheet" href="/legal.css" />
 </head>
@@ -42,28 +42,45 @@
 
   <main class="shell">
     <div class="hero">
-      <p class="eyebrow">Account & Data</p>
-
-      <h1>Delete your RomBuzz account</h1>
+      <p class="eyebrow">Account &amp; Data</p>
+      <h1>Account Deletion &amp; Data Erasure</h1>
 
       <p class="hero-copy">
-        You can request permanent deletion of your RomBuzz
-        account and associated personal data even if you no
-        longer have the RomBuzz app installed.
+        This page explains how to permanently delete a RomBuzz account, what
+        happens when deletion begins, what information is deleted, and what
+        limited information may lawfully remain.
       </p>
 
       <p class="updated">
-        Last updated: August 22, 2026
+        Effective date: August 26, 2026<br />
+        Last updated: August 26, 2026
       </p>
     </div>
 
     <article class="card">
       <section>
-        <h2>Delete inside the RomBuzz app</h2>
+        <h2>1. Deactivation is not permanent deletion</h2>
 
         <p>
-          If you still have access to RomBuzz, this is the
-          fastest way to initiate deletion.
+          RomBuzz may allow you to temporarily deactivate your account. A
+          deactivated account may be hidden from normal discovery and can be
+          reactivated where that feature remains available.
+        </p>
+
+        <p>
+          <strong>Permanent account deletion is different.</strong>
+          Once an authenticated permanent deletion request is accepted, RomBuzz
+          starts an irreversible account-deletion lifecycle. RomBuzz does not
+          provide a restore flow for that deleted account.
+        </p>
+      </section>
+
+      <section>
+        <h2>2. Delete your account inside the RomBuzz app</h2>
+
+        <p>
+          If you still have access to your account, the in-app flow is the
+          preferred way to start deletion because you are already authenticated.
         </p>
 
         <div class="steps">
@@ -76,7 +93,8 @@
           </div>
 
           <div class="step">
-            Find the <strong>Danger zone</strong>.
+            Go to the account-management or
+            <strong>Danger zone</strong> section.
           </div>
 
           <div class="step">
@@ -84,29 +102,36 @@
           </div>
 
           <div class="step">
-            Review the deletion and BuzzCoin forfeiture
-            information, then confirm deletion.
+            Review the deletion information and any virtual-balance forfeiture
+            notice.
           </div>
+
+          <div class="step">
+            Confirm permanent deletion.
+          </div>
+        </div>
+
+        <div class="notice">
+          <strong>
+            Deleting the app from your phone does not delete your RomBuzz
+            account.
+          </strong>
         </div>
       </section>
 
       <section>
-        <h2>Don't have the app?</h2>
+        <h2>3. Request deletion without reinstalling the app</h2>
 
         <p>
-          You do not need to reinstall RomBuzz.
-        </p>
-
-        <p>
-          Send an account-deletion request to RomBuzz
-          Support from the email address associated with
-          your RomBuzz account.
+          If you no longer have the app or cannot use the in-app deletion flow,
+          you can request account deletion by email. You do not need to reinstall
+          RomBuzz solely to submit the request.
         </p>
 
         <div class="actions">
           <a
             class="button"
-            href="mailto:support@rombuzz.com?subject=RomBuzz%20Account%20Deletion%20Request&body=Hello%20RomBuzz%20Support%2C%0A%0AI%20want%20to%20permanently%20delete%20my%20RomBuzz%20account%20and%20associated%20personal%20data.%0A%0AAccount%20email%3A%20%0A%0AThank%20you."
+            href="mailto:legal@neptrixx.com?subject=RomBuzz%20Account%20Deletion%20Request&body=Hello%20RomBuzz%2C%0A%0AI%20want%20to%20permanently%20delete%20my%20RomBuzz%20account%20and%20associated%20personal%20data.%0A%0AAccount%20email%3A%20%0A%0AThank%20you."
           >
             Request deletion by email
           </a>
@@ -114,120 +139,438 @@
 
         <p>
           Email:
-          <a href="mailto:support@rombuzz.com">
-            support@rombuzz.com
+          <a href="mailto:legal@neptrixx.com">
+            legal@neptrixx.com
           </a>
+          <br />
+          Suggested subject:
+          <strong>RomBuzz Account Deletion Request</strong>
         </p>
 
         <p>
-          Use the subject:
-          <strong>RomBuzz Account Deletion Request</strong>.
+          Whenever possible, send the request from the email address associated
+          with the RomBuzz account. We may ask for reasonable verification to
+          confirm that you control the account before processing a
+          support-initiated deletion.
         </p>
 
         <p>
-          For account security, RomBuzz may ask you to
-          verify that you control the account or its
-          registered email address before a support-initiated
-          deletion is processed.
-        </p>
-      </section>
-
-      <section>
-        <h2>What happens after deletion begins?</h2>
-
-        <p>
-          Once an authenticated deletion request is
-          accepted, the account is placed into a pending
-          deletion state and removed from normal RomBuzz
-          user-facing experiences.
-        </p>
-
-        <p>
-          RomBuzz currently applies a
-          <strong>seven-day deletion hold</strong>.
-        </p>
-
-        <p>
-          During this period, your email address and minimal
-          account-deletion metadata may remain temporarily
-          stored for account lifecycle, security, anti-abuse,
-          and deletion processing purposes.
-        </p>
-
-        <p>
-          User-facing profile data, supported media,
-          messages, matches, and related feature records are
-          removed or scheduled for deletion through the
-          account deletion process.
-        </p>
-
-        <p>
-          If deletion from an external storage provider
-          temporarily fails, RomBuzz may retry that cleanup
-          before removing the final pending account record.
+          <strong>
+            Do not email your password, one-time verification code,
+            authentication token, or full payment-card number.
+          </strong>
         </p>
       </section>
 
       <section>
-        <h2>Data that may be retained</h2>
+        <h2>4. What happens immediately after deletion begins</h2>
 
         <p>
-          Limited information may be retained when
-          reasonably necessary for:
+          Once an authenticated deletion request is accepted, the account enters
+          a pending-deletion state. RomBuzz removes the user from normal
+          user-facing experiences and begins deleting, scrubbing, detaching, or
+          scheduling deletion of supported account data and media.
+        </p>
+
+        <p>
+          This means the former profile should no longer operate as an active
+          dating account while the deletion lifecycle is underway.
+        </p>
+      </section>
+
+      <section>
+        <h2>5. The seven-day deletion hold</h2>
+
+        <p>
+          RomBuzz currently keeps the account email in a restricted
+          <strong>seven-day deletion hold</strong>
+          after permanent deletion begins. Minimal deletion-lifecycle
+          information may also be retained during that period.
+        </p>
+
+        <p>
+          The hold is used for deletion processing, account-lifecycle integrity,
+          security, and anti-abuse purposes. It helps prevent immediate account
+          recreation from interfering with deletion or abuse controls.
+        </p>
+
+        <div class="notice">
+          <strong>The seven-day hold is not a recovery period.</strong>
+
+          <p>
+            RomBuzz does not provide a cancel-deletion or restore-account flow
+            after authenticated permanent deletion begins.
+          </p>
+        </div>
+
+        <p>
+          After the hold and required cleanup complete, the remaining
+          pending-deletion account record is permanently removed. After the
+          hold, the same email may be eligible to create a new account, but a
+          new account does not restore the deleted account, matches, messages,
+          media, or other deleted data.
+        </p>
+      </section>
+
+      <section>
+        <h2>6. Data removed through the deletion lifecycle</h2>
+
+        <p>
+          Depending on the features you used, the deletion process is designed
+          to remove or scrub active account information such as:
         </p>
 
         <ul>
-          <li>Security and fraud prevention.</li>
-          <li>Safety and moderation investigations.</li>
-          <li>Legal or regulatory obligations.</li>
-          <li>Support and dispute handling.</li>
+          <li>Public and user-facing profile information.</li>
+
           <li>
-            Financial, transaction, or accounting records
-            where applicable.
+            Profile photos, gallery media, and supported account media.
+          </li>
+
+          <li>
+            Authentication and account-profile fields that are no longer needed
+            for the deletion hold.
+          </li>
+
+          <li>
+            Dating preferences, interests, lifestyle fields, and profile
+            settings.
+          </li>
+
+          <li>
+            Location and location-derived active profile information.
+          </li>
+
+          <li>
+            Matches, likes, messages, and supported social or communication
+            records where deletion rules apply.
+          </li>
+
+          <li>
+            Posts, comments, stories, MicroBuzz data, and other supported
+            user-generated content where deletion rules apply.
+          </li>
+
+          <li>
+            Device or session information that is not required for lawful
+            retention, security, or deletion processing.
           </li>
         </ul>
 
         <p>
-          Where appropriate, retained audit records may be
-          pseudonymized or detached from the deleted active
-          account.
+          The exact cleanup depends on the feature, the type of record, legal
+          retention requirements, and whether another user's independent copy or
+          rights are involved.
         </p>
       </section>
 
       <section>
-        <h2>BuzzCoins</h2>
+        <h2>7. Technical cleanup retries</h2>
 
         <p>
-          Any remaining BuzzCoin or eligible creator balance
-          associated with an account may be forfeited when
-          permanent deletion is confirmed.
+          Account deletion can involve data stored across more than one service
+          or media system. If a deletion request to a storage or service provider
+          temporarily fails, RomBuzz may retain a limited cleanup reference and
+          retry the deletion.
         </p>
 
         <p>
-          The RomBuzz in-app deletion process shows this
-          information before deletion when a balance is
-          present.
+          If required cleanup is still incomplete at the end of the seven-day
+          hold, RomBuzz may postpone deletion of the final pending-deletion
+          record until the outstanding cleanup succeeds. The retained information
+          is restricted to what is reasonably necessary to finish the cleanup
+          and satisfy lawful obligations.
         </p>
       </section>
 
       <section>
-        <h2>Need help?</h2>
+        <h2>8. Information that may be retained</h2>
 
         <p>
-          Contact RomBuzz Support:
+          Limited information may be retained after account deletion when
+          reasonably necessary or legally required for purposes such as:
+        </p>
+
+        <ul>
+          <li>
+            Financial, transaction, accounting, tax, refund, or chargeback
+            records.
+          </li>
+
+          <li>
+            Fraud, spam, security, and abuse prevention.
+          </li>
+
+          <li>
+            Safety, reporting, moderation, and enforcement investigations.
+          </li>
+
+          <li>
+            Legal or regulatory obligations.
+          </li>
+
+          <li>
+            Claims, disputes, litigation, or valid legal holds.
+          </li>
+
+          <li>
+            Evidence preservation relating to serious policy or safety
+            incidents.
+          </li>
+        </ul>
+
+        <p>
+          Where appropriate, retained transaction or audit records may be
+          pseudonymized or detached from the former active account identifier so
+          they no longer function as the user's active profile record.
+        </p>
+      </section>
+
+      <section>
+        <h2>9. BuzzCoins and other virtual balances</h2>
+
+        <p>
+          If the account has a remaining BuzzCoin or other virtual balance,
+          RomBuzz may require an additional confirmation before permanent
+          deletion begins.
         </p>
 
         <p>
-          <a href="mailto:support@rombuzz.com">
-            support@rombuzz.com
+          By confirming deletion after receiving that notice, you acknowledge
+          that the remaining virtual balance will be permanently forfeited and
+          cannot be restored to the deleted account.
+        </p>
+
+        <p>
+          BuzzCoins and other virtual items are subject to the
+          <a href="/terms">Terms of Service</a>
+          and are not treated as cash unless RomBuzz expressly provides a lawful
+          redemption feature with separate terms.
+        </p>
+      </section>
+
+      <section>
+        <h2>10. App-store subscriptions must be cancelled separately</h2>
+
+        <p>
+          If you have a subscription managed through Apple, Google, or another
+          external billing platform,
+          <strong>
+            deleting your RomBuzz account does not automatically cancel that
+            external subscription
+          </strong>
+          unless the billing platform expressly provides otherwise.
+        </p>
+
+        <p>
+          Cancel the subscription through the account or subscription settings
+          of the platform that billed you. Uninstalling RomBuzz also does not by
+          itself cancel an external subscription.
+        </p>
+      </section>
+
+      <section>
+        <h2>11. Account deletion does not automatically create a refund</h2>
+
+        <p>
+          Deleting an account does not automatically create a right to a refund
+          for a prior purchase. Refund eligibility depends on applicable law and
+          the rules of the platform that processed the transaction.
+        </p>
+      </section>
+
+      <section>
+        <h2>12. Copies controlled by other users</h2>
+
+        <p>
+          RomBuzz cannot delete information another person independently copied
+          or stored outside RomBuzz. Examples include screenshots, downloaded
+          photos, screen recordings, copied messages, forwarded content, or
+          other copies stored on another person's device or account.
+        </p>
+
+        <p>
+          We may still take action on content that remains inside RomBuzz where
+          required by law or our policies.
+        </p>
+      </section>
+
+      <section>
+        <h2>13. Backups and deidentified information</h2>
+
+        <p>
+          Deleted information may remain temporarily in protected backups until
+          those backups are rotated, overwritten, or securely removed under our
+          normal retention processes.
+        </p>
+
+        <p>
+          Aggregated or deidentified information that no longer identifies you
+          may be retained and used for lawful analytics, security, reliability,
+          or service-improvement purposes.
+        </p>
+      </section>
+
+      <section>
+        <h2>14. External services and sign-in accounts are not deleted</h2>
+
+        <p>
+          Deleting RomBuzz does not delete your Apple Account, Google Account,
+          app-store account, email account, mobile-device account, or another
+          external service. If you want to revoke RomBuzz's access through an
+          external authentication provider, you may also need to use that
+          provider's account settings.
+        </p>
+      </section>
+
+      <section>
+        <h2>15. Device permissions are managed separately</h2>
+
+        <p>
+          Account deletion does not change operating-system permissions on your
+          device. You can remove RomBuzz's camera, microphone, photo-library,
+          location, or notification permissions through your device settings.
+        </p>
+      </section>
+
+      <section>
+        <h2>16. Service-provider deletion</h2>
+
+        <p>
+          You generally do not need to contact every infrastructure or service
+          provider used by RomBuzz. RomBuzz coordinates deletion or retention
+          instructions for service providers acting on our behalf as part of the
+          account-deletion lifecycle, subject to lawful exceptions and provider
+          obligations.
+        </p>
+      </section>
+
+      <section>
+        <h2>17. Legal preservation and safety holds</h2>
+
+        <p>
+          In limited circumstances, RomBuzz may be legally required or permitted
+          to preserve specific information despite an account-deletion request.
+          This may occur because of litigation, a valid law-enforcement request,
+          a regulatory obligation, a serious safety investigation, fraud
+          prevention, or another lawful preservation requirement.
+        </p>
+
+        <p>
+          Any such retention is limited to the information and period reasonably
+          necessary for the applicable purpose.
+        </p>
+      </section>
+
+      <section>
+        <h2>18. Privacy requests that do not require deleting the account</h2>
+
+        <p>
+          If you only want to correct profile information, change permissions,
+          request access to data, or exercise another privacy right, you may not
+          need to delete the entire account. See our
+          <a href="/privacy">Privacy Policy</a>
+          for available privacy rights and request information.
+        </p>
+      </section>
+
+      <section>
+        <h2>19. Authorized agents and special circumstances</h2>
+
+        <p>
+          Where applicable law allows an authorized agent to submit a privacy or
+          deletion request, RomBuzz may require proof of the agent's authority
+          and may separately verify the identity of the account holder.
+        </p>
+
+        <p>
+          Requests concerning a deceased or incapacitated user are handled in
+          accordance with applicable law and may require documentation showing
+          the requester's authority.
+        </p>
+      </section>
+
+      <section>
+        <h2>20. Contact</h2>
+
+        <p>
+          For account deletion, privacy, or data-erasure questions, contact:
+        </p>
+
+        <p>
+          <strong>
+            RomBuzz / Neptrixx International Company Pvt. Ltd.
+          </strong>
+          <br />
+
+          Email:
+          <a href="mailto:legal@neptrixx.com">
+            legal@neptrixx.com
+          </a>
+          <br />
+
+          Website:
+          <a href="https://rombuzz.com">
+            https://rombuzz.com
           </a>
         </p>
 
         <p>
-          For more information about how RomBuzz handles
-          information, see our
-          <a href="/privacy">Privacy Policy</a>.
+          Use the subject
+          <strong>RomBuzz Account Deletion Request</strong>
+          for deletion requests sent by email. Do not send passwords, one-time
+          codes, authentication tokens, or full payment-card numbers.
         </p>
+      </section>
+
+      <section>
+        <h2>21. Summary</h2>
+
+        <ul>
+          <li>
+            You can permanently delete your account from RomBuzz settings.
+          </li>
+
+          <li>
+            If you cannot use the app, you can request deletion at
+            <a href="mailto:legal@neptrixx.com">
+              legal@neptrixx.com
+            </a>.
+          </li>
+
+          <li>
+            Your active profile is removed from normal RomBuzz experiences when
+            deletion begins.
+          </li>
+
+          <li>
+            The email is held in a restricted deletion state for seven days.
+          </li>
+
+          <li>
+            The seven-day hold is not a recovery period and the deleted account
+            cannot be restored.
+          </li>
+
+          <li>
+            Outstanding technical cleanup may be retried before the final
+            pending record is removed.
+          </li>
+
+          <li>
+            Limited lawful records may be retained or pseudonymized for safety,
+            fraud, accounting, disputes, or legal obligations.
+          </li>
+
+          <li>
+            Remaining BuzzCoins or other virtual balances may require explicit
+            forfeiture confirmation.
+          </li>
+
+          <li>
+            External app-store subscriptions must be cancelled separately.
+          </li>
+        </ul>
       </section>
     </article>
   </main>
@@ -235,7 +578,7 @@
   <footer class="footer">
     <div class="shell footer-inner">
       <span>© 2026 RomBuzz. All rights reserved.</span>
-      <span>Powered by Neptrixx.</span>
+      <span>Operated by Neptrixx International Company Pvt. Ltd.</span>
 
       <div class="footer-links">
         <a href="/privacy">Privacy</a>
