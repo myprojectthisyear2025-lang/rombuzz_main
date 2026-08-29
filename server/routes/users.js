@@ -406,6 +406,17 @@ function normalizeViewProfileMediaUrl(entry) {
   ).trim();
 }
 
+function getViewProfileStreamUid(entry) {
+  if (!entry || typeof entry === "string") return "";
+
+  return String(
+    entry?.streamUid ||
+      entry?.uid ||
+      entry?.cloudflareStream?.uid ||
+      ""
+  ).trim();
+}
+
 function getViewProfileMediaCaption(entry) {
   return String(entry?.caption || entry?.text || entry?.description || "")
     .toLowerCase()
@@ -422,7 +433,10 @@ function inferViewProfileMediaType(entry) {
   const type = String(entry?.type || entry?.mediaType || "").toLowerCase().trim();
   const caption = getViewProfileMediaCaption(entry);
   const url = normalizeViewProfileMediaUrl(entry).toLowerCase();
+  const streamUid = getViewProfileStreamUid(entry);
+  const provider = String(entry?.provider || entry?.storage || "").toLowerCase().trim();
 
+  if (streamUid || provider === "cloudflare_stream") return "video";
   if (caption.includes("kind:reel") || caption.includes("kind:video")) return "video";
   if (type === "video" || type === "reel" || type.includes("video") || type.includes("reel")) {
     return "video";
@@ -537,14 +551,22 @@ function buildViewProfileGallery(user = {}, options = {}) {
 
   const pushMedia = (entry, fallbackIndex = 0, legacyPhoto = false) => {
     const url = normalizeViewProfileMediaUrl(entry);
-    if (!url || seen.has(url)) return;
+    const streamUid = getViewProfileStreamUid(entry);
+    const stableMediaKey = streamUid || url;
+
+    if (!stableMediaKey || seen.has(stableMediaKey)) return;
     if (!canShowInViewProfile(entry, canSeeMatchedMedia, isSelf)) return;
 
     const type = legacyPhoto ? "image" : inferViewProfileMediaType(entry);
     const id =
       typeof entry === "object" && entry
-        ? String(entry?.id || entry?._id || entry?.mediaId || `${type}-${fallbackIndex}-${url}`)
-        : `legacy-photo-${fallbackIndex}-${url}`;
+        ? String(
+            entry?.id ||
+              entry?._id ||
+              entry?.mediaId ||
+              `${type}-${fallbackIndex}-${stableMediaKey}`
+          )
+        : `legacy-photo-${fallbackIndex}-${stableMediaKey}`;
     const caption =
       typeof entry === "object" && entry
         ? String(entry?.caption || "")
@@ -578,7 +600,7 @@ function buildViewProfileGallery(user = {}, options = {}) {
       sourceType: "gallery",
     };
 
-    seen.add(url);
+    seen.add(stableMediaKey);
     media.push(normalized);
 
     if (type === "video") {
