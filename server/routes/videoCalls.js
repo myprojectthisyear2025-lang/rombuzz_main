@@ -437,36 +437,48 @@ router.post("/start", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "cannot_call_self" });
     }
 
-    await markExpiredRingingCallsForUser(callerId);
+    // Expired-call cleanup still runs, but it must never hold up a new call.
+    // The active-call query below independently ignores expired ringing calls.
+    markExpiredRingingCallsForUser(callerId).catch((err) => {
+      console.error("❌ expired video call cleanup failed:", err);
+    });
 
-    if (await isBlocked(callerId, peerId)) {
-      return res.status(403).json({ error: "blocked" });
-    }
+    const now = new Date();
 
-    const matched = await requireMatchedPair(callerId, peerId);
-    if (!matched) {
-      return res.status(403).json({ error: "matched_users_only" });
-    }
-
-       const [caller, receiver] = await Promise.all([
+    // These checks are independent, so do them together instead of serially.
+    const [blocked, matched, caller, receiver, existing] = await Promise.all([
+      isBlocked(callerId, peerId),
+      requireMatchedPair(callerId, peerId),
       User.findOne({ id: callerId })
         .select("id firstName lastName avatar profilePic photo")
         .lean(),
       User.findOne({ id: peerId })
         .select("id firstName lastName avatar profilePic photo pushTokens")
         .lean(),
+      VideoCallSession.findOne({
+        participants: { $all: [callerId, peerId] },
+        $or: [
+          { status: "accepted" },
+          { status: "ringing", expiresAt: { $gt: now } },
+          { status: "ringing", expiresAt: null },
+          { status: "ringing", expiresAt: { $exists: false } },
+        ],
+      }).sort({ createdAt: -1 }),
     ]);
+
+    if (blocked) {
+      return res.status(403).json({ error: "blocked" });
+    }
+
+    if (!matched) {
+      return res.status(403).json({ error: "matched_users_only" });
+    }
 
     if (!receiver) {
       return res.status(404).json({ error: "receiver_not_found" });
     }
 
-    const existing = await VideoCallSession.findOne({
-      participants: { $all: [callerId, peerId] },
-      status: { $in: ["ringing", "accepted"] },
-    }).sort({ createdAt: -1 });
-
-      if (existing) {
+    if (existing) {
       const token = createTokenForCall(existing, callerId);
 
       return res.status(409).json({
@@ -478,8 +490,12 @@ router.post("/start", authMiddleware, async (req, res) => {
 
     const callId = safeCallId();
     const roomId = makeRoomId(callerId, peerId);
+    const [callerSnapshot, receiverSnapshot] = await Promise.all([
+      cleanUserSnapshot(caller),
+      cleanUserSnapshot(receiver),
+    ]);
 
-     const call = await VideoCallSession.create({
+    const call = await VideoCallSession.create({
       id: callId,
       provider: "agora",
       callType: "video",
@@ -489,17 +505,18 @@ router.post("/start", authMiddleware, async (req, res) => {
       participants: [callerId, peerId],
       roomId,
       channelName: safeChannelName(callId),
-      caller: await cleanUserSnapshot(caller),
-      receiver: await cleanUserSnapshot(receiver),
+      caller: callerSnapshot,
+      receiver: receiverSnapshot,
       startedAt: new Date(),
       expiresAt: ringExpiresAt(),
       lastReason: "started",
     });
 
     const callerToken = createTokenForCall(call, callerId);
+    const callPayload = await publicCall(call);
 
-       emitToUser(peerId, "video-call:incoming", {
-      call: await publicCall(call),
+    emitToUser(peerId, "video-call:incoming", {
+      call: callPayload,
     });
 
     // ✅ Off-app / locked-phone fallback.
@@ -512,13 +529,13 @@ router.post("/start", authMiddleware, async (req, res) => {
     });
 
     emitToUser(callerId, "video-call:ringing", {
-      call: await publicCall(call),
+      call: callPayload,
       token: callerToken,
     });
 
     return res.json({
       ok: true,
-      call: await publicCall(call),
+      call: callPayload,
       token: callerToken,
     });
   } catch (err) {
@@ -812,18 +829,26 @@ router.post("/:callId/end", authMiddleware, async (req, res) => {
       });
     }
 
-      call.status = "ended";
+    call.status = "ended";
     call.endedAt = new Date();
     call.endedBy = me;
     call.lastReason = reason || "ended";
     await call.save();
 
-    await createCallHistoryMessage(call, "ended");
-    await emitCallEvent(call, "video-call:ended");
+    const callPayload = await publicCall(call);
+
+    // Tell both phones immediately. Chat-history persistence is not allowed
+    // to delay the actual hang-up signal or the caller's HTTP response.
+    emitToUser(call.callerId, "video-call:ended", { call: callPayload });
+    emitToUser(call.receiverId, "video-call:ended", { call: callPayload });
+
+    createCallHistoryMessage(call, "ended").catch((err) => {
+      console.error("❌ video call history write failed after end:", err);
+    });
 
     return res.json({
       ok: true,
-      call: await publicCall(call),
+      call: callPayload,
     });
   } catch (err) {
     console.error("❌ video call end error:", err);

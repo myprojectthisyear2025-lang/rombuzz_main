@@ -156,21 +156,22 @@ registerConnection(io);
 // ðŸ“¡ ROUTES (Modularized)
 // =====================================================
 
-// ðŸ” AUTH & PROFILE
+// 🔐 AUTH & PROFILE
 app.use('/api/auth', require('./routes/auth'));
 
 app.use('/api', require('./routes/profile'));
 
-// ðŸ‘¤ USERS & NOTIFICATIONS
+// 👤 USERS & NOTIFICATIONS
 app.use('/api/users', require('./routes/users'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/admin/announcements', require('./routes/adminAnnouncements'));
+app.use('/api/app-version', require('./routes/appVersion'));
 
-// âš™ï¸ SETTINGS & ACCOUNT
+// ⚙️ SETTINGS & ACCOUNT
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/account', require('./routes/account'));
 
-// ðŸ“ MICROBUZZ
+// 📍 MICROBUZZ
 app.use('/api/microbuzz', require('./routes/microbuzz'));
 
 // ðŸ POSTS / LETSBUZZ
