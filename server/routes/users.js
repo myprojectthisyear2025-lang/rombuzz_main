@@ -965,6 +965,7 @@ router.put("/me", authMiddleware, async (req, res) => {
       
       // Media
       "avatar",
+      "photos",
       "phone",
       "voiceUrl",
       "voiceDurationSec",
