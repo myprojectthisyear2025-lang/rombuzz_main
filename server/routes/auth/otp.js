@@ -61,7 +61,11 @@ router.post("/send-code", async (req, res) => {
     const emailLower = String(email).trim().toLowerCase();
     const now = new Date();
 
-    // 1️⃣ Find existing OTP state before generating/sending a fresh code.
+    // Release an expired deletion hold immediately when the email
+    // is used again. Do not wait for the six-hour cleanup worker.
+    await releaseExpiredDeletionHoldByEmail(emailLower);
+
+    // Find existing OTP state after any expired hold was released.
     let user = await User.findOne({ email: emailLower });
 
     if (user && isPendingDeleteUser(user)) {

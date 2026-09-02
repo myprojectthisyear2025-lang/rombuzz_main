@@ -27,6 +27,13 @@ function sendPendingDeleteAuthResponse(res, user) {
 function computeProfileComplete(user) {
   if (!user) return false;
 
+  // Once RomBuzz has successfully completed onboarding for an
+  // existing account, older profile-data shapes must not send that
+  // user back through signup.
+  if (user.hasOnboarded === true) {
+    return true;
+  }
+
   const required = [
     user.firstName,
     user.lastName,
@@ -36,7 +43,11 @@ function computeProfileComplete(user) {
   ];
 
   const hasPhotos =
-    Array.isArray(user.photos) && user.photos.length > 0;
+    (Array.isArray(user.photos) && user.photos.length > 0) ||
+    (Array.isArray(user.media) &&
+      user.media.some(
+        (item) => String(item?.type || "").toLowerCase() === "image"
+      ));
 
   const hasInterests =
     Array.isArray(user.interests) && user.interests.length > 0;

@@ -58,6 +58,8 @@ router.post("/login", async (req, res) => {
       { id: user.id },
       { profileComplete: isProfileComplete }
     );
+
+    user.profileComplete = isProfileComplete;
   }
 
   let match = false;
@@ -83,6 +85,7 @@ router.post("/login", async (req, res) => {
   );
 
   return res.json({
+    status: isProfileComplete ? "ok" : "incomplete_profile",
     token,
     user: baseSanitizeUser(user),
   });

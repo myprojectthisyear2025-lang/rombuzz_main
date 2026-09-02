@@ -54,6 +54,12 @@ function isPendingDeleteUser(user = {}) {
 
   return visibility === "pending_delete" || status === "pending_delete";
 }
+function getReleasedDeletionEmail(userId) {
+  const uid = normalizeId(userId)
+    .replace(/[^a-zA-Z0-9_-]/g, "");
+
+  return `deleted-${uid}-${Date.now()}@deleted.rombuzz.invalid`;
+}
 
 function getWalletNumbers(wallet = {}) {
   const balanceBC = Number(wallet?.balanceBC || 0);
@@ -68,6 +74,33 @@ function getWalletNumbers(wallet = {}) {
     totalBC,
     hasBalance: totalBC > 0,
   };
+}
+
+
+async function releaseExpiredDeletionHoldByEmail(email) {
+  const emailLower = normalizeEmail(email);
+  if (!emailLower) return false;
+
+  const now = new Date();
+
+  const expiredUser = await User.findOne({
+    email: emailLower,
+    $or: [
+      { visibility: "pending_delete" },
+      { deleteStatus: "pending_delete" },
+    ],
+    deleteAfter: { $lte: now },
+  })
+    .select("id email deleteAfter")
+    .lean();
+
+  if (!expiredUser) {
+    return false;
+  }
+
+  await permanentlyWipeDeletedUser(expiredUser.id);
+
+  return true;
 }
 
 async function getDeleteAccountPreview(userId) {
@@ -433,18 +466,23 @@ async function permanentlyWipeDeletedUser(userId) {
       { id: uid },
       {
         $set: {
+          // The 7-day email hold is over. Never let retryable media
+          // cleanup extend the user's email-reuse deadline.
+          email: getReleasedDeletionEmail(uid),
+          originalEmail: "",
           media: buildStorageRetryManifest(cleanup?.storage),
         },
       }
     );
 
     console.warn(
-      `⚠️ Permanent wipe postponed for ${uid}; cleanup still has failures.`
+      `⚠️ External cleanup still pending for ${uid}; email hold released.`
     );
 
     return {
-      success: false,
+      success: true,
       pendingCleanup: true,
+      emailReleased: true,
       userId: uid,
       cleanup,
     };
@@ -561,6 +599,7 @@ module.exports = {
   startAccountDeletion,
   permanentlyWipeDeletedUser,
   permanentlyWipeExpiredDeletedAccounts,
+  releaseExpiredDeletionHoldByEmail,
   startPendingDeletionCleanupJob,
   isPendingDeleteUser,
 };
