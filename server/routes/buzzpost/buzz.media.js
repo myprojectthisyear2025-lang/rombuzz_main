@@ -51,6 +51,10 @@ const {
   normalizeStreamUid,
 } = require("../../services/cloudflareStreamService");
 
+const {
+  deleteProfileMediaEverywhere,
+} = require("../../services/profileMediaDeletion");
+
 async function signR2Value(value, expiresInSeconds = 3600) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -1005,81 +1009,49 @@ router.patch("/media/:id/privacy", authMiddleware, async (req, res) => {
 });
 
 // =======================================================
-// ✅ Delete media (MongoDB)
+// ✅ Delete media permanently from profile + storage
 // =======================================================
 router.delete("/media/:id", authMiddleware, async (req, res) => {
   try {
-    const { id } = req.params;
-    const me = String(req.user.id);
-
-    const user = await User.findOne({ id: me });
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-     const mediaToDelete = (user.media || []).find((m) => String(m.id) === String(id));
-    const mediaKey = getStoredMediaR2Key(mediaToDelete || {});
-    const streamUid = getOwnerMediaStreamUid(mediaToDelete || {});
-
-    const stillReferenced = mediaKey
-      ? isOwnerR2KeyStillReferenced(user, mediaKey, id)
-      : false;
-
-    const streamStillReferenced = streamUid
-      ? isOwnerStreamUidStillReferenced(user, streamUid, id)
-      : false;
-
-    const before = Array.isArray(user.media) ? user.media.length : 0;
-    user.media = (user.media || []).filter((m) => String(m.id) !== String(id));
-    const changed = before !== user.media.length;
-
-    let storageDelete = {
-      deleted: false,
-      provider: mediaKey ? "r2" : "",
-      key: mediaKey || "",
-      reason: changed ? "no_r2_key" : "not_deleted_from_db",
-    };
-
-    let streamDelete = {
-      deleted: false,
-      provider: streamUid ? "cloudflare_stream" : "",
-      streamUid: streamUid || "",
-      reason: changed ? "no_stream_uid" : "not_deleted_from_db",
-    };
-
-    if (changed) {
-      user.markModified("media");
-      await user.save();
-
-      storageDelete = mediaKey && !stillReferenced
-        ? await deleteStoredR2ObjectBestEffort(mediaToDelete, `buzz-media:${me}:${id}`)
-        : {
-            deleted: false,
-            provider: mediaKey ? "r2" : "",
-            key: mediaKey || "",
-            reason: stillReferenced ? "still_referenced" : "no_r2_key",
-          };
-
-      streamDelete = streamUid && !streamStillReferenced
-        ? await deleteCloudflareStreamVideoBestEffort(streamUid, `buzz-media:${me}:${id}`)
-        : {
-            deleted: false,
-            provider: streamUid ? "cloudflare_stream" : "",
-            streamUid: streamUid || "",
-            reason: streamStillReferenced ? "still_referenced" : "no_stream_uid",
-          };
-    }
-
-    return res.json({
-      success: changed,
-      deletedFromR2: !!storageDelete.deleted,
-      deletedFromStream: !!streamDelete.deleted,
-      storageDelete,
-      streamDelete,
+    const result = await deleteProfileMediaEverywhere({
+      userId: req.user.id,
+      mediaId: req.params.id,
+      mediaUrl:
+        req.body?.mediaUrl ||
+        req.body?.url ||
+        "",
+      r2Key:
+        req.body?.r2Key ||
+        req.body?.fileKey ||
+        "",
+      streamUid:
+        req.body?.streamUid ||
+        req.body?.uid ||
+        "",
     });
+
+    if (result.reason === "user_not_found") {
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
+
+    if (!result.found) {
+      return res.status(404).json({
+        error: "Media not found",
+      });
+    }
+
+    return res.json(result);
   } catch (err) {
-    console.error("❌ DELETE /media/:id error:", err);
-    return res.status(500).json({ error: "Failed to delete media" });
+    console.error(
+      "❌ DELETE /media/:id error:",
+      err
+    );
+
+    return res.status(500).json({
+      error: "Failed to delete media",
+    });
   }
 });
 
