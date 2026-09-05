@@ -62,6 +62,7 @@ router.post(
         gender,
         dob,
         lookingFor,
+        relationshipStyle,
         interestedIn,
 
         city,
@@ -167,6 +168,7 @@ router.post(
                 verifiedDob,
 
               lookingFor,
+              relationshipStyle,
               interestedIn,
               city,
               height,
@@ -200,6 +202,7 @@ router.post(
             verifiedDob,
 
           lookingFor,
+          relationshipStyle,
           interestedIn,
           city,
           height,

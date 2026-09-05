@@ -55,6 +55,11 @@ async function completeExistingUser({
   user.dob = data.dob;
   user.lookingFor = data.lookingFor;
 
+  if (data.relationshipStyle !== undefined) {
+    user.relationshipStyle =
+      data.relationshipStyle;
+  }
+
   if (data.city !== undefined) {
     user.city = data.city;
   }
@@ -162,6 +167,8 @@ async function createNewUser({
     gender: data.gender,
     dob: data.dob,
     lookingFor: data.lookingFor,
+    relationshipStyle:
+      data.relationshipStyle || "",
     interestedIn:
       data.interestedIn,
 

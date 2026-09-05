@@ -51,9 +51,13 @@ const userSchema = new mongoose.Schema(
     longitude: { type: Number, default: null },
     location: { type: Object, default: null },
     distanceVisibility: { type: String, default: "public" },
+  // Legacy/web compatibility — do not remove.
     travelMode: { type: Boolean, default: false },
-    bio: { type: String, default: "" },
+
+    // Mobile Travel Vibe — user may select up to 5.
+    travelVibes: { type: [String], default: [] },    bio: { type: String, default: "" },
     voiceUrl: { type: String, default: "" },
+    voiceDurationSec: { type: Number, default: 0 },
     vibeTags: { type: [String], default: [] },
     lookingFor: { type: String, default: "" },
     relationshipStyle: { type: String, default: "" },

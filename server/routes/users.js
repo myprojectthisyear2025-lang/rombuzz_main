@@ -906,7 +906,13 @@ router.put("/me", authMiddleware, async (req, res) => {
       "latitude",
       "longitude",
       "distanceVisibility",
+
+      // Legacy/web compatibility.
       "travelMode",
+
+      // Mobile Travel Vibe.
+      "travelVibes",
+
       "location",
 
       // About
@@ -1016,6 +1022,29 @@ router.put("/me", authMiddleware, async (req, res) => {
 
     if (updates.favorites !== undefined) {
       updates.favorites = toStringArray(updates.favorites);
+    }
+
+    if (updates.travelVibes !== undefined) {
+      updates.travelVibes = [
+        ...new Set(toStringArray(updates.travelVibes)),
+      ].slice(0, 5);
+    }
+
+    if (updates.languages !== undefined) {
+      const seenLanguages = new Set();
+
+      updates.languages = toStringArray(updates.languages)
+        .filter((language) => {
+          const key = language.toLowerCase();
+
+          if (!key || seenLanguages.has(key)) {
+            return false;
+          }
+
+          seenLanguages.add(key);
+          return true;
+        })
+        .slice(0, 5);
     }
 
     updates.updatedAt = Date.now();
@@ -1149,7 +1178,14 @@ router.get("/:id", authMiddleware, async (req, res) => {
         pronouns: user.pronouns,
         country: user.country,
         hometown: user.hometown,
+
+        // Keep legacy website field.
         travelMode: user.travelMode,
+
+        // New mobile Travel Vibe selections.
+        travelVibes: Array.isArray(user.travelVibes)
+          ? user.travelVibes.slice(0, 5)
+          : [],
 
         relationshipStyle: user.relationshipStyle,
         bodyType: user.bodyType,
@@ -1164,7 +1200,9 @@ router.get("/:id", authMiddleware, async (req, res) => {
         school: user.school,
         jobTitle: user.jobTitle,
         company: user.company,
-        languages: user.languages,
+        languages: Array.isArray(user.languages)
+          ? user.languages.slice(0, 5)
+          : [],
 
         religion: user.religion,
         politicalViews: user.politicalViews,

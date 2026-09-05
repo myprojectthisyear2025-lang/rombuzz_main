@@ -48,6 +48,14 @@ const { onlineUsers } = require("../models/state");
 const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 
 const helpers = require("../utils/helpers");
+const {
+  normalizeLookingFor,
+  getLookingForMatchValues,
+} = require("../utils/lookingForCompatibility");
+const {
+  normalizeRelationshipStyle,
+  getRelationshipStyleMatchValues,
+} = require("../utils/relationshipStyleCompatibility");
 
 function normalizeMediaString(value = "") {
   return String(value || "").trim();
@@ -371,11 +379,15 @@ router.get("/", authMiddleware, async (req, res) => {
       baseQuery.gender = new RegExp(`^${escapeRegex(prefGender)}$`, "i");
     }
 
-    // ✅ LookingFor filtering (STRICT) + Premium-only intents gate
-    const requestedLookingFor = String(lookingFor || "").toLowerCase().trim();
-    const phaseMode = String(phase || "strict").toLowerCase().trim();
+    // ✅ LookingFor filtering (STRICT) + Premium-only intents gate.
+    // Mobile uses canonical keys; website-only intents remain supported.
+   const requestedLookingFor = normalizeLookingFor(lookingFor);
+const requestedRelationshipStyle =
+  normalizeRelationshipStyle(relationshipStyle);
 
-    const PREMIUM_INTENTS = new Set(["ons", "threesome", "onlyfans"]);
+const phaseMode = String(phase || "strict").toLowerCase().trim();
+
+const PREMIUM_INTENTS = new Set(["ons", "threesome", "onlyfans"]);
     const allowPremiumIntents = canUseRestricted(me);
 
     const allowRequestedLookingFor =
@@ -385,17 +397,22 @@ router.get("/", authMiddleware, async (req, res) => {
       allowPremiumIntents;
 
     // Strict phase enforces the filter.
-    // Fallback phase DOES NOT enforce it (it only boosts similarity).
+    // Fallback phase DOES NOT enforce it.
     if (
       requestedLookingFor &&
       requestedLookingFor !== "all" &&
       phaseMode !== "fallback" &&
       allowRequestedLookingFor
     ) {
-      baseQuery.lookingFor = new RegExp(
-        `^${escapeRegex(requestedLookingFor)}$`,
-        "i"
+      const lookingForMatchValues = getLookingForMatchValues(
+        requestedLookingFor
       );
+
+      baseQuery.lookingFor = {
+        $in: lookingForMatchValues.map(
+          (value) => new RegExp(`^${escapeRegex(value)}$`, "i")
+        ),
+      };
     }
 
       if (requestedVibe && allowRequestedVibe) {
@@ -415,15 +432,22 @@ router.get("/", authMiddleware, async (req, res) => {
 
     // Advanced filters apply only in strict mode.
     // Once client switches to fallback, these are relaxed automatically.
-    if (phaseMode !== "fallback") {
-      if (relationshipStyle) {
-        baseQuery.relationshipStyle = new RegExp(
-          `^${escapeRegex(relationshipStyle)}$`,
-          "i"
-        );
-      }
+  if (phaseMode !== "fallback") {
+  if (requestedRelationshipStyle) {
+    const relationshipStyleMatchValues =
+      getRelationshipStyleMatchValues(
+        requestedRelationshipStyle
+      );
 
-      if (bodyType) {
+    baseQuery.relationshipStyle = {
+      $in: relationshipStyleMatchValues.map(
+        (value) =>
+          new RegExp(`^${escapeRegex(value)}$`, "i")
+      ),
+    };
+  }
+
+  if (bodyType) {
         baseQuery.bodyType = new RegExp(`^${escapeRegex(bodyType)}$`, "i");
       }
 
@@ -652,7 +676,7 @@ router.get("/", authMiddleware, async (req, res) => {
       (self.hobbies || []).map((x) => String(x).toLowerCase())
     );
 
-    const selfLookingFor = (self.lookingFor || "").toLowerCase();
+    const selfLookingFor = normalizeLookingFor(self.lookingFor);
     const selfVibe = (self.vibe || "").toLowerCase();
 
     const withScores = pool.map((u) => {
@@ -667,7 +691,7 @@ router.get("/", authMiddleware, async (req, res) => {
       // - In STRICT phase: results are already filtered, but keep a small boost anyway
       // - In FALLBACK phase: boost "closest match" (same lookingFor OR requestedLookingFor)
       let lookingForScore = 0;
-      const uLookingFor = (u.lookingFor || "").toLowerCase();
+      const uLookingFor = normalizeLookingFor(u.lookingFor);
 
       if (selfLookingFor && uLookingFor === selfLookingFor) {
         lookingForScore = 0.25;
@@ -718,9 +742,16 @@ router.get("/", authMiddleware, async (req, res) => {
           String(a || "").toLowerCase() &&
           String(a || "").toLowerCase() === String(b || "").toLowerCase();
 
-        if (eq(self.relationshipStyle, u.relationshipStyle)) fallbackSimilarity += 0.12;
-        if (eq(self.fitnessLevel, u.fitnessLevel)) fallbackSimilarity += 0.06;
-        if (eq(self.workoutFrequency, u.workoutFrequency)) fallbackSimilarity += 0.06;
+    if (
+  normalizeRelationshipStyle(self.relationshipStyle) &&
+  normalizeRelationshipStyle(self.relationshipStyle) ===
+    normalizeRelationshipStyle(u.relationshipStyle)
+) {
+  fallbackSimilarity += 0.12;
+}
+
+if (eq(self.fitnessLevel, u.fitnessLevel)) fallbackSimilarity += 0.06;
+if (eq(self.workoutFrequency, u.workoutFrequency)) fallbackSimilarity += 0.06;
 
         if (eq(self.smoking, u.smoking)) fallbackSimilarity += 0.05;
         if (eq(self.drinking, u.drinking)) fallbackSimilarity += 0.05;
@@ -818,6 +849,13 @@ router.get("/", authMiddleware, async (req, res) => {
             height: u.height || null,
             city: u.city || "",
             orientation: u.orientation || "",
+            relationshipStyle: u.relationshipStyle || "",
+
+            // New mobile Travel Vibe preview.
+            travelVibes: Array.isArray(u.travelVibes)
+              ? u.travelVibes.slice(0, 5)
+              : [],
+
             interests: u.interests || [],
             hobbies: u.hobbies || [],
             favorites: u.favorites || [],
