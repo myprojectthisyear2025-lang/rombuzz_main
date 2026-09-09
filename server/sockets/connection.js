@@ -425,6 +425,12 @@ function registerConnection(io) {  io.on("connection", (socket) => {
       }
     });
 
+    // Keep the shared onlineUsers map from pointing at a dead socket.
+    socket.on("disconnect", () => {
+      if (currentUserId && onlineUsers[currentUserId] === socket.id) {
+        delete onlineUsers[currentUserId];
+      }
+    });
 
   });
 }

@@ -42,8 +42,7 @@ const {
   validateMediaFile,
 } = require("../utils/r2Media");
 
-// ✅ Correct shared realtime state + socket access
-const { onlineUsers } = require("../models/state");
+// ✅ Shared Socket.IO access
 const { getIO } = require("../socket");
 
 // Mongo + models
@@ -74,6 +73,8 @@ function normalizeMediaString(value = "") {
 
 const MICROBUZZ_SELFIE_TTL_MS = 5 * 60 * 1000;
 const MICROBUZZ_SELFIE_SIGN_SECONDS = 5 * 60;
+const MICROBUZZ_CLEANUP_INTERVAL_MS = 60 * 1000;
+let lastMicroBuzzCleanupAt = 0;
 
 function isMicroBuzzR2SelfieKey(value = "") {
   return normalizeMediaString(value).startsWith("microbuzz-selfies/");
@@ -115,7 +116,20 @@ function scheduleMicroBuzzSelfieDelete(key) {
 }
 
 async function cleanupExpiredMicroBuzzPresences() {
-  const expiredBefore = new Date(Date.now() - MICROBUZZ_SELFIE_TTL_MS);
+  const now = Date.now();
+
+  if (
+    now - lastMicroBuzzCleanupAt <
+    MICROBUZZ_CLEANUP_INTERVAL_MS
+  ) {
+    return;
+  }
+
+  lastMicroBuzzCleanupAt = now;
+
+  const expiredBefore = new Date(
+    now - MICROBUZZ_SELFIE_TTL_MS
+  );
 
   const expired = await MicroBuzzPresence.find({
     updatedAt: { $lt: expiredBefore },
@@ -159,6 +173,60 @@ async function signMicroBuzzPresence(presence = {}, expiresInSeconds = 21600) {
       presence.selfieUrl,
       expiresInSeconds
     ),
+  };
+}
+
+async function buildIncomingBuzzPayload(fromId) {
+  const cutoff = new Date(
+    Date.now() - MICROBUZZ_SELFIE_TTL_MS
+  );
+
+  const [profile, presence] = await Promise.all([
+    User.findOne({
+      id: fromId,
+      visibility: { $ne: "pending_delete" },
+      deleteStatus: { $ne: "pending_delete" },
+    })
+      .select("id firstName lastName dob")
+      .lean(),
+
+    MicroBuzzPresence.findOne({
+      userId: fromId,
+      updatedAt: { $gte: cutoff },
+    }).lean(),
+  ]);
+
+  if (!profile || !presence) return null;
+
+  const firstName =
+    profile.firstName || "Someone";
+
+  const lastName =
+    profile.lastName || "";
+
+  const name =
+    [firstName, lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+  return {
+    fromId: String(fromId),
+    firstName,
+    lastName,
+    name,
+    dob: profile.dob || "",
+
+    selfieUrl:
+      await signMicroBuzzSelfieValue(
+        presence.selfieUrl,
+        MICROBUZZ_SELFIE_SIGN_SECONDS
+      ),
+
+    message:
+      `${firstName} wants to match with you!`,
+
+    type: "microbuzz",
   };
 }
 
@@ -238,15 +306,31 @@ router.post("/activate", authMiddleware, async (req, res) => {
       offsetLng = (Math.random() - 0.5) * 0.0005;
     }
 
-     const storedSelfieValue = normalizeMediaString(selfieUrl);
+    const storedSelfieValue =
+      normalizeMediaString(selfieUrl);
+
+    const storedLat =
+      latNum + offsetLat;
+
+    const storedLng =
+      lngNum + offsetLng;
 
     await MicroBuzzPresence.findOneAndUpdate(
       { userId },
       {
         userId,
         selfieUrl: storedSelfieValue,
-        lat: latNum + offsetLat,
-        lng: lngNum + offsetLng,
+        lat: storedLat,
+        lng: storedLng,
+
+        location: {
+          type: "Point",
+          coordinates: [
+            storedLng,
+            storedLat,
+          ],
+        },
+
         updatedAt: new Date(),
       },
       { upsert: true }
@@ -301,16 +385,66 @@ router.get("/nearby", authMiddleware, async (req, res) => {
 
     await cleanupExpiredMicroBuzzPresences();
 
-    const fiveMinutesAgo = new Date(Date.now() - MICROBUZZ_SELFIE_TTL_MS);
+    const fiveMinutesAgo =
+      new Date(
+        Date.now() -
+          MICROBUZZ_SELFIE_TTL_MS
+      );
 
-    // 🌐 Raw active presences near me (except myself)
-    const allActive = await MicroBuzzPresence.find({
-      updatedAt: { $gte: fiveMinutesAgo },
-      userId: { $ne: userId },
-    }).lean();
+    const radiusMeters =
+      radiusKm * 1000;
+
+    // MongoDB performs the actual distance search.
+    // This uses the full real radius instead of loading
+    // every active MicroBuzz user into Node.
+    const allActive =
+      await MicroBuzzPresence.aggregate([
+        {
+          $geoNear: {
+            near: {
+              type: "Point",
+              coordinates: [
+                lng,
+                lat,
+              ],
+            },
+
+            key: "location",
+            distanceField:
+              "distanceMeters",
+
+            maxDistance:
+              radiusMeters,
+
+            spherical: true,
+
+            query: {
+              updatedAt: {
+                $gte:
+                  fiveMinutesAgo,
+              },
+
+              userId: {
+                $ne: userId,
+              },
+            },
+          },
+        },
+
+        {
+          $project: {
+            _id: 0,
+            userId: 1,
+            selfieUrl: 1,
+            distanceMeters: 1,
+          },
+        },
+      ]);
 
     if (!allActive.length) {
-      return res.json({ users: [] });
+      return res.json({
+        users: [],
+      });
     }
 
     // 🔎 Load only profiles that are still visible/active in the product.
@@ -323,33 +457,39 @@ router.get("/nearby", authMiddleware, async (req, res) => {
       .select("id gender dob")
       .lean();
 
-    const usersById = new Map(candidateUsers.map((u) => [u.id, u]));
+    const usersById =
+      new Map(
+        candidateUsers.map(
+          (u) => [u.id, u]
+        )
+      );
 
-      const rawUsers = allActive
-      .map((presence) => {
-        const u = usersById.get(presence.userId);
+    const rawUsers = allActive
+      .map((presence) => ({
+        id:
+          presence.userId,
 
-        // Distance in meters between me and this presence
-        const dKm =
-          Math.sqrt((presence.lat - lat) ** 2 + (presence.lng - lng) ** 2) *
-          111;
-        const distanceMeters = dKm * 1000;
+        selfieUrl:
+          presence.selfieUrl,
 
-        return {
-          id: presence.userId,
-          selfieUrl: presence.selfieUrl,
-          distanceMeters,
-          _user: u || null, // attach for filtering only
-        };
-      })
-      // 1) Drop orphaned / pending-delete presences before any user-facing filtering.
-      .filter((item) => Boolean(item._user))
-      // 2) Distance cap: MicroBuzz hard-locked to ~0–100m in prod
-      .filter((item) => {
-        if (process.env.NODE_ENV !== "production") return true;
-        return item.distanceMeters <= radiusKm * 1000;
-      })
-      // 3) Gender preference filter
+        distanceMeters:
+          Number(
+            presence.distanceMeters
+          ) || 0,
+
+        _user:
+          usersById.get(
+            presence.userId
+          ) || null,
+      }))
+
+      // Drop orphaned / pending-delete presences.
+      .filter(
+        (item) =>
+          Boolean(item._user)
+      )
+
+      // Gender preference filter
       .filter((item) => {
         const u = item._user;
         if (!prefGender || prefGender === "everyone") return true;
@@ -420,308 +560,551 @@ router.post("/deactivate", authMiddleware, async (req, res) => {
 });
 
 /* ============================================================
-   💞 BUZZ REQUEST + MATCH CONFIRM
+   💌 RECOVER LATEST INCOMING BUZZ
+============================================================ */
+router.get("/incoming", authMiddleware, async (req, res) => {
+  try {
+    if (!(await enforceMicroBuzzAllowed(req, res))) return;
+
+    const cutoff = new Date(
+      Date.now() - MICROBUZZ_SELFIE_TTL_MS
+    );
+
+    const pending = await MicroBuzzBuzz.findOne({
+      toId: req.user.id,
+      time: { $gte: cutoff },
+    })
+      .sort({ time: -1 })
+      .lean();
+
+    if (!pending) {
+      return res.json({ request: null });
+    }
+
+    const alreadyMatched = await Match.exists({
+      users: {
+        $all: [
+          pending.fromId,
+          req.user.id,
+        ],
+      },
+    });
+
+    if (alreadyMatched) {
+      await MicroBuzzBuzz.deleteOne({
+        _id: pending._id,
+      });
+
+      return res.json({
+        request: null,
+      });
+    }
+
+    const request =
+      await buildIncomingBuzzPayload(
+        pending.fromId
+      );
+
+    if (!request) {
+      await MicroBuzzBuzz.deleteOne({
+        _id: pending._id,
+      });
+
+      return res.json({
+        request: null,
+      });
+    }
+
+    return res.json({ request });
+  } catch (err) {
+    console.error(
+      "❌ /api/microbuzz/incoming error:",
+      err
+    );
+
+    return res.status(500).json({
+      error:
+        "Incoming Buzz fetch failed",
+    });
+  }
+});
+
+/* ============================================================
+   💞 BUZZ REQUEST + ACCEPT / REJECT / IGNORE
 ============================================================ */
 router.post("/buzz", authMiddleware, async (req, res) => {
   try {
     if (!(await enforceMicroBuzzAllowed(req, res))) return;
 
-    // ✅ Socket.IO instance
     const io = getIO();
-const { toId, confirm } = req.body || {};
-const fromId = req.user.id;
 
-if (!toId) return res.status(400).json({ error: "toId required" });
+    const {
+      toId,
+      confirm,
+    } = req.body || {};
 
-// 🚫 Never allow stale MicroBuzz actions against a deleted account.
-const targetUser = await User.findOne({
-  id: toId,
-  visibility: { $ne: "pending_delete" },
-  deleteStatus: { $ne: "pending_delete" },
-})
-  .select("id")
-  .lean();
+    const fromId =
+      req.user.id;
 
-if (!targetUser) {
-  return res.status(404).json({ error: "User not found" });
-}
+    if (!toId) {
+      return res.status(400).json({
+        error: "toId required",
+      });
+    }
 
-// 🚫 Ignore check (permanent MicroBuzz ignore)
-const ignored = await MicroBuzzIgnore.findOne({
-  byId: toId,
-  fromId: fromId,
-});
+    if (
+      String(toId) ===
+      String(fromId)
+    ) {
+      return res.status(400).json({
+        error:
+          "Cannot Buzz yourself",
+      });
+    }
 
-if (ignored) {
-  // silently drop buzz
-  return res.json({ ignored: true });
-}
+    const targetUser =
+      await User.findOne({
+        id: toId,
 
-    const fromPresence = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
-    const toPresence = await MicroBuzzPresence.findOne({ userId: toId }).lean();
+        visibility: {
+          $ne: "pending_delete",
+        },
 
-    const calcDistance = () => {
-      if (!fromPresence || !toPresence) return null;
-      const dx = (fromPresence.lat - toPresence.lat) * 111000;
-      const dy = (fromPresence.lng - toPresence.lng) * 111000;
-      return Math.sqrt(dx * dx + dy * dy);
-    };
+        deleteStatus: {
+          $ne: "pending_delete",
+        },
+      })
+        .select(
+          "id firstName"
+        )
+        .lean();
 
- const distanceMeters = calcDistance();
-const reverseBuzz = await MicroBuzzBuzz.findOne({ fromId: toId, toId: fromId });
-// ✅ PREVENT LOOPING — If already matched, do NOT send any buzz popup again
-const alreadyMatched = await Match.findOne({ users: { $all: [fromId, toId] } });
+    if (!targetUser) {
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
 
-if (alreadyMatched) {
-  // 🔁 They were matched before (Discover, old flow, etc.)
-  const fromPresence = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
-  const toPresence = await MicroBuzzPresence.findOne({ userId: toId }).lean();
+    const ignored =
+      await MicroBuzzIgnore.findOne({
+        byId: toId,
+        fromId,
+      }).lean();
 
-  // 🧑 Fetch profiles for names (John / Katy)
-  const [fromProfile, toProfile] = await Promise.all([
-    User.findOne({ id: fromId }).lean(),
-    User.findOne({ id: toId }).lean(),
-  ]);
+    if (ignored) {
+      return res.json({
+        ignored: true,
+      });
+    }
 
-  const fromName = fromProfile?.firstName || "Someone";
-  const toName = toProfile?.firstName || "Someone";
+    const alreadyMatched =
+      await Match.findOne({
+        users: {
+          $all: [
+            fromId,
+            toId,
+          ],
+        },
+      }).lean();
 
-  // 🧵 Shared chat room id (sorted for consistency)
-  const roomId = [fromId, toId].sort().join("_");
+    if (alreadyMatched) {
+      const otherPresence =
+        await MicroBuzzPresence
+          .findOne({
+            userId: toId,
+          })
+          .lean();
 
-  const [signedFromPresence, signedToPresence] = await Promise.all([
-    signMicroBuzzPresence(fromPresence, 21600),
-    signMicroBuzzPresence(toPresence, 21600),
-  ]);
+      return res.json({
+        matched: true,
+        alreadyMatched: true,
 
-  // 🎉 Live "match" event for BOTH users (with extra data)
-  [fromId, toId].forEach((uid) => {
-    const other = uid === fromId ? toId : fromId;
-    const otherSelfie =
-      uid === fromId
-        ? signedToPresence?.selfieUrl
-        : signedFromPresence?.selfieUrl;
-    const otherDisplayName = uid === fromId ? toName : fromName;
+        otherUserId:
+          String(toId),
 
-    if (onlineUsers[uid]) {
-      io.to(onlineUsers[uid]).emit("match", {
-        otherUserId: other,
-        otherName: otherDisplayName,
-        selfieUrl: otherSelfie,
-        roomId,
+        otherName:
+          targetUser.firstName ||
+          "Someone",
+
+        selfieUrl:
+          await signMicroBuzzSelfieValue(
+            otherPresence?.selfieUrl,
+            MICROBUZZ_SELFIE_SIGN_SECONDS
+          ),
+
+        roomId:
+          [fromId, toId]
+            .sort()
+            .join("_"),
+
         via: "microbuzz",
       });
     }
-  });
 
-  // 🔔 Personalized notifications with 2 clear actions:
-  //  - View Profile (href)
-  //  - Chat (entity: "chat", entityId: roomId)
-  try {
-  await Promise.all([
-  sendNotification(fromId, {
-    type: "match",
-    fromId: toId,
-    via: "microbuzz",
-    message: `You and ${toName} matched with each other 💞`,
-    href: `/viewProfile/${toId}`,
-    entity: "chat",
-    entityId: roomId,
-  }),
+    const reverseBuzz =
+      await MicroBuzzBuzz.findOne({
+        fromId: toId,
+        toId: fromId,
+      }).lean();
 
-  sendNotification(toId, {
-    type: "match",
-    fromId: fromId,
-    via: "microbuzz",
-    message: `You and ${fromName} matched with each other 💞`,
-    href: `/viewProfile/${fromId}`,
-    entity: "chat",
-    entityId: roomId,
-  }),
-]);
+    if (reverseBuzz) {
+      if (confirm === "ignore") {
+        await MicroBuzzIgnore
+          .findOneAndUpdate(
+            {
+              byId: fromId,
+              fromId: toId,
+            },
+            {
+              byId: fromId,
+              fromId: toId,
+            },
+            {
+              upsert: true,
+              setDefaultsOnInsert:
+                true,
+            }
+          );
 
-  } catch (e) {
-    console.warn("❌ MicroBuzz match notification failed:", e);
-  }
+        await MicroBuzzBuzz.deleteMany({
+          $or: [
+            {
+              fromId,
+              toId,
+            },
+            {
+              fromId: toId,
+              toId: fromId,
+            },
+          ],
+        });
 
-  return res.json({ matched: true });
-}
-
-/* ============================================================
-   MUTUAL BUZZ → MATCH (loop-proof)
-============================================================ */
-if (reverseBuzz) {
-  if (confirm === true) {
-    // Clean up pending buzzes
-    await MicroBuzzBuzz.deleteMany({
-      $or: [
-        { fromId, toId },
-        { fromId: toId, toId: fromId },
-      ],
-    });
-
-    // Create match if not exists
-    const exists = await Match.findOne({ users: { $all: [fromId, toId] } });
-    if (!exists) {
-      await Match.create({
-        id: `${fromId}_${toId}_${Date.now()}`,
-        user1: fromId,
-        user2: toId,
-        users: [fromId, toId], // still included for array lookups
-        type: "microbuzz",
-        createdAt: new Date(),
-      });
-    }
-
-    // Notify both users: MATCHED!
-    const fromPresence = await MicroBuzzPresence.findOne({ userId: fromId }).lean();
-    const toPresence = await MicroBuzzPresence.findOne({ userId: toId }).lean();
-
-    // 🧑 Fetch profiles for names
-    const [fromProfile, toProfile] = await Promise.all([
-      User.findOne({ id: fromId }).lean(),
-      User.findOne({ id: toId }).lean(),
-    ]);
-
-    const fromName = fromProfile?.firstName || "Someone";
-    const toName = toProfile?.firstName || "Someone";
-
-    // 🧵 Shared chat room id (same for both sides)
-    const roomId = [fromId, toId].sort().join("_");
-
-      const [signedFromPresence, signedToPresence] = await Promise.all([
-      signMicroBuzzPresence(fromPresence, 21600),
-      signMicroBuzzPresence(toPresence, 21600),
-    ]);
-
-    // 🎉 Live "match" event for BOTH users (with room + names)
-    [fromId, toId].forEach((uid) => {
-      const other = uid === fromId ? toId : fromId;
-      const otherSelfie =
-        uid === fromId
-          ? signedToPresence?.selfieUrl
-          : signedFromPresence?.selfieUrl;
-      const otherDisplayName = uid === fromId ? toName : fromName;
-
-      if (onlineUsers[uid]) {
-        io.to(onlineUsers[uid]).emit("match", {
-          otherUserId: other,
-          otherName: otherDisplayName,
-          selfieUrl: otherSelfie,
-          roomId,
-          via: "microbuzz",
+        return res.json({
+          ignored: true,
         });
       }
-    });
 
-    // 🔔 Personalized match notifications for BOTH:
-    // John: "You and Katy matched..." → View Katy + Chat
-    // Katy: "You and John matched..." → View John + Chat
-    try {
-     await Promise.all([
-  sendNotification(fromId, {
-    type: "match",
-    fromId: toId,
-    via: "microbuzz",
-    message: `You and ${toName} matched with each other 💞`,
-    href: `/viewProfile/${toId}`,
-    entity: "chat",
-    entityId: roomId,
-  }),
+      if (confirm === false) {
+        await MicroBuzzBuzz.deleteMany({
+          $or: [
+            {
+              fromId,
+              toId,
+            },
+            {
+              fromId: toId,
+              toId: fromId,
+            },
+          ],
+        });
 
-  sendNotification(toId, {
-    type: "match",
-    fromId: fromId,
-    via: "microbuzz",
-    message: `You and ${fromName} matched with each other 💞`,
-    href: `/viewProfile/${fromId}`,
-    entity: "chat",
-    entityId: roomId,
-  }),
-]);
+        return res.json({
+          rejected: true,
+        });
+      }
 
-    } catch (e) {
-      console.warn("❌ MicroBuzz match notification failed:", e);
-    }
+      if (confirm !== true) {
+        const request =
+          await buildIncomingBuzzPayload(
+            toId
+          );
 
-    // Final response
-    return res.json({ matched: true });
-  }
+        return res.json({
+          pending: true,
+          requiresConfirm: true,
+          request,
+        });
+      }
 
-  // 🚫 IGNORE (hard, permanent)
-  if (confirm === "ignore") {
-    await MicroBuzzIgnore.create({
-      byId: fromId,
-      fromId: toId,
-    });
-
-    await MicroBuzzBuzz.deleteOne({ fromId: toId, toId: fromId });
-    return res.json({ ignored: true });
-  }
-
-  // ❌ REJECT (soft reset — allow fresh buzz both ways)
-if (confirm === false) {
-  await MicroBuzzBuzz.deleteMany({
-    $or: [
-      { fromId: fromId, toId: toId },
-      { fromId: toId, toId: fromId },
-    ],
-  });
-
-  return res.json({ rejected: true });
-}
-
-
-  // ⏳ waiting for confirm
-  return res.json({ pending: true, requiresConfirm: true });
-}
-
-      /* ============================================================
-         ONE-WAY BUZZ
-    ============================================================ */
-    const exists = await MicroBuzzBuzz.findOne({ fromId, toId });
-    if (!exists) {
-      await MicroBuzzBuzz.create({ fromId, toId, time: new Date() });
-    }
-
-    // Fetch real user profile to get firstName
-    const fromProfile = await User.findOne({ id: fromId }).lean();
-    const firstName = fromProfile?.firstName || "Someone";
-
-    // 🔔 Create a stored notification + trigger navbar badge
-    try {
-      await sendNotification(toId, {
-        fromId,
-        type: "buzz",
-        via: "microbuzz",
-        message: `${firstName} wants to buzz you!`,
-        href: `/viewProfile/${fromId}`,
+      await MicroBuzzBuzz.deleteMany({
+        $or: [
+          {
+            fromId,
+            toId,
+          },
+          {
+            fromId: toId,
+            toId: fromId,
+          },
+        ],
       });
-    } catch (e) {
-      console.warn("MicroBuzz one-way notification failed:", e);
+
+      const exists =
+        await Match.findOne({
+          users: {
+            $all: [
+              fromId,
+              toId,
+            ],
+          },
+        });
+
+      if (!exists) {
+        await Match.create({
+          id:
+            `${fromId}_${toId}_${Date.now()}`,
+
+          users: [
+            fromId,
+            toId,
+          ],
+
+          status:
+            "matched",
+
+          createdAt:
+            new Date(),
+        });
+      }
+
+      const [
+        fromProfile,
+        toProfile,
+        fromPresence,
+        toPresence,
+      ] = await Promise.all([
+        User.findOne({
+          id: fromId,
+        })
+          .select("firstName")
+          .lean(),
+
+        User.findOne({
+          id: toId,
+        })
+          .select("firstName")
+          .lean(),
+
+        MicroBuzzPresence
+          .findOne({
+            userId: fromId,
+          })
+          .lean(),
+
+        MicroBuzzPresence
+          .findOne({
+            userId: toId,
+          })
+          .lean(),
+      ]);
+
+      const fromName =
+        fromProfile?.firstName ||
+        "Someone";
+
+      const toName =
+        toProfile?.firstName ||
+        "Someone";
+
+      const roomId =
+        [fromId, toId]
+          .sort()
+          .join("_");
+
+      const [
+        fromSelfie,
+        toSelfie,
+      ] = await Promise.all([
+        signMicroBuzzSelfieValue(
+          fromPresence?.selfieUrl,
+          MICROBUZZ_SELFIE_SIGN_SECONDS
+        ),
+
+        signMicroBuzzSelfieValue(
+          toPresence?.selfieUrl,
+          MICROBUZZ_SELFIE_SIGN_SECONDS
+        ),
+      ]);
+
+      const forAccepter = {
+        otherUserId:
+          String(toId),
+
+        otherName:
+          toName,
+
+        selfieUrl:
+          toSelfie,
+
+        roomId,
+        via: "microbuzz",
+      };
+
+      const forSender = {
+        otherUserId:
+          String(fromId),
+
+        otherName:
+          fromName,
+
+        selfieUrl:
+          fromSelfie,
+
+        roomId,
+        via: "microbuzz",
+      };
+
+      // Send through private user rooms.
+      io.to(
+        String(fromId)
+      ).emit(
+        "match",
+        forAccepter
+      );
+
+      io.to(
+        String(toId)
+      ).emit(
+        "match",
+        forSender
+      );
+
+      try {
+        await Promise.all([
+          sendNotification(
+            fromId,
+            {
+              type: "match",
+              fromId: toId,
+              via: "microbuzz",
+
+              message:
+                `You and ${toName} matched with each other 💞`,
+
+              href:
+                `/viewProfile/${toId}`,
+
+              entity:
+                "chat",
+
+              entityId:
+                roomId,
+            }
+          ),
+
+          sendNotification(
+            toId,
+            {
+              type: "match",
+              fromId,
+              via: "microbuzz",
+
+              message:
+                `You and ${fromName} matched with each other 💞`,
+
+              href:
+                `/viewProfile/${fromId}`,
+
+              entity:
+                "chat",
+
+              entityId:
+                roomId,
+            }
+          ),
+        ]);
+      } catch (e) {
+        console.warn(
+          "❌ MicroBuzz match notification failed:",
+          e
+        );
+      }
+
+      return res.json({
+        matched: true,
+        ...forAccepter,
+      });
     }
 
-   // 📡 Live popup if they are online (existing behavior)
-if (onlineUsers[toId]) {
-  io.to(onlineUsers[toId]).emit("buzz_request", {
-    fromId,
-    selfieUrl: await signMicroBuzzSelfieValue(fromPresence?.selfieUrl, 21600),
-    firstName: fromProfile?.firstName || "Someone",
-    lastName: fromProfile?.lastName || "",
-    dob: fromProfile?.dob || "",
-    distanceMeters,
-    message: `${firstName} wants to buzz you!`,
-    type: "microbuzz",
-  });
-}
+    if (
+      confirm === true ||
+      confirm === false ||
+      confirm === "ignore"
+    ) {
+      return res.status(409).json({
+        error:
+          "Buzz request is no longer pending",
+      });
+    }
 
+    const existingOutgoing =
+      await MicroBuzzBuzz.findOne({
+        fromId,
+        toId,
+      }).lean();
 
-    res.json({ success: true });
+    if (existingOutgoing) {
+      return res.json({
+        pending: true,
+        alreadyLiked: true,
+      });
+    }
 
+    await MicroBuzzBuzz.create({
+      fromId,
+      toId,
+      time: new Date(),
+    });
 
+    const request =
+      await buildIncomingBuzzPayload(
+        fromId
+      );
+
+    if (!request) {
+      await MicroBuzzBuzz.deleteOne({
+        fromId,
+        toId,
+      });
+
+      return res.status(409).json({
+        error:
+          "MicroBuzz presence expired",
+      });
+    }
+
+    try {
+      await sendNotification(
+        toId,
+        {
+          fromId,
+          type: "buzz",
+          via: "microbuzz",
+
+          message:
+            `${request.firstName} wants to buzz you!`,
+
+          href:
+            `/viewProfile/${fromId}`,
+        }
+      );
+    } catch (e) {
+      console.warn(
+        "MicroBuzz one-way notification failed:",
+        e
+      );
+    }
+
+    io.to(
+      String(toId)
+    ).emit(
+      "buzz_request",
+      request
+    );
+
+    return res.json({
+      success: true,
+      pending: true,
+    });
   } catch (err) {
-    console.error("❌ /api/microbuzz/buzz error:", err);
-    res.status(500).json({ error: "Buzz failed" });
+    console.error(
+      "❌ /api/microbuzz/buzz error:",
+      err
+    );
+
+    return res.status(500).json({
+      error: "Buzz failed",
+    });
   }
 });
 // Simple DOB → age helper (supports "mm/dd/yyyy" or ISO/Date-parsable)

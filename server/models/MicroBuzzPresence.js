@@ -2,6 +2,7 @@
  * ============================================================
  * 📁 File: models/MicroBuzzPresence.js
  * 💾 Purpose: Tracks active MicroBuzz users with selfie + coords
+ *    and provides an indexed GeoJSON point for radius searches.
  * ============================================================
  */
 const mongoose = require("mongoose");
@@ -11,8 +12,14 @@ const microBuzzPresenceSchema = new mongoose.Schema({
   selfieUrl: { type: String, required: true },
   lat: { type: Number, required: true },
   lng: { type: Number, required: true },
-  updatedAt: { type: Date, default: Date.now },
+  location: {
+    type: { type: String, enum: ["Point"] },
+    coordinates: { type: [Number] },
+  },
+  updatedAt: { type: Date, default: Date.now, index: true },
 });
+
+microBuzzPresenceSchema.index({ location: "2dsphere" });
 
 module.exports =
   mongoose.models.MicroBuzzPresence ||
