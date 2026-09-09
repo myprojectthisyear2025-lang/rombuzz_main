@@ -173,6 +173,7 @@ app.use('/api/account', require('./routes/account'));
 
 // 📍 MICROBUZZ
 app.use('/api/microbuzz', require('./routes/microbuzz'));
+app.use('/api/microbuzz', require('./routes/microbuzzSessionActions'));
 
 // ðŸ POSTS / LETSBUZZ
 app.use('/api/posts', require('./routes/posts'));

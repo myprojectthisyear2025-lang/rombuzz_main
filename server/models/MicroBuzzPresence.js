@@ -9,6 +9,7 @@ const mongoose = require("mongoose");
 
 const microBuzzPresenceSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true, unique: true },
+  sessionId: { type: String, required: true, index: true },
   selfieUrl: { type: String, required: true },
   lat: { type: Number, required: true },
   lng: { type: Number, required: true },

@@ -50,9 +50,19 @@ const User = require("../models/User");
 const MicroBuzzPresence = require("../models/MicroBuzzPresence");
 const MicroBuzzBuzz = require("../models/MicroBuzzBuzz");
 const Match = require("../models/Match");
-const MicroBuzzIgnore = require("../models/MicroBuzzIgnore");
+const Relationship = require("../models/Relationship");
 
-//const MicroBuzzSelfie = require("../models/MicroBuzzSelfie");
+const {
+  getIncomingBuzzQueue,
+} = require("../services/microbuzzQueueService");
+
+const {
+  clearSessionIgnores,
+  getIgnoredIdsForCurrentSession,
+  ignoreForCurrentSession,
+  isIgnoredForCurrentSession,
+  resolveSessionId,
+} = require("../services/microbuzzSessionService");
 
 // 🔔 Notifications helper
 const { sendNotification } = require("../utils/helpers");
@@ -299,26 +309,32 @@ router.post("/activate", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "Invalid or missing lat/lng/selfieUrl" });
     }
 
-    let offsetLat = 0;
-    let offsetLng = 0;
-    if (process.env.NODE_ENV !== "production") {
-      offsetLat = (Math.random() - 0.5) * 0.0005;
-      offsetLng = (Math.random() - 0.5) * 0.0005;
-    }
-
     const storedSelfieValue =
       normalizeMediaString(selfieUrl);
 
+    const existingPresence =
+      await MicroBuzzPresence.findOne({
+        userId,
+      })
+        .select("sessionId updatedAt")
+        .lean();
+
+    const sessionId =
+      resolveSessionId(
+        existingPresence
+      );
+
     const storedLat =
-      latNum + offsetLat;
+      latNum;
 
     const storedLng =
-      lngNum + offsetLng;
+      lngNum;
 
     await MicroBuzzPresence.findOneAndUpdate(
       { userId },
       {
         userId,
+        sessionId,
         selfieUrl: storedSelfieValue,
         lat: storedLat,
         lng: storedLng,
@@ -338,6 +354,7 @@ router.post("/activate", authMiddleware, async (req, res) => {
 
     res.json({
       success: true,
+      sessionId,
       selfieUrl: await signMicroBuzzSelfieValue(storedSelfieValue, 21600),
       r2Key: isR2Key(storedSelfieValue) ? storedSelfieValue : "",
       storage: isR2Key(storedSelfieValue) ? "r2" : "legacy",
@@ -369,19 +386,104 @@ router.get("/nearby", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const prefs = self.preferences || {};
-    const prefGender = (prefs.gender || "").toLowerCase();           // "male" | "female" | "everyone" | ""
-    const prefAgeMin = Number(prefs.ageMin) || null;                 // e.g. 21
-    const prefAgeMax = Number(prefs.ageMax) || null;                 // e.g. 35
+      const prefs =
+      self.preferences || {};
 
-    // 🛰 Discover can go far, but MicroBuzz is ultra-local.
-    // Clamp max radius to ~100m in production.
-    const requestedRadiusKm = parseFloat(req.query.radius || "0.1"); // default 100m
-    const maxRadiusKm = process.env.NODE_ENV === "production" ? 0.1 : 1; // dev can scan wider
-    const radiusKm = Math.min(
-      Number.isFinite(requestedRadiusKm) ? requestedRadiusKm : 0.1,
-      maxRadiusKm
-    );
+    const requestedGender =
+      String(
+        req.query.gender || ""
+      ).toLowerCase();
+
+    const prefGender =
+      [
+        "male",
+        "female",
+        "everyone",
+      ].includes(
+        requestedGender
+      )
+        ? requestedGender
+        : String(
+            prefs.gender || ""
+          ).toLowerCase();
+
+    const prefAgeMin =
+      Number(prefs.ageMin) ||
+      null;
+
+    const prefAgeMax =
+      Number(prefs.ageMax) ||
+      null;
+
+    // MicroBuzz is always capped at a true 100m.
+    const requestedRadiusKm =
+      parseFloat(
+        req.query.radius ||
+          "0.1"
+      );
+
+    const radiusKm =
+      Math.min(
+        Number.isFinite(
+          requestedRadiusKm
+        )
+          ? Math.max(
+              requestedRadiusKm,
+              0
+            )
+          : 0.1,
+        0.1
+      );
+
+    const [
+      blockDocs,
+      ignoredIds,
+    ] =
+      await Promise.all([
+        Relationship.find({
+          type: "block",
+
+          $or: [
+            {
+              from:
+                userId,
+            },
+            {
+              to:
+                userId,
+            },
+          ],
+        })
+          .select("from to")
+          .lean(),
+
+        getIgnoredIdsForCurrentSession(
+          userId
+        ),
+      ]);
+
+    const blockedIds =
+      blockDocs.map(
+        (row) =>
+          String(
+            row.from
+          ) ===
+          String(userId)
+            ? String(
+                row.to
+              )
+            : String(
+                row.from
+              )
+      );
+
+    const excludedIds = [
+      ...new Set([
+        userId,
+        ...blockedIds,
+        ...ignoredIds,
+      ]),
+    ];
 
     await cleanupExpiredMicroBuzzPresences();
 
@@ -425,7 +527,8 @@ router.get("/nearby", authMiddleware, async (req, res) => {
               },
 
               userId: {
-                $ne: userId,
+                $nin:
+                  excludedIds,
               },
             },
           },
@@ -543,7 +646,16 @@ router.post("/deactivate", authMiddleware, async (req, res) => {
       userId: req.user.id,
     }).lean();
 
-    await MicroBuzzPresence.deleteOne({ userId: req.user.id });
+    await Promise.all([
+      MicroBuzzPresence.deleteOne({
+        userId: req.user.id,
+      }),
+
+      clearSessionIgnores(
+        req.user.id,
+        presence?.sessionId
+      ),
+    ]);
 
     if (presence?.selfieUrl) {
       await deleteMicroBuzzSelfieBestEffort(
@@ -560,74 +672,62 @@ router.post("/deactivate", authMiddleware, async (req, res) => {
 });
 
 /* ============================================================
-   💌 RECOVER LATEST INCOMING BUZZ
+   💌 RECOVER INCOMING BUZZ QUEUE
 ============================================================ */
-router.get("/incoming", authMiddleware, async (req, res) => {
-  try {
-    if (!(await enforceMicroBuzzAllowed(req, res))) return;
+router.get(
+  "/incoming",
+  authMiddleware,
+  async (req, res) => {
+    try {
+      if (
+        !(
+          await enforceMicroBuzzAllowed(
+            req,
+            res
+          )
+        )
+      ) {
+        return;
+      }
 
-    const cutoff = new Date(
-      Date.now() - MICROBUZZ_SELFIE_TTL_MS
-    );
+      const requests =
+        await getIncomingBuzzQueue({
+          userId:
+            req.user.id,
 
-    const pending = await MicroBuzzBuzz.findOne({
-      toId: req.user.id,
-      time: { $gte: cutoff },
-    })
-      .sort({ time: -1 })
-      .lean();
-
-    if (!pending) {
-      return res.json({ request: null });
-    }
-
-    const alreadyMatched = await Match.exists({
-      users: {
-        $all: [
-          pending.fromId,
-          req.user.id,
-        ],
-      },
-    });
-
-    if (alreadyMatched) {
-      await MicroBuzzBuzz.deleteOne({
-        _id: pending._id,
-      });
+          signSelfie:
+            (value) =>
+              signMicroBuzzSelfieValue(
+                value,
+                MICROBUZZ_SELFIE_SIGN_SECONDS
+              ),
+        });
 
       return res.json({
-        request: null,
-      });
-    }
+        request:
+          requests[0] ||
+          null,
 
-    const request =
-      await buildIncomingBuzzPayload(
-        pending.fromId
+        requests,
+
+        pendingCount:
+          requests.length,
+      });
+    } catch (err) {
+      console.error(
+        "❌ /api/microbuzz/incoming error:",
+        err
       );
 
-    if (!request) {
-      await MicroBuzzBuzz.deleteOne({
-        _id: pending._id,
-      });
-
-      return res.json({
-        request: null,
-      });
+      return res
+        .status(500)
+        .json({
+          error:
+            "Incoming Buzz fetch failed",
+        });
     }
-
-    return res.json({ request });
-  } catch (err) {
-    console.error(
-      "❌ /api/microbuzz/incoming error:",
-      err
-    );
-
-    return res.status(500).json({
-      error:
-        "Incoming Buzz fetch failed",
-    });
   }
-});
+);
 
 /* ============================================================
    💞 BUZZ REQUEST + ACCEPT / REJECT / IGNORE
@@ -685,15 +785,51 @@ router.post("/buzz", authMiddleware, async (req, res) => {
       });
     }
 
-    const ignored =
-      await MicroBuzzIgnore.findOne({
-        byId: toId,
-        fromId,
-      }).lean();
+    const [
+      blocked,
+      suppressedForSession,
+    ] =
+      await Promise.all([
+        Relationship.exists({
+          type: "block",
 
-    if (ignored) {
+          $or: [
+            {
+              from:
+                fromId,
+              to:
+                toId,
+            },
+            {
+              from:
+                toId,
+              to:
+                fromId,
+            },
+          ],
+        }),
+
+        isIgnoredForCurrentSession(
+          toId,
+          fromId
+        ),
+      ]);
+
+    if (blocked) {
+      return res.status(404).json({
+        error:
+          "User unavailable",
+      });
+    }
+
+    // Do not reveal to Jake that Katy ignored him.
+    if (
+      suppressedForSession &&
+      confirm === undefined
+    ) {
       return res.json({
-        ignored: true,
+        success: true,
+        pending: true,
       });
     }
 
@@ -749,22 +885,10 @@ router.post("/buzz", authMiddleware, async (req, res) => {
 
     if (reverseBuzz) {
       if (confirm === "ignore") {
-        await MicroBuzzIgnore
-          .findOneAndUpdate(
-            {
-              byId: fromId,
-              fromId: toId,
-            },
-            {
-              byId: fromId,
-              fromId: toId,
-            },
-            {
-              upsert: true,
-              setDefaultsOnInsert:
-                true,
-            }
-          );
+        await ignoreForCurrentSession(
+          fromId,
+          toId
+        );
 
         await MicroBuzzBuzz.deleteMany({
           $or: [
