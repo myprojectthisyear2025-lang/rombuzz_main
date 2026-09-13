@@ -1164,16 +1164,6 @@ if (sid) {
   io.to(sid).emit("chat:message", signedMsg);
 }
 
-// ✅ NEW: emit unread summary update to receiver (server-accurate)
-try {
-  const summary = await computeUnreadSummaryForUser(String(toId));
-  if (sid) io.to(sid).emit("chat:unread:update", summary);
-  io.to(String(toId)).emit("chat:unread:update", summary);
-} catch (e) {
-  console.warn("unread summary emit failed:", e?.message || e);
-}
-
-
 // 🔥 Navbar/unread bubble handler
 if (sid) {
   io.to(sid).emit("direct:message", {
@@ -1187,8 +1177,28 @@ if (sid) {
   });
 }
 
+// ✅ The message is already validated, persisted, signed, and emitted.
+// Return success immediately so Reel sharing does not wait for the
+// receiver's full unread-summary database calculation.
+res.json({ message: signedMsg });
 
-    res.json({ message: signedMsg });
+// ✅ Keep unread badges server-accurate without blocking the sender.
+computeUnreadSummaryForUser(String(toId))
+  .then((summary) => {
+    if (sid) {
+      io.to(sid).emit("chat:unread:update", summary);
+    }
+
+    io.to(String(toId)).emit("chat:unread:update", summary);
+  })
+  .catch((e) => {
+    console.warn(
+      "unread summary emit failed:",
+      e?.message || e
+    );
+  });
+
+return;
   } catch (err) {
     console.error("❌ POST message error:", err);
     res.status(500).json({ error: "Failed to send message" });
