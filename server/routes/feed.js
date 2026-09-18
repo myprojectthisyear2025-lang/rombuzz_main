@@ -109,6 +109,28 @@ async function signFeedUser(user = {}) {
   return safe;
 }
 
+async function signLetsBuzzFeedUser(user = {}) {
+  const signedAvatar = await signR2Value(
+    user.avatar || user.avatarUrl || user.profilePic || user.photo || "",
+    21600
+  );
+
+  return {
+    id: String(user.id || ""),
+    firstName: user.firstName || "",
+    lastName: user.lastName || "",
+    username: user.username || "",
+    avatar: signedAvatar,
+    avatarUrl: signedAvatar,
+  };
+}
+
+function countHeartReactions(reactions = {}) {
+  return Object.values(reactions || {}).filter(
+    (emoji) => emoji === "❤️"
+  ).length;
+}
+
 // ============================================================
 // ============================================================
 // ✅ Gallery caption tags parser (scope + kind)
@@ -474,103 +496,201 @@ router.get("/letsbuzz", authMiddleware, async (req, res) => {
     const myId = String(req.user.id);
 
     // 1️⃣ Fetch matches
-    const matches = await Match.find({ users: myId }).lean();
+    const matches = await Match.find({ users: myId })
+      .select("users -_id")
+      .lean();
+
     const matchedIds = matches
       .flatMap((m) => m.users)
       .filter((id) => String(id) !== myId);
 
-    // 2️⃣ Fetch matched users
-    const users = await User.find({ id: { $in: matchedIds } }).lean();
+    // 2️⃣ Fetch only the fields LetsBuzz actually needs.
+    const users = await User.find({ id: { $in: matchedIds } })
+      .select("id firstName lastName avatar media")
+      .lean();
 
     const feed = [];
 
-     for (const u of users) {
+    for (const u of users) {
       if (!Array.isArray(u.media)) continue;
 
-      for (const m of u.media) {
-        if (!isLetsBuzzEligibleGalleryMedia(m)) continue;
+      const feedUser = await signLetsBuzzFeedUser(u);
+      const eligibleMedia = u.media.filter(
+        isLetsBuzzEligibleGalleryMedia
+      );
 
-        const visibleComments = sanitizeMediaCommentsForViewer(
-          m.comments,
-          myId,
-          u.id
-        );
+      const userFeedItems = await Promise.all(
+        eligibleMedia.map(async (m) => {
+          const visibleComments =
+            sanitizeMediaCommentsForViewer(
+              m.comments,
+              myId,
+              u.id
+            );
 
-          const signedMedia = await signR2MediaItem(m, 7200);
-        const signedMediaUrl =
-          signedMedia.mediaUrl ||
-          signedMedia.url ||
-          signedMedia.secureUrl ||
-          signedMedia.secure_url ||
-          signedMedia.fileUrl ||
-          signedMedia.imageUrl ||
-          signedMedia.photoUrl ||
-          "";
+          const signedMedia =
+            await signR2MediaItem(m, 7200);
 
-        const streamUid = getCloudflareStreamUid(signedMedia || m);
-        if (!signedMediaUrl && !streamUid) continue;
+          const signedMediaUrl =
+            signedMedia.mediaUrl ||
+            signedMedia.url ||
+            signedMedia.secureUrl ||
+            signedMedia.secure_url ||
+            signedMedia.fileUrl ||
+            signedMedia.imageUrl ||
+            signedMedia.photoUrl ||
+            "";
 
-        const mediaId = String(m.id || m._id || streamUid || "");
-        if (!mediaId) continue;
+          const streamUid =
+            getCloudflareStreamUid(
+              signedMedia || m
+            );
 
-        const kind = inferLetsBuzzKind(signedMedia || m);
-        const scope = resolveLetsBuzzScope(signedMedia || m);
+          if (!signedMediaUrl && !streamUid) {
+            return null;
+          }
 
-        feed.push({
-          id: mediaId,
-          userId: u.id,
-          mediaUrl: signedMediaUrl,
-          url: signedMediaUrl,
-          fileUrl: signedMediaUrl,
-          secureUrl: signedMediaUrl,
-          secure_url: signedMediaUrl,
-          imageUrl: signedMediaUrl,
-          photoUrl: signedMediaUrl,
-          type: kind === "reel" ? "video" : "image",
-          privacy: scope,
-          caption: m.caption || "",
-          createdAt: m.createdAt || Date.now(),
-          comments: visibleComments,
-          commentsCount: visibleComments.length,
-          fromGallery: true,
-          sourceType: "gallery",
-          mediaId,
-          r2Key: signedMedia.r2Key || "",
+          const mediaId = String(
+            m.id ||
+              m._id ||
+              streamUid ||
+              ""
+          );
 
-          // Cloudflare Stream profile_reel support.
-          // LetsBuzz mobile resolves signed playback through /api/stream/:uid/playback.
-          provider: signedMedia.provider || m.provider || "",
-          storage: signedMedia.storage || m.storage || "",
-          streamUid,
-          playback: signedMedia.playback || m.playback || {},
-          thumbnailUrl: signedMedia.thumbnailUrl || m.thumbnailUrl || "",
-          cloudflareStream: signedMedia.cloudflareStream || m.cloudflareStream || null,
-          status:
-            signedMedia.status ||
-            m.status ||
-            signedMedia?.cloudflareStream?.status ||
-            m?.cloudflareStream?.status ||
-            "",
-          duration: Number(
-            signedMedia.duration ||
-              m.duration ||
-              signedMedia?.cloudflareStream?.duration ||
-              m?.cloudflareStream?.duration ||
-              0
-          ),
+          if (!mediaId) {
+            return null;
+          }
 
-          user: await signFeedUser(u),
-        });
-      }
+          const kind =
+            inferLetsBuzzKind(
+              signedMedia || m
+            );
+
+          const scope =
+            resolveLetsBuzzScope(
+              signedMedia || m
+            );
+
+          const reactions =
+            m.reactions || {};
+
+          return {
+            id: mediaId,
+            userId: u.id,
+
+            mediaUrl: signedMediaUrl,
+            url: signedMediaUrl,
+            fileUrl: signedMediaUrl,
+            secureUrl: signedMediaUrl,
+            secure_url: signedMediaUrl,
+            imageUrl: signedMediaUrl,
+            photoUrl: signedMediaUrl,
+
+            type:
+              kind === "reel"
+                ? "video"
+                : "image",
+
+            privacy: scope,
+            caption: m.caption || "",
+            createdAt:
+              m.createdAt || Date.now(),
+
+            comments: visibleComments,
+            commentsCount:
+              visibleComments.length,
+
+            likesCount:
+              countHeartReactions(
+                reactions
+              ),
+
+            isLiked:
+              reactions?.[myId] === "❤️",
+
+            fromGallery: true,
+            sourceType: "gallery",
+            mediaId,
+
+            r2Key:
+              signedMedia.r2Key || "",
+
+            // Cloudflare Stream profile_reel support.
+            provider:
+              signedMedia.provider ||
+              m.provider ||
+              "",
+
+            storage:
+              signedMedia.storage ||
+              m.storage ||
+              "",
+
+            streamUid,
+
+            playback:
+              signedMedia.playback ||
+              m.playback ||
+              {},
+
+            thumbnailUrl:
+              signedMedia.thumbnailUrl ||
+              m.thumbnailUrl ||
+              "",
+
+            cloudflareStream:
+              signedMedia.cloudflareStream ||
+              m.cloudflareStream ||
+              null,
+
+            status:
+              signedMedia.status ||
+              m.status ||
+              signedMedia
+                ?.cloudflareStream
+                ?.status ||
+              m?.cloudflareStream
+                ?.status ||
+              "",
+
+            duration: Number(
+              signedMedia.duration ||
+                m.duration ||
+                signedMedia
+                  ?.cloudflareStream
+                  ?.duration ||
+                m?.cloudflareStream
+                  ?.duration ||
+                0
+            ),
+
+            user: feedUser,
+          };
+        })
+      );
+
+      feed.push(
+        ...userFeedItems.filter(Boolean)
+      );
     }
 
     // 3️⃣ Newest first
-    feed.sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+    feed.sort(
+      (a, b) =>
+        Number(b.createdAt) -
+        Number(a.createdAt)
+    );
 
     res.json({ items: feed });
   } catch (err) {
-    console.error("❌ LetsBuzz gallery feed failed:", err);
-    res.status(500).json({ error: "failed_to_load_letsbuzz" });
+    console.error(
+      "❌ LetsBuzz gallery feed failed:",
+      err
+    );
+
+    res.status(500).json({
+      error: "failed_to_load_letsbuzz",
+    });
   }
 });
 

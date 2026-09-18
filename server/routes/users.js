@@ -1107,38 +1107,130 @@ router.get("/blocks", authMiddleware, async (req, res) => {
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const [viewer, user] = await Promise.all([
-      User.findOne({ id: req.user.id }).lean(),
+      User.findOne({
+        id: req.user.id,
+      })
+        .select("id country")
+        .lean(),
+
       User.findOne({
         id: req.params.id,
-        visibility: { $ne: "pending_delete" },
-        deleteStatus: { $ne: "pending_delete" },
-      }).lean(),
+        visibility: {
+          $ne: "pending_delete",
+        },
+        deleteStatus: {
+          $ne: "pending_delete",
+        },
+      })
+        .select(
+          [
+            "id",
+            "firstName",
+            "lastName",
+            "dob",
+            "avatar",
+            "bio",
+            "pronouns",
+            "country",
+            "hometown",
+            "travelMode",
+            "travelVibes",
+            "relationshipStyle",
+            "bodyType",
+            "fitnessLevel",
+            "smoking",
+            "drinking",
+            "workoutFrequency",
+            "diet",
+            "sleepSchedule",
+            "educationLevel",
+            "school",
+            "jobTitle",
+            "company",
+            "languages",
+            "religion",
+            "politicalViews",
+            "zodiac",
+            "favoriteMusic",
+            "favoriteMovies",
+            "travelStyle",
+            "petsPreference",
+            "likes",
+            "dislikes",
+            "interests",
+            "hobbies",
+            "media",
+            "photos",
+            "voiceUrl",
+            "voiceDurationSec",
+            "location",
+            "latitude",
+            "longitude",
+            "visibilityMode",
+            "fieldVisibility",
+          ].join(" ")
+        )
+        .lean(),
     ]);
 
-      if (!viewer) return res.status(404).json({ error: "Viewer not found" });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!viewer) {
+      return res.status(404).json({
+        error: "Viewer not found",
+      });
+    }
 
-    const viewerId = String(viewer.id || "");
-    const targetId = String(user.id || "");
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
 
-    const isSelf = viewerId === targetId;
+    const viewerId = String(
+      viewer.id || ""
+    );
+
+    const targetId = String(
+      user.id || ""
+    );
+
+    const isSelf =
+      viewerId === targetId;
+
     const matchedConnection = isSelf
       ? true
-      : await Match.findOne({
+      : await Match.exists({
           status: "matched",
           $or: [
             // ✅ Current Match model
-            { users: { $all: [viewerId, targetId] } },
+            {
+              users: {
+                $all: [
+                  viewerId,
+                  targetId,
+                ],
+              },
+            },
 
             // ✅ Legacy fallback, safe to keep
-            { user1: viewerId, user2: targetId },
-            { user1: targetId, user2: viewerId },
+            {
+              user1: viewerId,
+              user2: targetId,
+            },
+            {
+              user1: targetId,
+              user2: viewerId,
+            },
           ],
-        }).lean();
+        });
 
-    const canSeeMatchedMedia = isSelf || !!matchedConnection;
+    const canSeeMatchedMedia =
+      isSelf ||
+      !!matchedConnection;
 
-    const discoverGallery = buildDiscoverSafeGallery(user);
+    const discoverGallery =
+      buildDiscoverSafeGallery(
+        user
+      );
     const viewProfileGallery = buildViewProfileGallery(user, {
       canSeeMatchedMedia,
       isSelf,
@@ -1151,18 +1243,44 @@ router.get("/:id", authMiddleware, async (req, res) => {
       ? viewProfileGallery
       : discoverGallery;
 
-    const distancePayload = buildProfileDistancePayload(viewer, user, req.query);
+    const distancePayload =
+      buildProfileDistancePayload(
+        viewer,
+        user,
+        req.query
+      );
 
-      const signedAvatar = await signR2Value(user.avatar, 21600);
-    const signedVoiceUrl = await signR2Value(user.voiceUrl, 3600);
+    // All three operations are independent.
+    const [
+      signedAvatar,
+      signedVoiceUrl,
+      signedProfileMedia,
+    ] = await Promise.all([
+      signR2Value(
+        user.avatar,
+        21600
+      ),
+
+      signR2Value(
+        user.voiceUrl,
+        3600
+      ),
+
+      Promise.all(
+        profileGallery.media.map(
+          (item) =>
+            signR2MediaItem(
+              item,
+              7200
+            )
+        )
+      ),
+    ]);
 
     // View Profile source of truth:
     // Send ONE normalized gallery list only.
     // Do not also send derived photos/reels arrays because mobile can read all arrays
     // and that causes repeated thumbnails.
-    const signedProfileMedia = await Promise.all(
-      profileGallery.media.map((item) => signR2MediaItem(item, 7200))
-    );
 
     res.json({
       matched: canSeeMatchedMedia,
