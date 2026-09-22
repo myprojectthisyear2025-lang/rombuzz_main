@@ -17,6 +17,14 @@
       "destination": "/terms.html"
     },
     {
+      "source": "/child-safety",
+      "destination": "/child-safety.html"
+    },
+    {
+      "source": "/child-safety-standards",
+      "destination": "/child-safety.html"
+    },
+    {
       "source": "/delete-account",
       "destination": "/delete-account.html"
     },

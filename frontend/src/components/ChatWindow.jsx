@@ -157,7 +157,7 @@ export default function ChatWindow({ me, peer, onClose }) {
     socket.emit("sendMessage", { roomId, ...payload });
   };
 
-  const persistText = async (text) => {
+  const persistText = async (text, id) => {
     const token = localStorage.getItem("token") || sessionStorage.getItem("token");
     await fetch(`${API_BASE}/api/chat/rooms/${roomId}`, {
       method: "POST",
@@ -165,7 +165,7 @@ export default function ChatWindow({ me, peer, onClose }) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, id }),
     });
   };
 
@@ -182,7 +182,7 @@ export default function ChatWindow({ me, peer, onClose }) {
     setMessages((m) => [...m, msg]);
     setInput("");
     sendLive(msg);
-    persistText(text);
+    persistText(text, msg.id);
   };
 
   const insertEmoji = (e) => setInput((p) => p + (e.emoji || ""));
@@ -218,7 +218,7 @@ export default function ChatWindow({ me, peer, onClose }) {
     };
     setMessages((m) => [...m, live]);
     sendLive(live);
-    await persistText(live.text);
+    await persistText(live.text, live.id);
   };
 
   // Camera controls
@@ -265,7 +265,7 @@ export default function ChatWindow({ me, peer, onClose }) {
     };
     setMessages((m) => [...m, msg]);
     sendLive(msg);
-    await persistText(msg.text);
+    await persistText(msg.text, msg.id);
     closeCamera();
   };
 
@@ -304,7 +304,7 @@ export default function ChatWindow({ me, peer, onClose }) {
     };
     setMessages((m) => [...m, msg]);
     sendLive(msg);
-    await persistText(msg.text);
+    await persistText(msg.text, msg.id);
     closeCamera();
   };
 

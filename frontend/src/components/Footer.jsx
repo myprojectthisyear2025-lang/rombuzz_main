@@ -26,6 +26,13 @@ export default function Footer() {
         </a>
 
         <a
+          href="/child-safety"
+          className="hover:text-rose-300 transition-colors"
+        >
+          Child Safety
+        </a>
+
+        <a
           href="/delete-account"
           className="hover:text-rose-300 transition-colors"
         >
