@@ -34,7 +34,18 @@ const messageSchema = new mongoose.Schema({
   callEndedBy: { type: String, default: "" },
 
   createdAt: { type: Date, default: Date.now },
+  expireAt: { type: Date, default: null },
+  seen: { type: Boolean, default: false },
+  seenAt: { type: Date, default: null },
+  roomId: { type: String, default: "" },
+  edited: { type: Boolean, default: false },
+  deleted: { type: Boolean, default: false },
+  hiddenFor: { type: [String], default: [] },
+  reactions: { type: Map, of: String, default: {} },
 });
+
+messageSchema.index({ from: 1, to: 1, createdAt: 1 });
+messageSchema.index({ expireAt: 1 }, { sparse: true });
 
 module.exports =
   mongoose.models.Message || mongoose.model("Message", messageSchema);

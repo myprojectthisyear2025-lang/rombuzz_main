@@ -21,7 +21,6 @@
  *   - models/PostModel.js
  *   - models/User.js
  *   - utils/helpers.js → sendNotification(), baseSanitizeUser()
- *   - db.lowdb.js (temporary for matches)
  * ============================================================
  */
 
@@ -31,7 +30,6 @@ const authMiddleware = require("../auth-middleware");
 const PostModel = require("../../models/PostModel");
 const User = require("../../models/User");
 const { sendNotification, baseSanitizeUser } = require("../../utils/helpers");
-const { db } = require("../../models/db.lowdb");
 
 // =======================================================
 // ✅ Bookmark a post

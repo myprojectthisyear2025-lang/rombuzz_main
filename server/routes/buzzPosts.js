@@ -19,8 +19,7 @@
  *
  * Notes:
  *   - Keeps identical API endpoints as before (no frontend breakage)
- *   - Uses MongoDB for persistent data; retains LowDB legacy for
- *     fallback reads (feed & matches).
+ *   - Uses MongoDB for all persistent data, including feed visibility and matches.
  *   - All notifications use sendNotification() for consistency.
  *
  * Dependencies:

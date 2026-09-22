@@ -114,6 +114,7 @@ const userSchema = new mongoose.Schema(
     profileComplete: { type: Boolean, default: false },
     hasOnboarded: { type: Boolean, default: false },
     lastActive: { type: Date, default: Date.now },
+    lastOnline: { type: Date, default: null },
      profileViews: {
       total: { type: Number, default: 0 },
       today: { type: Number, default: 0 },

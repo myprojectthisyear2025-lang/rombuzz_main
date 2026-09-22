@@ -134,10 +134,10 @@ router.post("/buzz/posts/:postId/react", authMiddleware, async (req, res) => {
     if (!post) return res.status(404).json({ error: "Post not found" });
 
     post.reactions = post.reactions || {};
-    const hadReaction = post.reactions[myId];
+    const hadReaction = post.reactions.get(myId);
 
     // update reaction
-    post.reactions[myId] = emoji;
+    post.reactions.set(myId, emoji);
     post.updatedAt = Date.now();
 
     await post.save();
@@ -159,7 +159,7 @@ router.post("/buzz/posts/:postId/react", authMiddleware, async (req, res) => {
 
     // build reaction counts
     const reactionCounts = {};
-    Object.values(post.reactions).forEach(
+    Array.from(post.reactions.values()).forEach(
       (em) => (reactionCounts[em] = (reactionCounts[em] || 0) + 1)
     );
 
@@ -167,7 +167,7 @@ router.post("/buzz/posts/:postId/react", authMiddleware, async (req, res) => {
       success: true,
       myReaction: emoji,
       reactionCounts,
-      totalReactions: Object.keys(post.reactions).length,
+      totalReactions: post.reactions.size,
     });
   } catch (err) {
     console.error("❌ Mongo react error:", err);
@@ -184,8 +184,8 @@ router.delete("/buzz/posts/:postId/react", authMiddleware, async (req, res) => {
     const post = await PostModel.findOne({ id: postId });
     if (!post) return res.status(404).json({ error: "Post not found" });
 
-    if (post.reactions && post.reactions[myId]) {
-      delete post.reactions[myId];
+    if (post.reactions && post.reactions.get(myId)) {
+      post.reactions.delete(myId);
       post.updatedAt = Date.now();
       await post.save();
     }
@@ -215,23 +215,23 @@ router.post(
       post.reactions = post.reactions || {};
 
       // toggle logic
-      if (!post.reactions[myId]) {
-        post.reactions[myId] = emoji; // add
-      } else if (post.reactions[myId] === emoji) {
-        delete post.reactions[myId]; // remove same reaction
+      if (!post.reactions.get(myId)) {
+        post.reactions.set(myId, emoji); // add
+      } else if (post.reactions.get(myId) === emoji) {
+        post.reactions.delete(myId); // remove same reaction
       } else {
-        post.reactions[myId] = emoji; // change emoji
+        post.reactions.set(myId, emoji); // change emoji
       }
 
       await post.save();
 
       // count reactions
       const counts = {};
-      for (const e of Object.values(post.reactions)) {
+      for (const e of Array.from(post.reactions.values())) {
         counts[e] = (counts[e] || 0) + 1;
       }
 
-      res.json({ success: true, counts, reactions: post.reactions });
+      res.json({ success: true, counts, reactions: Object.fromEntries(post.reactions) });
     } catch (err) {
       console.error("❌ Mongo react-emoji failed:", err);
       res.status(500).json({ error: "Reaction failed" });

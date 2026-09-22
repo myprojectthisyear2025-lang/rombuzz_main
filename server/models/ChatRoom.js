@@ -153,6 +153,8 @@ const messageSchema = new mongoose.Schema(
 
     time: { type: Date, default: Date.now },
     createdAt: { type: Date, default: Date.now },
+    expireAt: { type: Date, default: null },
+    seen: { type: Boolean, default: false },
 
   edited: { type: Boolean, default: false },
 deleted: { type: Boolean, default: false },
@@ -233,8 +235,11 @@ const chatRoomSchema = new mongoose.Schema(
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },
-  { timestamps: true }
+  { timestamps: true, optimisticConcurrency: true }
 );
+
+chatRoomSchema.index({ participants: 1, updatedAt: -1 });
+chatRoomSchema.index({ "messages.expireAt": 1 }, { sparse: true });
 
 module.exports =
   mongoose.models.ChatRoom || mongoose.model("ChatRoom", chatRoomSchema);

@@ -1,4 +1,8 @@
-# RomBuzz Backend Split (prep for modularization)
+# RomBuzz backend persistence
+
+The running backend now uses MongoDB exclusively. See [the migration guide](docs/mongodb-migration.md) and [the pre-change audit](docs/lowdb-audit.md) before cutover. Legacy JSON import is an explicit server-side command; startup never reads or rewrites it.
+
+The historical split inventory below records the earlier modularization; its removed database helpers are no longer runtime files.
 
 - Entry file left intact: `server/index.js` (so Render deploy keeps working)
 - The script created/updated these files from your header sections:
@@ -6,9 +10,8 @@
   - `config/config.js`
   - `config/cors.js`
   - `config/sendgrid.js`
-  - `models/db.lowdb.js`
-  - `models/migrations.js`
-  - `models/write-guard.js`
+  - `config/db.js`
+  - `models/User.js` and the other domain models
   - `routes/account.js`
   - `routes/auth-middleware.js`
   - `routes/auth.js`
@@ -27,8 +30,6 @@
   - `utils/helpers.js`
   - `utils/jwt.js`
 
-## Next steps (optional, later)
-1. Gradually refactor each generated file to export functions/routers.
-2. Replace LowDB usage in `models/db.lowdb.js` with Mongoose models.
-3. Create `config/db.js` for Mongo connection and wire models.
-4. Once routes export routers, update `server/index.js` to `app.use(...)` them.
+## Database checks
+
+Run `npm test` and `npm run check` in `server`. The tests use synthetic records and a disposable local MongoDB replica set. Never use production credentials for tests.

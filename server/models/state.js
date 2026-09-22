@@ -8,7 +8,7 @@
  *   - onlineUsers → tracks users connected via sockets
  *
  * Why:
- *   - Keeps transient data separate from persistent DB (LowDB)
+ *   - Keeps transient connection/lock state separate from persistent MongoDB data
  *   - Prepares for future scaling (e.g., Redis or clustered memory)
  * ============================================================
  */

@@ -39,6 +39,7 @@ const storySchema = new mongoose.Schema(
 
 // Auto-remove after expiry
 storySchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+storySchema.index({ userId: 1, isActive: 1, createdAt: 1 });
 
 module.exports =
   mongoose.models.StoryModel || mongoose.model("StoryModel", storySchema);

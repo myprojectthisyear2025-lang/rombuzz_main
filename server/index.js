@@ -53,27 +53,8 @@ const fetch = (...args) =>
 const { signToken } = require('./utils/jwt');
 
 // =======================
-// 📦 DATABASE (modularized) — LowDB (legacy) + MongoDB init
-// =======================
-// 📦 DATABASE (modularized) — LowDB (legacy) + MongoDB init + User sync
-const db = require("./models/db.lowdb");
-require("./models/writeGuard")(db);
-const { initMongo } = require("./config/db");  // ⭐ REAL Mongo connection
-
-// 🔄 Optional one-time user sync on startup
-const { bulkSyncAllUsers } = require("./modules/userSync");
-(async () => {
-  try {
-    await db.read();
-    if (db.data?.users?.length) {
-      await bulkSyncAllUsers(db.data.users);
-    } else {
-      console.log("⚙️  No users found in LowDB for sync");
-    }
-  } catch (err) {
-    console.error("User bulk sync error:", err);
-  }
-})();
+// MongoDB is the only runtime database. Legacy import is an explicit CLI operation.
+const { initMongo } = require("./config/db");
 
 // =======================
 // 💫 VIBE UTILITIES (modularized)
@@ -97,7 +78,6 @@ const {
   isBlocked,
   msToDays,
   distanceKm,
-  getRoomDoc,
   incMatchStreakOut,
   THIRTY_DAYS,
 } = require('./utils/helpers');
@@ -249,7 +229,7 @@ const {
   startPendingDeletionCleanupJob,
 } = require("./services/accountDeletionService");
 
-startAiWingmanTask();
+
 
 // 📍 Meet in the Middle — NEW CLEAN SOCKETS
 // Uses meetMiddle:* events only, so it does not conflict with old meet:* events.
@@ -281,10 +261,17 @@ app.use(errorHandler);
   // 🧹 Account deletion cleanup:
   // Runs once after startup and then every 6 hours while Render is awake.
   // It permanently wipes accounts whose 7-day pending_delete hold expired.
-  startPendingDeletionCleanupJob();
+  if (process.env.DISABLE_BACKGROUND_JOBS !== "true") {
+    startPendingDeletionCleanupJob();
+    startAiWingmanTask();
+  }
+  const { startMessageExpiryJob } = require("./services/messageExpiry");
+  startMessageExpiryJob(io);
 
   server.listen(PORT, () => {
     logSuccess(`ðŸƒ Mongo ready â€” Rombuzz API running on port ${PORT}`);
   });
-})();
-
+})().catch(() => {
+  console.error("Backend startup failed; MongoDB must be available before serving traffic.");
+  process.exit(1);
+});

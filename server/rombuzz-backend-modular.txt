@@ -9,10 +9,10 @@ rombuzz-backend-modular/
 │   ├── buzzComments.js
 │   └── ...
 │
-├── models/                       ← Mongo models + legacy LowDB guards
+├── models/                       ← Mongo domain models + transient socket state
 │   ├── User.js
-│   ├── db.lowdb.js
-│   ├── writeGuard.js
+│   ├── ChatRoom.js
+│   ├── Message.js
 │   ├── state.js
 │   └── ...
 │

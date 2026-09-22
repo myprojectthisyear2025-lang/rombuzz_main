@@ -19,25 +19,26 @@ const shortid = require("shortid");
 const BuzzCoinWallet = require("../models/BuzzCoinWallet");
 const BuzzCoinLedger = require("../models/BuzzCoinLedger");
 
-async function getOrCreateWallet(userId) {
+async function getOrCreateWallet(userId, { session } = {}) {
   const id = String(userId);
 
-  let wallet = await BuzzCoinWallet.findOne({ userId: id });
+  let wallet = await BuzzCoinWallet.findOne({ userId: id }).session(session || null);
   if (!wallet) {
-    wallet = await BuzzCoinWallet.create({
+    wallet = new BuzzCoinWallet({
       userId: id,
       balanceBC: 0,
       pendingBC: 0,
       earnedBC: 0,
       lastTransactionAt: null,
     });
+    await wallet.save({ session });
   }
 
   return wallet;
 }
 
-async function getWalletSnapshot(userId) {
-  const wallet = await getOrCreateWallet(userId);
+async function getWalletSnapshot(userId, { session } = {}) {
+  const wallet = await getOrCreateWallet(userId, { session });
 
   return {
     userId: String(wallet.userId),
@@ -59,8 +60,9 @@ async function addLedgerEntry({
   referenceId = "",
   reason = "",
   metadata = {},
+  session,
 }) {
-  return BuzzCoinLedger.create({
+  const [entry] = await BuzzCoinLedger.create([{
     id: shortid.generate(),
     userId: String(userId),
     type,
@@ -70,7 +72,8 @@ async function addLedgerEntry({
     referenceId,
     reason,
     metadata,
-  });
+  }], { session });
+  return entry;
 }
 
 function normalizeCreditBucket(bucket) {
@@ -96,6 +99,7 @@ async function creditBuzzCoins({
   reason = "",
   metadata = {},
   walletBucket = "balance",
+  session,
 }) {
   const amount = Math.floor(Number(amountBC) || 0);
   if (amount <= 0) {
@@ -105,7 +109,7 @@ async function creditBuzzCoins({
     });
   }
 
-  const wallet = await getOrCreateWallet(userId);
+  const wallet = await getOrCreateWallet(userId, { session });
 
    if (wallet.locked) {
     throw Object.assign(new Error(wallet.lockReason || "Wallet is locked"), {
@@ -125,7 +129,7 @@ async function creditBuzzCoins({
   }
 
   wallet.lastTransactionAt = new Date();
-  await wallet.save();
+  await wallet.save({ session });
 
   const balanceAfterBC =
     bucket === "earned"
@@ -146,9 +150,10 @@ async function creditBuzzCoins({
       ...metadata,
       walletBucket: bucket,
     },
+    session,
   });
 
-  return getWalletSnapshot(userId);
+  return getWalletSnapshot(userId, { session });
 }
 
 async function debitBuzzCoins({
@@ -159,6 +164,7 @@ async function debitBuzzCoins({
   referenceId = "",
   reason = "",
   metadata = {},
+  session,
 }) {
   const amount = Math.floor(Number(amountBC) || 0);
   if (amount <= 0) {
@@ -168,7 +174,7 @@ async function debitBuzzCoins({
     });
   }
 
-  const wallet = await getOrCreateWallet(userId);
+  const wallet = await getOrCreateWallet(userId, { session });
 
   if (wallet.locked) {
     throw Object.assign(new Error(wallet.lockReason || "Wallet is locked"), {
@@ -189,7 +195,7 @@ async function debitBuzzCoins({
 
   wallet.balanceBC = currentBalance - amount;
   wallet.lastTransactionAt = new Date();
-  await wallet.save();
+  await wallet.save({ session });
 
   await addLedgerEntry({
     userId,
@@ -200,9 +206,10 @@ async function debitBuzzCoins({
     referenceId,
     reason,
     metadata,
+    session,
   });
 
-  return getWalletSnapshot(userId);
+  return getWalletSnapshot(userId, { session });
 }
 
 async function listLedger({ userId, limit = 50 }) {

@@ -7,7 +7,7 @@
  *   GET /api/debug/users   → Lists all registered users (sanitized)
  *
  * Features:
- *   - Reads from LowDB and returns minimal account info for inspection
+ *   - Reads from MongoDB and returns minimal account info for inspection
  *   - Useful for verifying signup methods, password hashes, and account creation
  *   - Helps detect legacy accounts that may need migration (e.g., old "password" fields)
  *
@@ -16,7 +16,7 @@
  *   Never expose this endpoint publicly on production without authentication or IP restriction.
  *
  * Dependencies:
- *   - db.lowdb.js         → Access to RomBuzz user database
+ *   - User model         → Access to RomBuzz user database
  * ============================================================
  */
 

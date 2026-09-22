@@ -21,7 +21,8 @@ const shortid = require("shortid");
 const authMiddleware = require("./auth-middleware");
 const { baseSanitizeUser } = require("../utils/helpers");
 
-const { db } = require("../models/db.lowdb"); // matches are still in LowDB in your project
+const Match = require("../models/Match");
+const { matchedUserIds } = require("../services/matchQueries");
 const User = require("../models/User");
 const StoryModel = require("../models/StoryModel");
 
@@ -128,12 +129,7 @@ router.get("/feed", authMiddleware, async (req, res) => {
   try {
     const myId = req.user.id;
 
-    // Matches still coming from LowDB (same approach as posts.js does) :contentReference[oaicite:1]{index=1}
-    await db.read();
-    const myMatches = (db.data.matches || [])
-      .filter((m) => Array.isArray(m.users) && m.users.includes(myId))
-      .map((m) => m.users.find((id) => id !== myId))
-      .filter(Boolean);
+    const myMatches = await matchedUserIds(myId);
 
     if (!myMatches.length) return res.json({ users: [] });
 
@@ -237,14 +233,7 @@ router.post("/:id/view", authMiddleware, async (req, res) => {
     // Owner may view their own story.
     // Everyone else must still be matched with the owner.
     if (ownerId !== myId) {
-      await db.read();
-
-      const stillMatched = (db.data.matches || []).some(
-        (match) =>
-          Array.isArray(match.users) &&
-          match.users.includes(myId) &&
-          match.users.includes(ownerId)
-      );
+      const stillMatched = await Match.exists({ users: { $all: [myId, ownerId] } });
 
       if (!stillMatched) {
         return res.status(403).json({ error: "forbidden" });

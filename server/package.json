@@ -6,7 +6,10 @@
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "test": "node --test tests/*.test.js",
+    "check": "node scripts/check-syntax.js",
+    "migrate:lowdb": "node scripts/migrate-lowdb-to-mongodb.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.744.0",
@@ -23,7 +26,6 @@
     "google-auth-library": "^9.2.0",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
-    "lowdb": "^7.0.1",
     "mongoose": "^8.7.0",
     "multer": "^1.4.5-lts.1",
     "resend": "^6.5.2",
@@ -32,7 +34,9 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4"
+    "mongodb-memory-server": "^11.2.0",
+    "nodemon": "^3.1.4",
+    "socket.io-client": "^4.8.3"
   },
   "engines": {
     "node": ">=18"

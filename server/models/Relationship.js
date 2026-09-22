@@ -22,6 +22,7 @@ const mongoose = require("mongoose");
 
 const relationshipSchema = new mongoose.Schema(
   {
+    id: { type: String },
     from: { type: String, required: true, index: true }, // user initiating action
     to: { type: String, required: true, index: true },   // target user
     type: {

@@ -435,18 +435,6 @@ function distanceKm(loc1, loc2) {
   return R * c;
 }
 
-const roomStore = global._roomMessages || (global._roomMessages = new Map());
-
-async function getRoomDoc(_dbIgnored, roomId) {
-  const key = String(roomId);
-  let doc = roomStore.get(key);
-  if (!doc) {
-    doc = { roomId: key, list: [] };
-    roomStore.set(key, doc);
-  }
-  return doc;
-}
-
 async function incMatchStreakOut(fromId, toId) {
   const from = String(fromId);
   const to = String(toId);
@@ -523,7 +511,6 @@ module.exports = {
   isBlocked,
   msToDays,
   distanceKm,
-  getRoomDoc,
   incMatchStreakOut,
   isRestricted,
   canUseRestricted,

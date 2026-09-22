@@ -15,7 +15,7 @@
  *
  * Dependencies:
  *   - authMiddleware.js → Validates JWT
- *   - LowDB instance (db.lowdb.js)
+ *   - MongoDB User and Notification models
  *   - process.env.OPENAI_API_KEY
  *   - ENABLE_AI_WINGMAN env flag
  *

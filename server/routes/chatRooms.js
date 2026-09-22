@@ -29,22 +29,20 @@ const {
   sendFeatureRestrictionError,
 } = require("../utils/moderation");
 const ChatRoom = require("../models/ChatRoom");
-const MediaGift = require("../models/MediaGift");
+const { appendMessage, validKey, authorizeRoom, ensureRoom, markRoomsRead, findActiveChatUser, isChatMatchActive } = require("../services/chatPersistence");
+const { buildChatMessage } = require("../services/chatMessageBuilder");
+const { computeUnreadSummaryForUser } = require("../services/chatUnread");
+const { unlockChatMedia } = require("../services/chatMediaUnlock");
 const User = require("../models/User");
 const Match = require("../models/Match");
 const Relationship = require("../models/Relationship");
-const { debitBuzzCoins, creditBuzzCoins } = require("../services/buzzCoinService");
+
 const {
   deleteStoredR2ObjectBestEffort,
-  getSignedMediaUrl,
   getStoredMediaR2Key,
-  isR2Key,
 } = require("../utils/r2Media");
 const {
-  createSignedPlaybackToken,
   deleteCloudflareStreamVideoBestEffort,
-  getStreamVideo,
-  normalizeStreamUid,
 } = require("../services/cloudflareStreamService");
 
 // ✅ Proper Socket.IO + state wiring
@@ -55,324 +53,7 @@ const { onlineUsers } = require("../models/state");
 // 🧩 Utilities
 // =======================
 
-function normalizeMediaString(value = "") {
-  return String(value || "").trim();
-}
-
-async function signR2Value(value, expiresInSeconds = 3600) {
-  const raw = normalizeMediaString(value);
-  if (!raw) return null;
-  if (!isR2Key(raw)) return raw;
-
-  return getSignedMediaUrl(raw, expiresInSeconds);
-}
-
-function decodeRbzPayload(text = "") {
-  const raw = String(text || "");
-  if (!raw.startsWith("::RBZ::")) return null;
-
-  try {
-    const payload = JSON.parse(raw.slice("::RBZ::".length));
-    return payload && typeof payload === "object" ? payload : null;
-  } catch {
-    return null;
-  }
-}
-
-function getChatMessageStoredMedia(message = {}) {
-  const raw =
-    typeof message?.toObject === "function"
-      ? message.toObject({ flattenMaps: true })
-      : { ...(message || {}) };
-
-  const payload = decodeRbzPayload(raw.text) || {};
-
-  return {
-    r2Key:
-      raw.r2Key ||
-      payload.r2Key ||
-      payload.key ||
-      "",
-    key:
-      raw.key ||
-      payload.key ||
-      "",
-    url:
-      raw.url ||
-      payload.url ||
-      payload.mediaUrl ||
-      payload.fileUrl ||
-      payload.previewUrl ||
-      "",
-    mediaUrl:
-      raw.mediaUrl ||
-      payload.mediaUrl ||
-      "",
-    fileUrl:
-      raw.fileUrl ||
-      payload.fileUrl ||
-      "",
-    imageUrl:
-      raw.imageUrl ||
-      payload.imageUrl ||
-      payload.photoUrl ||
-      "",
-    photoUrl:
-      raw.photoUrl ||
-      payload.photoUrl ||
-      "",
-    attachmentUrl:
-      raw.attachmentUrl ||
-      payload.attachmentUrl ||
-      "",
-  };
-}
-
-function isChatR2KeyStillReferenced(room, key, excludedMsgId = "") {
-  const cleanKey = String(key || "").trim();
-  if (!cleanKey) return false;
-
-  return (room?.messages || []).some((candidate) => {
-    if (String(candidate?.id || "") === String(excludedMsgId || "")) {
-      return false;
-    }
-
-    return getStoredMediaR2Key(getChatMessageStoredMedia(candidate)) === cleanKey;
-  });
-}
-
-function getChatMessageStreamUid(message = {}) {
-  const raw =
-    typeof message?.toObject === "function"
-      ? message.toObject({ flattenMaps: true })
-      : { ...(message || {}) };
-
-  const payload = decodeRbzPayload(raw.text) || {};
-
-  return normalizeStreamUid(
-    raw.streamUid ||
-      raw.uid ||
-      raw.cloudflareStream?.uid ||
-      payload.streamUid ||
-      payload.uid ||
-      payload.cloudflareStream?.uid ||
-      ""
-  );
-}
-
-function isChatStreamUidStillReferenced(room, streamUid, excludedMsgId = "") {
-  const cleanUid = normalizeStreamUid(streamUid);
-  if (!cleanUid) return false;
-
-  return (room?.messages || []).some((candidate) => {
-    if (String(candidate?.id || "") === String(excludedMsgId || "")) {
-      return false;
-    }
-
-    return getChatMessageStreamUid(candidate) === cleanUid;
-  });
-}
-
-function replaceRbzPayloadUrl(text = "", signedUrl = "") {
-  const raw = String(text || "");
-  const nextUrl = String(signedUrl || "").trim();
-
-  if (!raw.startsWith("::RBZ::") || !nextUrl) return raw;
-
-  try {
-    const payload = JSON.parse(raw.slice("::RBZ::".length));
-    if (!payload || typeof payload !== "object") return raw;
-
-    payload.url = nextUrl;
-    return `::RBZ::${JSON.stringify(payload)}`;
-  } catch {
-    return raw;
-  }
-}
-
-function replaceRbzPayloadStreamPlayback(text = "", stream = {}) {
-  const raw = String(text || "");
-  if (!raw.startsWith("::RBZ::")) return raw;
-
-  try {
-    const payload = JSON.parse(raw.slice("::RBZ::".length));
-    if (!payload || typeof payload !== "object") return raw;
-
-    payload.provider = "cloudflare_stream";
-    payload.storage = "cloudflare_stream";
-    payload.purpose = "chat_video";
-    payload.context = "chat_video";
-    payload.streamUid = stream.streamUid || payload.streamUid || "";
-    payload.uid = stream.streamUid || payload.uid || "";
-    payload.url = stream.playback?.hls || payload.url || "";
-    payload.previewUrl = stream.playback?.hls || payload.previewUrl || "";
-    payload.playback = stream.playback || payload.playback || {};
-    payload.thumbnailUrl = stream.thumbnailUrl || payload.thumbnailUrl || "";
-    payload.status = stream.status || payload.status || "processing";
-    payload.duration = Number(stream.duration || payload.duration || 0);
-    payload.cloudflareStream = {
-      ...(payload.cloudflareStream || {}),
-      uid: stream.streamUid || payload.cloudflareStream?.uid || "",
-      provider: "cloudflare_stream",
-      purpose: "chat_video",
-      context: "chat_video",
-      status: stream.status || payload.cloudflareStream?.status || "processing",
-      duration: Number(stream.duration || payload.cloudflareStream?.duration || 0),
-      requireSignedURLs: true,
-    };
-
-    return `::RBZ::${JSON.stringify(payload)}`;
-  } catch {
-    return raw;
-  }
-}
-
-function getChatStreamUid(base = {}, payload = {}) {
-  return normalizeStreamUid(
-    base?.streamUid ||
-      base?.cloudflareStream?.uid ||
-      payload?.streamUid ||
-      payload?.uid ||
-      payload?.cloudflareStream?.uid ||
-      ""
-  );
-}
-
-function isChatStreamVideo(base = {}, payload = {}) {
-  const provider = String(
-    base?.provider ||
-      base?.storage ||
-      payload?.provider ||
-      payload?.storage ||
-      ""
-  ).toLowerCase();
-
-  const purpose = String(
-    base?.purpose ||
-      base?.cloudflareStream?.purpose ||
-      base?.cloudflareStream?.context ||
-      payload?.purpose ||
-      payload?.context ||
-      payload?.cloudflareStream?.purpose ||
-      payload?.cloudflareStream?.context ||
-      ""
-  ).toLowerCase();
-
-  const mediaType = String(base?.mediaType || payload?.mediaType || "").toLowerCase();
-
-  return (
-    mediaType === "video" &&
-    provider === "cloudflare_stream" &&
-    purpose === "chat_video" &&
-    !!getChatStreamUid(base, payload)
-  );
-}
-
-async function signChatStreamVideoMessage(base = {}, payload = {}) {
-  const streamUid = getChatStreamUid(base, payload);
-  if (!streamUid) return base;
-
-  try {
-    const video = await getStreamVideo(streamUid);
-    const signed = await createSignedPlaybackToken(streamUid);
-    const playback = signed?.playback || {};
-
-    const streamPayload = {
-      streamUid,
-      playback,
-      thumbnailUrl: playback?.thumbnailUrl || video?.thumbnailUrl || "",
-      status: video?.status || "processing",
-      duration: Number(video?.duration || 0),
-    };
-
-    return {
-      ...base,
-      provider: "cloudflare_stream",
-      storage: "cloudflare_stream",
-      purpose: "chat_video",
-      streamUid,
-      url: playback?.hls || "",
-      playback,
-      thumbnailUrl: streamPayload.thumbnailUrl,
-      status: streamPayload.status,
-      duration: streamPayload.duration,
-      cloudflareStream: {
-        ...(base.cloudflareStream || {}),
-        uid: streamUid,
-        provider: "cloudflare_stream",
-        purpose: "chat_video",
-        context: "chat_video",
-        status: streamPayload.status,
-        duration: streamPayload.duration,
-        requireSignedURLs: true,
-      },
-      text: replaceRbzPayloadStreamPlayback(base.text, streamPayload),
-    };
-  } catch (err) {
-    console.warn("signChatStreamVideoMessage failed:", err?.message || err);
-    return base;
-  }
-}
-
-async function signChatMessageMedia(message = {}, expiresInSeconds = 3600) {
-  const base =
-    typeof message?.toObject === "function"
-      ? message.toObject({ flattenMaps: true })
-      : { ...(message || {}) };
-
-  const payload = decodeRbzPayload(base.text);
-
-  if (isChatStreamVideo(base, payload || {})) {
-    return signChatStreamVideoMessage(base, payload || {});
-  }
-
-  const rawUrl = normalizeMediaString(base.url || "");
-  const key = isR2Key(rawUrl) ? rawUrl : "";
-
-  if (!key) return base;
-
-  const signedUrl = await getSignedMediaUrl(key, expiresInSeconds);
-
-  return {
-    ...base,
-    url: signedUrl,
-    r2Key: key,
-    text: replaceRbzPayloadUrl(base.text, signedUrl),
-  };
-}
-
-async function signChatMessages(messages = [], expiresInSeconds = 3600) {
-  return Promise.all(
-    (messages || []).map((message) =>
-      signChatMessageMedia(message, expiresInSeconds)
-    )
-  );
-}
-
-// Parse participants from roomId
-// Supports both "a_b" and legacy "a__b" formats
-function getPeersFromRoomId(roomId) {
-  const raw = String(roomId || "");
-  const parts = raw.split("_");
-
-  // Normal case: "userA_userB"
-  if (parts.length === 2) {
-    const [a, b] = parts;
-    return { a, b };
-  }
-
-  // Legacy case: "userA__userB" → ["userA", "", "userB"]
-  if (parts.length === 3 && parts[1] === "") {
-    return { a: parts[0], b: parts[2] };
-  }
-
-  // Fallback: use first two non-empty pieces
-  const nonEmpty = parts.filter(Boolean);
-  return {
-    a: nonEmpty[0] || "",
-    b: nonEmpty[1] || "",
-  };
-}
+const { signChatMessageMedia, signChatMessages, getChatMessageStoredMedia, isChatR2KeyStillReferenced, getChatMessageStreamUid, isChatStreamUidStillReferenced } = require("../services/chatMessageMedia");
 
 async function isChatBlocked(userA, userB) {
   const a = String(userA || "");
@@ -391,89 +72,14 @@ async function isChatBlocked(userA, userB) {
   return !!block;
 }
 
-async function findActiveChatUser(userId) {
-  const id = String(userId || "").trim();
-  if (!id) return null;
-
-  return User.findOne({
-    id,
-    visibility: { $ne: "pending_delete" },
-    deleteStatus: { $ne: "pending_delete" },
-  })
-    .select("id")
-    .lean();
-}
-
-async function isChatMatchActive(userA, userB) {
-  const a = String(userA || "").trim();
-  const b = String(userB || "").trim();
-
-  if (!a || !b || a === b) return false;
-
-  const match = await Match.exists({
-    $or: [
-      { users: { $all: [a, b] } },
-
-      {
-        status: "matched",
-        user1: a,
-        user2: b,
-      },
-
-      {
-        status: "matched",
-        user1: b,
-        user2: a,
-      },
-    ],
-  });
-
-  return !!match;
-}
-
-// ✅ Authorize the current user, require an active peer,
-// and require that both users are still matched.
 async function enforceActiveRoomPeer(req, res, roomId) {
-  const me = String(req.user?.id || "");
-  const { a, b } = getPeersFromRoomId(roomId);
-
-  const aId = String(a || "");
-  const bId = String(b || "");
-
-  if (
-    !me ||
-    !aId ||
-    !bId ||
-    (me !== aId && me !== bId)
-  ) {
-    res.status(403).json({ error: "forbidden" });
+  try { return await authorizeRoom(roomId, String(req.user?.id || "")); }
+  catch (err) {
+    const status = { forbidden: 403, blocked: 403, not_matched: 409, user_not_found: 404 }[err.message];
+    if (!status) throw err;
+    res.status(status).json({ error: err.message, message: "This conversation is no longer available." });
     return null;
   }
-
-  const peerId = me === aId ? bId : aId;
-
-  const [peer, matched] = await Promise.all([
-    findActiveChatUser(peerId),
-    isChatMatchActive(me, peerId),
-  ]);
-
-  if (!peer) {
-    res.status(404).json({
-      error: "user_not_found",
-      message: "This user is no longer available.",
-    });
-    return null;
-  }
-
-  if (!matched) {
-    res.status(409).json({
-      error: "not_matched",
-      message: "This conversation is no longer available.",
-    });
-    return null;
-  }
-
-  return { peerId };
 }
 
 // ✅ Existing-room actions must never create a brand-new empty room.
@@ -491,29 +97,6 @@ async function getExistingActiveRoom(req, res, roomId) {
   return {
     room,
     peerId: activePeer.peerId,
-  };
-}
-
-function sanitizeReplyToSnapshot(input) {
-  if (!input || typeof input !== "object") return null;
-
-  const id = String(input.id || "");
-  const from = String(input.from || "");
-  if (!id || !from) return null;
-
-  return {
-    id,
-    from,
-    type: String(input.type || "text"),
-    text: String(input.text || ""),
-    url: input.url ? String(input.url) : null,
-    mediaType:
-      input.mediaType === "image" ||
-      input.mediaType === "video" ||
-      input.mediaType === "audio"
-        ? input.mediaType
-        : null,
-    deleted: !!input.deleted,
   };
 }
 
@@ -730,40 +313,13 @@ async function getPaginatedVisibleMessages(roomId, userId, options = {}) {
   };
 }
 
-async function getRoomDoc(roomId) {
+async function getRoomDoc(roomId, actorId) {
   let room = await ChatRoom.findOne({ roomId });
 
   if (!room) {
-    const { a, b } = getPeersFromRoomId(roomId);
-
-    // ✅ init read state for both users
-    const epoch = new Date(0);
-    room = await ChatRoom.create({
-      roomId,
-      participants: [a, b],
-      lastReadAtByUser: { [a]: epoch, [b]: epoch },
-      chatPrefsByUser: {
-        [a]: {
-          pinned: false,
-          muted: false,
-          alertOnline: false,
-          deletedForMe: false,
-          forceUnread: false,
-          updatedAt: new Date(),
-        },
-        [b]: {
-          pinned: false,
-          muted: false,
-          alertOnline: false,
-          deletedForMe: false,
-          forceUnread: false,
-          updatedAt: new Date(),
-        },
-      },
-      messages: [],
-    });
-
-    return room;
+    const { participants } = await authorizeRoom(roomId, String(actorId));
+    await ensureRoom(roomId, participants);
+    room = await ChatRoom.findOne({ roomId });
   }
 
   // ✅ backfill read state for old rooms (no breaking changes)
@@ -839,15 +395,6 @@ function setMyRoomPrefs(room, userId, patch = {}) {
   return next;
 }
 
-function normalizeGiftUnlockPrice(value) {
-  const n = Math.floor(Number(value) || 0);
-
-  // Gifted media must be paid media, but keep a sane app-side cap.
-  // You can raise this later after wallet/payout rules are finalized.
-  if (n <= 0) return 0;
-  return Math.min(n, 10000);
-}
-
 async function enforceChatAllowed(req, res) {
   try {
     await ensureFeatureAllowed(req.user.id, "chat");
@@ -891,7 +438,7 @@ router.get("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
       // Preserve the existing behavior for a brand-new conversation:
       // opening it creates an empty room instead of returning 404.
       if (!page) {
-        const room = await getRoomDoc(roomId);
+        const room = await getRoomDoc(roomId, userId);
 
         if (!room) {
           return res.status(404).json({
@@ -922,7 +469,7 @@ router.get("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
     // ✅ Legacy full-history response remains unchanged.
     // Shared Media, Purchased Media, Pinned Messages and older clients
     // continue receiving the original array response.
-    const room = await getRoomDoc(roomId);
+    const room = await getRoomDoc(roomId, userId);
 
     if (!room) {
       return res.status(404).json({
@@ -957,7 +504,8 @@ router.post("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
   try {
     const { roomId } = req.params;
     const { text, replyTo } = req.body || {};
-    if (!text) return res.status(400).json({ error: "text required" });
+    if (typeof text !== "string" || !text) return res.status(400).json({ error: "text required" });
+    if (req.body?.id !== undefined && !validKey(req.body.id)) return res.status(400).json({ error: "invalid_message_id" });
 
     if (!(await enforceChatAllowed(req, res))) return;
 
@@ -976,181 +524,10 @@ router.post("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
     }
 
 // ✅ Detect ephemeral + gift lock from ::RBZ:: payload
-let epMode = "none";
-let viewsLeft = 0;
+const msg = buildChatMessage({ text, replyTo, fromId, toId, id: req.body?.id });
 
-let giftLocked = false;
-let giftStickerId = "sticker_basic";
-let giftAmount = 0;
-let giftPriceBC = 0;
-
-// ✅ NEW: media fields (so realtime doesn’t render black/blank)
-let mediaUrl = null;
-let mediaType = null; // "image" | "video" | "audio"
-let overlayText = "";
-let muted = false;
-
-// ✅ Chat video Stream fields. Old Cloudinary videos keep using url only.
-let provider = "";
-let storage = "";
-let purpose = "";
-let streamUid = "";
-let thumbnailUrl = "";
-let status = "";
-let duration = 0;
-let playback = {};
-let cloudflareStream = {
-  uid: "",
-  provider: "",
-  purpose: "",
-  context: "",
-  status: "",
-  duration: 0,
-  requireSignedURLs: true,
-};
-
-if (text.startsWith("::RBZ::")) {
-  try {
-    const payload = JSON.parse(text.slice("::RBZ::".length));
-
-    const mode =
-      payload?.ephemeral?.mode ||
-      payload?.ephemeral ||
-      (payload?.viewOnce ? "once" : null);
-
-    if (mode === "once") {
-      epMode = "once";
-      viewsLeft = 1;
-    } else if (mode === "twice") {
-      epMode = "twice";
-      viewsLeft = 2;
-    }
-
-     if (payload?.gift?.locked) {
-      giftLocked = true;
-      giftStickerId = String(payload?.gift?.stickerId || "sticker_basic");
-
-      const rawPrice =
-        payload?.gift?.priceBC ??
-        payload?.gift?.amount ??
-        payload?.priceBC ??
-        0;
-
-      giftPriceBC = normalizeGiftUnlockPrice(rawPrice);
-      giftAmount = giftPriceBC;
-    }
-
-      // ✅ NEW: store media fields explicitly
-    if (payload?.url) mediaUrl = String(payload.url);
-
-    if (
-      payload?.mediaType === "video" ||
-      payload?.mediaType === "image" ||
-      payload?.mediaType === "audio"
-    ) {
-      mediaType = payload.mediaType;
-    } else if (payload?.type === "media" && payload?.url) {
-      mediaType = "image";
-    }
-
-    provider = String(payload?.provider || "").trim();
-    storage = String(payload?.storage || provider || "").trim();
-    purpose = String(payload?.purpose || payload?.context || "").trim();
-
-    streamUid = normalizeStreamUid(
-      payload?.streamUid ||
-        payload?.uid ||
-        payload?.cloudflareStream?.uid ||
-        ""
-    );
-
-    if (
-      mediaType === "video" &&
-      (provider === "cloudflare_stream" || storage === "cloudflare_stream") &&
-      streamUid
-    ) {
-      provider = "cloudflare_stream";
-      storage = "cloudflare_stream";
-      purpose = "chat_video";
-      mediaUrl = streamUid;
-      thumbnailUrl = String(payload?.thumbnailUrl || "");
-      status = String(payload?.status || payload?.cloudflareStream?.status || "processing");
-      duration = Number(payload?.duration || payload?.cloudflareStream?.duration || 0);
-      playback =
-        payload?.playback && typeof payload.playback === "object"
-          ? payload.playback
-          : {};
-
-      cloudflareStream = {
-        uid: streamUid,
-        provider: "cloudflare_stream",
-        purpose: "chat_video",
-        context: "chat_video",
-        status,
-        duration,
-        requireSignedURLs: true,
-      };
-    }
-
-    muted = !!payload?.muted;
-
-    if (payload?.overlayText) overlayText = String(payload.overlayText || "");
-  } catch (e) {
-    console.warn("RBZ payload parse failed:", e);
-  }
-}
-
-const isRBZ = text.startsWith("::RBZ::");
-const safeReplyTo = sanitizeReplyToSnapshot(replyTo);
-
-const msg = {
-  id: shortid.generate(),
-  from: fromId,
-  to: toId,
-  text,
-  type: isRBZ ? "media" : "text",
-
-  // ✅ NEW: keep media as real fields too
-  url: isRBZ ? mediaUrl : null,
-  mediaType: isRBZ ? mediaType : null,
-  overlayText: isRBZ ? overlayText : "",
-  muted: isRBZ ? muted : false,
-
-  // ✅ Chat video Stream metadata. Old Cloudinary videos keep provider empty/cloudinary.
-  provider: isRBZ ? provider : "",
-  storage: isRBZ ? storage : "",
-  purpose: isRBZ ? purpose : "",
-  streamUid: isRBZ ? streamUid : "",
-  thumbnailUrl: isRBZ ? thumbnailUrl : "",
-  status: isRBZ ? status : "",
-  duration: isRBZ ? duration : 0,
-  playback: isRBZ ? playback : {},
-  cloudflareStream: isRBZ ? cloudflareStream : {},
-
-  time: new Date(),
-  edited: false,
-  deleted: false,
-  reactions: {},
-  hiddenFor: [],
-  ephemeral: { mode: epMode, viewsLeft },
-  gift: {
-    locked: giftLocked,
-    stickerId: giftStickerId,
-    amount: giftAmount,
-    priceBC: giftPriceBC,
-    currency: "BC",
-    unlockedBy: [],
-    unlockedAt: null,
-    unlockTransactionId: "",
-  },
-  replyTo: safeReplyTo,
-};
-
-const room = await getRoomDoc(roomId);
-room.messages.push(msg);
-await room.save();
-
-const signedMsg = await signChatMessageMedia(msg, 3600);
+const saved = await appendMessage(roomId, [fromId, toId], msg);
+const signedMsg = await signChatMessageMedia(saved.message, 3600);
 
 // ✅ Socket events (room + direct)
 const io = getIO();
@@ -1208,7 +585,9 @@ return;
 // ============================================================
 // ✍️ EDIT MESSAGE
 // ============================================================
-router.patch("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => {
+router.patch("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res, next) => {
+  // The named preference endpoint below must not be consumed as a message id.
+  if (req.params.msgId === "prefs") return next("route");
   try {
     const { roomId, msgId } = req.params;
     const { text } = req.body || {};
@@ -1697,156 +1076,25 @@ router.post("/chat/rooms/:roomId/:msgId/unlock", authMiddleware, async (req, res
     if (!(await enforceChatAllowed(req, res))) return;
     if (!(await enforceGiftsAllowed(req, res))) return;
 
-    const activeRoom = await getExistingActiveRoom(req, res, roomId);
-    if (!activeRoom) return;
+    if (!(await enforceActiveRoomPeer(req, res, roomId))) return;
 
-    const room = activeRoom.room;
-    const participants = (room?.participants || []).map((x) => String(x));
+    const result = await unlockChatMedia({ roomId, msgId, buyerId: me });
+    const signedUpdatedMessage = await signChatMessageMedia(result.message, 3600);
 
-    if (!participants.includes(me)) {
-      return res.status(403).json({ error: "forbidden" });
-    }
-
-    const msg = (room.messages || []).find((m) => String(m.id) === String(msgId));
-    if (!msg) return res.status(404).json({ error: "not_found" });
-
-    // ✅ only receiver can unlock paid media
-    if (String(msg.to) !== me) {
-      return res.status(403).json({ error: "only_receiver_can_unlock" });
-    }
-
-    if (!msg?.gift?.locked) {
-      return res.json({
-        ok: true,
-        locked: false,
-        alreadyUnlocked: true,
-        message: msg,
-      });
-    }
-
-    msg.gift.unlockedBy ||= [];
-
-    if (msg.gift.unlockedBy.map(String).includes(me)) {
-      msg.gift.locked = false;
-      await room.save();
-
-      return res.json({
-        ok: true,
-        locked: false,
-        alreadyUnlocked: true,
-        message: msg,
-      });
-    }
-
-    const priceBC = normalizeGiftUnlockPrice(
-      msg?.gift?.priceBC ?? msg?.gift?.amount ?? 0
-    );
-
-    if (priceBC <= 0) {
-      return res.status(400).json({
-        error: "invalid_unlock_price",
-        message: "This gifted media does not have a valid BuzzCoin unlock price.",
-      });
-    }
-
-    const transactionId = `chat_media_unlock_${shortid.generate()}`;
-    const ownerId = String(msg.from || "");
-
-    const wallet = await debitBuzzCoins({
-      userId: me,
-      amountBC: priceBC,
-      type: "gift_send",
-      source: "chat_media_unlock",
-      referenceId: transactionId,
-      reason: "Unlocked gifted chat media",
-      metadata: {
-        roomId: String(roomId),
+    // Payment has committed. Replaying this idempotent event on a retry also
+    // repairs clients that missed the first response/event after commit.
+    if (result.transactionId) {
+      getIO()?.to(roomId).emit("chat:gift:unlocked", {
+        roomId,
         msgId: String(msgId),
-        mediaType: String(msg.mediaType || ""),
-        senderId: ownerId,
-        receiverId: me,
-      },
-    });
-
-      await creditBuzzCoins({
-      userId: ownerId,
-      amountBC: priceBC,
-      type: "gift_receive",
-      source: "chat_media_unlock",
-      referenceId: transactionId,
-      reason: "Earned BuzzCoin from unlocked gifted chat media",
-      walletBucket: "earned",
-      metadata: {
-        roomId: String(roomId),
-        msgId: String(msgId),
-        mediaType: String(msg.mediaType || ""),
-        senderId: ownerId,
-        buyerId: me,
-      },
-    });
-
-    await MediaGift.create({
-      id: shortid.generate(),
-      mediaId: String(msg.id),
-      ownerId,
-      fromId: me,
-
-      giftId: "chat_media_unlock",
-      priceBC,
-      placement: "chat",
-      targetType: "chat_media",
-      targetId: String(msg.id),
-      transactionId,
-      status: "completed",
-
-      // ✅ Chat gifted-media history fields
-      roomId: String(roomId),
-      msgId: String(msgId),
-      mediaType: String(msg.mediaType || ""),
-      buyerId: me,
-      sellerId: ownerId,
-
-      stickerId: String(msg?.gift?.stickerId || "sticker_basic"),
-      amount: priceBC,
-      createdAt: Date.now(),
-    });
-
-    msg.gift.locked = false;
-    msg.gift.amount = priceBC;
-    msg.gift.priceBC = priceBC;
-    msg.gift.currency = "BC";
-    msg.gift.unlockedAt = new Date();
-    msg.gift.unlockTransactionId = transactionId;
-
-    if (!msg.gift.unlockedBy.map(String).includes(me)) {
-      msg.gift.unlockedBy.push(me);
+        unlockedBy: me,
+        ownerId: result.ownerId,
+        priceBC: result.priceBC,
+        transactionId: result.transactionId,
+        message: signedUpdatedMessage,
+      });
     }
-
-     await room.save();
-
-    const updatedMessage = msg.toObject ? msg.toObject() : { ...msg };
-    const signedUpdatedMessage = await signChatMessageMedia(updatedMessage, 3600);
-
-      const io = getIO();
-    io?.to(roomId).emit("chat:gift:unlocked", {
-      roomId,
-      msgId: String(msgId),
-      unlockedBy: me,
-      ownerId,
-      priceBC,
-      transactionId,
-      message: signedUpdatedMessage,
-    });
-
-    return res.json({
-      ok: true,
-      locked: false,
-      ownerId,
-      priceBC,
-      transactionId,
-      wallet,
-      message: signedUpdatedMessage,
-    });
+    return res.json({ ...result, message: signedUpdatedMessage });
   } catch (err) {
     console.error("❌ unlock error:", err);
 
@@ -1872,126 +1120,6 @@ function legacyRoomId(userA, userB) {
   return [String(userA), String(userB)].sort().join("__");
 }
 
-function countUnreadForRoom(room, me) {
-  const myId = String(me);
-  const prefs = getMyRoomPrefs(room, myId);
-
-  const lastRead =
-    (room.lastReadAtByUser?.get && room.lastReadAtByUser.get(myId)) ||
-    (room.lastReadAtByUser && room.lastReadAtByUser[myId]) ||
-    new Date(0);
-
-  const msgs = room.messages || [];
-  let n = 0;
-
-  for (const m of msgs) {
-    if (!m) continue;
-    if (String(m.to) !== myId) continue;
-    if (m.deleted) continue;
-    if (m.hiddenFor?.includes?.(myId)) continue;
-
-    const t = new Date(m.time || 0);
-    if (t > new Date(lastRead || 0)) n++;
-  }
-
-  // ✅ Manual "Mark as unread" should show a badge even if there are no new messages.
-  if (n === 0 && prefs.forceUnread) return 1;
-
-  return n;
-}
-
-async function computeUnreadSummaryForUser(userId) {
-  const me = String(userId);
-  const rooms = await ChatRoom.find({ participants: me }).lean(false);
-
-  const roomPeerIds = [
-    ...new Set(
-      rooms
-        .map((room) => {
-          const participants = room?.participants || [];
-          return String(
-            participants.find((p) => String(p) !== me) || ""
-          );
-        })
-        .filter(Boolean)
-    ),
-  ];
-
-  if (!roomPeerIds.length) {
-    return { total: 0, byPeer: {} };
-  }
-
-  const [activeUsers, matchDocs] = await Promise.all([
-    User.find({
-      id: { $in: roomPeerIds },
-      visibility: { $ne: "pending_delete" },
-      deleteStatus: { $ne: "pending_delete" },
-    })
-      .select("id")
-      .lean(),
-
-    Match.find({
-      $or: [
-        { users: me },
-        { status: "matched", user1: me },
-        { status: "matched", user2: me },
-      ],
-    })
-      .select("users user1 user2 status")
-      .lean(),
-  ]);
-
-  const activePeerIds = new Set(
-    activeUsers.map((user) => String(user.id || ""))
-  );
-
-  const matchedPeerIds = new Set();
-
-  for (const match of matchDocs) {
-    let peerId = "";
-
-    if (Array.isArray(match?.users)) {
-      peerId =
-        match.users
-          .map(String)
-          .find((id) => id !== me) || "";
-    } else {
-      const user1 = String(match?.user1 || "");
-      const user2 = String(match?.user2 || "");
-
-      if (user1 === me) peerId = user2;
-      if (user2 === me) peerId = user1;
-    }
-
-    if (peerId) {
-      matchedPeerIds.add(peerId);
-    }
-  }
-
-  const byPeer = {};
-  let total = 0;
-
-  for (const room of rooms) {
-    const participants = room.participants || [];
-    const peerId = String(
-      participants.find((p) => String(p) !== me) || ""
-    );
-
-    if (!peerId) continue;
-    if (!activePeerIds.has(peerId)) continue;
-    if (!matchedPeerIds.has(peerId)) continue;
-
-    const c = countUnreadForRoom(room, me);
-
-    if (c > 0) {
-      byPeer[peerId] = c;
-    }
-
-    total += c;
-  }
-
-  return { total, byPeer };
-}
 
 
 // ============================================================
@@ -2054,9 +1182,7 @@ router.post("/chat/mark-read", authMiddleware, async (req, res) => {
 
     if (!room) return res.status(404).json({ error: "Room not found" });
 
-    if (!room.lastReadAtByUser) room.lastReadAtByUser = new Map();
-    room.lastReadAtByUser.set(me, new Date());
-    await room.save();
+    await markRoomsRead(me, room.roomId);
 
     const summary = await computeUnreadSummaryForUser(me);
 
@@ -2082,17 +1208,10 @@ router.post("/chat/mark-read", authMiddleware, async (req, res) => {
 router.post("/chat/mark-all-read", authMiddleware, async (req, res) => {
   try {
     const me = String(req.user.id);
-    const now = new Date();
 
     if (!(await enforceChatAllowed(req, res))) return;
 
-    const rooms = await ChatRoom.find({ participants: me }).lean(false);
-
-    for (const room of rooms) {
-      if (!room.lastReadAtByUser) room.lastReadAtByUser = new Map();
-      room.lastReadAtByUser.set(me, now);
-      await room.save();
-    }
+    await markRoomsRead(me);
 
     const summary = await computeUnreadSummaryForUser(me);
 

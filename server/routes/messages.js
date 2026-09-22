@@ -258,6 +258,8 @@ router.get("/", authMiddleware, async (req, res) => {
     }
 
     const convo = await Message.find({
+      deleted: { $ne: true },
+      hiddenFor: { $ne: self },
       $or: [
         { from: user1, to: user2 },
         { from: user2, to: user1 },
@@ -280,6 +282,13 @@ router.get("/", authMiddleware, async (req, res) => {
         url: m.url || null,
         r2Key: m.r2Key || "",
         ephemeral: m.ephemeral || "keep",
+        roomId: m.roomId || "",
+        seen: !!m.seen,
+        seenAt: m.seenAt || null,
+        edited: !!m.edited,
+        deleted: !!m.deleted,
+        reactions: m.reactions || {},
+        expireAt: m.expireAt || null,
 
         // 📹 Call-history message metadata
         callId: m.callId || "",

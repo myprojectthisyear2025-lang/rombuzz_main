@@ -21,21 +21,20 @@ async function initMongo() {
 
   if (!uri) {
     console.error("❌ FATAL: MONGO_URI missing in environment.");
-    process.exit(1);
+    throw new Error("MONGO_URI is required");
   }
 
   try {
     mongoose.set("strictQuery", false);
 
     await mongoose.connect(uri, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 10000,
     });
 
     console.log("🍃 MongoDB connected successfully");
   } catch (err) {
-    console.error("❌ MongoDB connection failed", err);
-    process.exit(1);
+    console.error("MongoDB connection failed; check configured URI and network access.");
+    throw new Error("MongoDB unavailable");
   }
 }
 

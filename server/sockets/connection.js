@@ -1,250 +1,55 @@
 /**
- * ============================================================
- * 📁 File: sockets/connection.js
- * ⚡ Purpose: Handles all Socket.IO real-time events for:
- *   - Chat messaging
- *   - Typing / message seen
- *   - MicroBuzz & BuzzMatch live interactions
- *   - Real-time voice/video call signaling
- *   - Meet-in-Middle live coordination
- * ============================================================
+ * Path: server/sockets/connection.js
+ * Purpose: Authenticate realtime clients and use MongoDB for every persistent socket operation.
  */
-
-const jwt = require("jsonwebtoken");
-const shortid = require("shortid");
-const db = require("../models/db.lowdb");
-const { JWT_SECRET, ENABLE_REALTIME_CHAT = true } = require("../config/env");
-const { isBlocked, getRoomDoc } = require("../utils/helpers");
+const authMiddleware = require("../routes/auth-middleware");
+const User = require("../models/User");
 const { onlineUsers } = require("../models/state");
+const { registerChatEvents } = require("./chatEvents");
+const { authorizeRoom, authorizePair } = require("../services/chatPersistence");
+const fetch = (...args) => global.fetch(...args);
 
-// ESM-safe fetch wrapper (same pattern as index.js)
-const fetch = (...args) =>
-  import("node-fetch").then(({ default: fetch }) => fetch(...args));
-
-function registerConnection(io) {  io.on("connection", (socket) => {
-    console.log(`⚡️ New client connected: ${socket.id}`);
-    let currentUserId = null;
-
-    // =========================
-    // ❤️ MATCH + BUZZ MATCH OPEN PROFILE
-    // =========================
-    socket.on("match", (data) => {
-      const { otherUserId, type } = data || {};
-      if (onlineUsers[otherUserId]) {
-        io.to(String(otherUserId)).emit("match", {
-          fromId: socket.userId,
-          type,
-        });
-
-        // 💫 When both should open each other's profile
-        socket.on("buzz_match_open_profile", (data) => {
-          const { otherUserId, selfieUrl } = data || {};
-          console.log("💫 buzz_match_open_profile:", data);
-
-          const myId = currentUserId;
-          const peerId = otherUserId;
-          if (!myId || !peerId) return;
-
-          // Emit to both users' private rooms
-          if (onlineUsers[myId]) {
-            io.to(String(myId)).emit("buzz_match_open_profile", {
-              otherUserId: peerId,
-              selfieUrl,
-            });
-          }
-          if (onlineUsers[peerId]) {
-            io.to(String(peerId)).emit("buzz_match_open_profile", {
-              otherUserId: myId,
-              selfieUrl,
-            });
-          }
-
-          console.log(`💫 buzz_match_open_profile relayed between ${myId} ↔ ${peerId}`);
-        });
-
-        console.log(`💥 Match emitted between ${socket.userId} ↔ ${otherUserId}`);
-      }
-    });
-
-    // =========================
-    // 🔌 USER REGISTRATION EVENTS
-    // =========================
-    socket.on("user:register", (userId) => {
-      if (!userId) return;
-      onlineUsers[userId] = socket.id;
-      currentUserId = userId;
-      socket.join(String(userId));
-      io.emit("presence:online", { userId });
-      console.log(`🔌 (user:register) ${userId} → ${socket.id} (joined private room)`);
-    });
-
-    socket.on("register", (userId) => {
-      if (!userId) return;
-      onlineUsers[userId] = socket.id;
-      currentUserId = userId;
-      socket.join(String(userId));
-      io.emit("presence:online", { userId });
-      console.log(`🔌 (legacy register) ${userId} → ${socket.id}`);
-    });
-
-    // =========================
-    // 🔐 AUTHENTICATION VIA TOKEN
-    // =========================
-    if (!ENABLE_REALTIME_CHAT) {
-      socket.emit("info", { message: "Realtime chat disabled by config" });
-      return;
-    }
-
-    const token = socket.handshake?.auth?.token;
-    if (token) {
+function registerConnection(io) {
+  io.use(async (socket, next) => {
+    const req = { headers: { authorization: "Bearer " + (socket.handshake?.auth?.token || "") } };
+    const res = { status() { return this; }, json() { next(new Error("Authentication required")); } };
+    await authMiddleware(req, res, async () => {
       try {
-        const data = jwt.verify(token, JWT_SECRET);
-        const userId = data.id;
-        onlineUsers[userId] = socket.id;
-        currentUserId = userId;
-
-        (async () => {
-          await db.read();
-          const u = db.data.users.find((x) => x.id === userId);
-          if (u) {
-            u.lastOnline = Date.now();
-            await db.write();
-          }
-        })();
-
-        socket.join(userId);
-        socket.emit("connected", { userId });
-        console.log(`✅ Authenticated user ${userId} joined their private room.`);
-      } catch {
-        socket.emit("error", { message: "Invalid auth token" });
-      }
-    }
-
-    // =========================
-    // 💬 ROOMS + UX SIGNALS
-    // =========================
-    socket.on("joinRoom", (roomId) => {
-      if (!roomId) return;
-      socket.join(roomId);
-      console.log(`🟢 ${socket.id} joined room ${roomId}`);
+        socket.userId = String(req.user.id);
+        await User.updateOne({ id: socket.userId }, { $set: { lastOnline: new Date() } });
+        next();
+      } catch { next(new Error("Presence persistence unavailable")); }
     });
-
-    socket.on("leaveRoom", (roomId) => {
-      if (!roomId) return;
-      socket.leave(roomId);
-      console.log(`🔴 ${socket.id} left room ${roomId}`);
-    });
-
-    socket.on("typing", ({ roomId, fromId }) => {
-      if (!roomId || !fromId) return;
-      socket.to(roomId).emit("typing", { fromId });
-    });
-
-    socket.on("message:seen", ({ roomId, msgId }) => {
-      if (!roomId || !msgId) return;
-      socket.to(roomId).emit("message:seen", msgId);
-    });
-
-    // 🧨 Auto-delete “view once” messages when seen
-    socket.on("message:seen", async ({ roomId, msgId }) => {
-      await db.read();
-      const msg = db.data.messages?.find((m) => m.id === msgId);
-      if (msg && msg.ephemeral?.mode === "once") {
-        db.data.messages = db.data.messages.filter((m) => m.id !== msgId);
-        await db.write();
-        io.to(roomId).emit("message:removed", { id: msgId });
-      }
-    });
-
-    // 🕓 Auto-cleanup expired messages hourly
-    setInterval(async () => {
-      await db.read();
-      const now = Date.now();
-      db.data.messages = db.data.messages.filter((m) => {
-        if (!m.expireAt) return true;
-        return new Date(m.expireAt).getTime() > now;
-      });
-      await db.write();
-    }, 60 * 60 * 1000);
-
-    // =========================
-    // 💌 SEND MESSAGE
-    // =========================
-    socket.on("sendMessage", async (msg) => {
+  });
+  io.on("connection", (socket) => {
+    const currentUserId = socket.userId;
+    let registered = false;
+    const register = (userId) => {
+      if (String(userId) !== currentUserId || registered) return;
+      registered = true;
+      onlineUsers[currentUserId] = socket.id;
+      socket.join(currentUserId);
+      io.emit("presence:online", { userId: currentUserId });
+    };
+    register(currentUserId);
+    socket.emit("connected", { userId: currentUserId });
+    socket.on("user:register", register);
+    socket.on("register", register);
+    registerChatEvents(io, socket);
+    socket.on("match", async (data = {}) => {
       try {
-        if (!msg || !msg.roomId) return;
-        const { roomId, from, to, text } = msg;
-
-        // Block check
-        if (isBlocked(from, to)) {
-          socket.emit("warn", {
-            roomId,
-            reason: "blocked",
-            message: "This user is unavailable to chat.",
-          });
-          return;
-        }
-
-        const doc = await getRoomDoc(roomId);
-        if (!doc.list.find((m) => m.id === msg.id)) {
-          doc.list.push({
-            id: msg.id || shortid.generate(),
-            roomId,
-            from,
-            to,
-            text: text || "",
-            type:
-              msg.type ||
-              (String(text || "").startsWith("::RBZ::") ? "media" : "text"),
-            time: msg.time || new Date().toISOString(),
-            edited: false,
-            deleted: false,
-            reactions: {},
-            hiddenFor: [],
-          });
-          await db.write();
-        }
-
-        // Emit message events
-        io.to(roomId).emit("chat:message", {
-          id: msg.id,
-          roomId,
-          from,
-          to,
-          text: msg.text || text || "",
-          time: msg.time,
-          type: msg.type || "text",
-        });
-
-        io.to(String(to)).emit("chat:message", {
-          id: msg.id,
-          roomId,
-          from,
-          to,
-          text: msg.text || text || "",
-          time: msg.time,
-          type: msg.type || "text",
-        });
-
-        const sid = onlineUsers[to];
-        if (sid) {
-          io.to(sid).emit("chat:message", {
-            id: msg.id,
-            roomId,
-            from,
-            to,
-            text: msg.text || text || "",
-            time: msg.time,
-            type: msg.type || "text",
-          });
-        }
-
-        console.log(`💬 Message in ${roomId} from ${from} → ${to}`);
-      } catch (e) {
-        console.error("sendMessage error:", e);
-      }
+        await authorizePair(currentUserId, String(data.otherUserId));
+        io.to(String(data.otherUserId)).emit("match", { fromId: currentUserId, type: data.type });
+      } catch {}
     });
-
+    socket.on("buzz_match_open_profile", async (data = {}) => {
+      try {
+        const peerId = String(data.otherUserId);
+        await authorizePair(currentUserId, peerId);
+        io.to(currentUserId).emit("buzz_match_open_profile", { otherUserId: peerId, selfieUrl: data.selfieUrl });
+        io.to(peerId).emit("buzz_match_open_profile", { otherUserId: currentUserId, selfieUrl: data.selfieUrl });
+      } catch {}
+    });
     // =========================
     // 📞 REAL-TIME CALLS (OFFER / ANSWER / SIGNAL / END)
     // =========================
@@ -297,8 +102,9 @@ function registerConnection(io) {  io.on("connection", (socket) => {
     socket.on("meet:request", async ({ from, to }) => {
       try {
         if (!from || !to) return;
-        await db.read();
-        const fromUser = db.data.users.find((u) => String(u.id) === String(from)) || { id: from };
+        if (String(from) !== socket.userId) return;
+        await authorizePair(String(from), String(to));
+        const fromUser = await User.findOne({ id: String(from) }).select("id firstName lastName avatar").lean();
         const sid = onlineUsers[to];
         if (sid) {
           io.to(sid).emit("meet:request", { from: fromUser });
@@ -313,17 +119,18 @@ function registerConnection(io) {  io.on("connection", (socket) => {
       try {
         console.log("📍 meet:accept from", from, "→", to, coords);
         if (!from || !to) return;
-        if (!coords || typeof coords.lat !== "number" || typeof coords.lng !== "number") return;
+        if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng) || Math.abs(coords.lat) > 90 || Math.abs(coords.lng) > 180) return;
 
-        await db.read();
-        const me = db.data.users.find((u) => String(u.id) === String(from));
-        const you = db.data.users.find((u) => String(u.id) === String(to));
+        if (String(from) !== socket.userId) return;
+        await authorizePair(String(from), String(to));
+        const me = await User.findOne({ id: String(from) }).select("id firstName lastName location").lean();
+        const you = await User.findOne({ id: String(to) }).select("id location").lean();
         if (!me || !you) return;
 
         me.location = { lat: Number(coords.lat), lng: Number(coords.lng) };
-        await db.write();
+        await User.updateOne({ id: me.id }, { $set: { location: me.location } });
 
-        if (!you.location?.lat || !you.location?.lng) {
+        if (!Number.isFinite(you.location?.lat) || !Number.isFinite(you.location?.lng)) {
           const sid = onlineUsers[to];
           if (sid) io.to(sid).emit("meet:accept", { from, coords: me.location });
           return;
@@ -368,10 +175,11 @@ function registerConnection(io) {  io.on("connection", (socket) => {
     //
     // We just broadcast to the *other* socket(s) in that chat room.
 
-    socket.on("game:join", ({ roomId, game }) => {
+    socket.on("game:join", async ({ roomId, game }) => {
       try {
         if (!roomId) return;
         const rid = String(roomId);
+        await authorizeRoom(rid, socket.userId);
         socket.join(rid);
         const userId = currentUserId;
 
@@ -387,10 +195,11 @@ function registerConnection(io) {  io.on("connection", (socket) => {
       }
     });
 
-    socket.on("game:leave", ({ roomId, game }) => {
+    socket.on("game:leave", async ({ roomId, game }) => {
       try {
         if (!roomId) return;
         const rid = String(roomId);
+        await authorizeRoom(rid, socket.userId);
         socket.leave(rid);
         const userId = currentUserId;
 
@@ -405,11 +214,12 @@ function registerConnection(io) {  io.on("connection", (socket) => {
       }
     });
 
-    socket.on("game:action", (packet = {}) => {
+    socket.on("game:action", async (packet = {}) => {
       try {
         const { roomId, game, type, payload } = packet;
         if (!roomId || !game) return;
         const rid = String(roomId);
+        await authorizeRoom(rid, socket.userId);
         const userId = currentUserId;
 
         // Only send to the *other* side – sender already has the state.
@@ -425,17 +235,15 @@ function registerConnection(io) {  io.on("connection", (socket) => {
       }
     });
 
-    // Keep the shared onlineUsers map from pointing at a dead socket.
-    socket.on("disconnect", () => {
-      if (currentUserId && onlineUsers[currentUserId] === socket.id) {
+    socket.on("disconnect", async () => {
+      try {
+        const remaining = await io.in(currentUserId).fetchSockets();
+        if (remaining.length) { onlineUsers[currentUserId] = remaining[0].id; return; }
         delete onlineUsers[currentUserId];
-      }
+        await User.updateOne({ id: currentUserId }, { $set: { lastOnline: new Date() } });
+        io.emit("presence:offline", { userId: currentUserId });
+      } catch { console.error("Could not persist disconnect timestamp."); }
     });
-
   });
 }
-
-// ============================================================
-// ✅ EXPORT
-// ============================================================
 module.exports = { registerConnection };

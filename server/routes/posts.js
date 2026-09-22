@@ -16,7 +16,7 @@
  *   - Provides separate reels feed filtered for videos
  *
  * Dependencies:
- *   - db.lowdb.js        → LowDB JSON database
+ *   - Match model        → Mongo match visibility
  *   - auth-middleware.js → Validates JWT session
  *   - shortid            → For post IDs
  *   - utils/helpers.js   → baseSanitizeUser()
@@ -30,7 +30,7 @@
 const express = require("express");
 const router = express.Router();
 const shortid = require("shortid");
-const { db } = require("../models/db.lowdb");
+const { matchedUserIds } = require("../services/matchQueries");
 const authMiddleware = require("./auth-middleware");
 const {
   ensureFeatureAllowed,
@@ -149,13 +149,8 @@ try {
   const io = global.io;
   const onlineUsers = global.onlineUsers || {};
 
-  await db.read();
   const myId = req.user.id;
-
-  const matches = (db.data.matches || [])
-    .filter(m => Array.isArray(m.users) && m.users.includes(myId))
-    .flatMap(m => m.users)
-    .filter(id => id !== myId);
+  const matches = await matchedUserIds(myId);
 
  const signedCreated = await signPostForResponse(created, 7200);
 
@@ -213,14 +208,8 @@ router.get("/me", authMiddleware, async (req, res) => {
 // =======================
 router.get("/matches", authMiddleware, async (req, res) => {
   try {
-    // 1) Still read matches from LowDB for now
-    await db.read();
     const myId = req.user.id;
-
-    const myMatches = (db.data.matches || [])
-      .filter(m => Array.isArray(m.users) && m.users.includes(myId))
-      .map(m => m.users.find(id => id !== myId))
-      .filter(Boolean);
+    const myMatches = await matchedUserIds(myId);
 
     if (myMatches.length === 0) {
       return res.json({ posts: [] });
@@ -268,14 +257,8 @@ router.get("/matches", authMiddleware, async (req, res) => {
 // =======================
 router.get("/reels", authMiddleware, async (req, res) => {
   try {
-    // 1️⃣ Read match relationships (still from LowDB for now)
-    await db.read();
     const myId = req.user.id;
-
-    const myMatches = (db.data.matches || [])
-      .filter(m => Array.isArray(m.users) && m.users.includes(myId))
-      .map(m => m.users.find(id => id !== myId))
-      .filter(Boolean);
+    const myMatches = await matchedUserIds(myId);
 
     if (myMatches.length === 0) {
       return res.json({ posts: [] });
@@ -341,18 +324,18 @@ router.post("/:postId/react", authMiddleware, async (req, res) => {
     if (!post.reactions) post.reactions = {};
 
     // 3️⃣ Toggle like
-    const alreadyLiked = !!post.reactions[myId];
+    const alreadyLiked = !!post.reactions.get(myId);
     if (alreadyLiked) {
-      delete post.reactions[myId]; // unlike
+      post.reactions.delete(myId); // unlike
     } else {
-      post.reactions[myId] = true; // like
+      post.reactions.set(myId, true); // like
     }
 
     post.updatedAt = Date.now();
     await post.save();
 
     // 4️⃣ Return updated reaction info
-      const likesCount = Object.keys(post.reactions).length;
+      const likesCount = post.reactions.size;
     return res.json({
       success: true,
       liked: !alreadyLiked,
@@ -589,18 +572,18 @@ router.post("/:postId/comments/:commentId/heart", authMiddleware, async (req, re
 
     if (!comment.reactions) comment.reactions = {};
 
-    const alreadyLiked = comment.reactions[myId] === "❤️";
+    const alreadyLiked = comment.reactions.get(myId) === "❤️";
     if (alreadyLiked) {
-      delete comment.reactions[myId];
+      comment.reactions.delete(myId);
     } else {
-      comment.reactions[myId] = "❤️";
+      comment.reactions.set(myId, "❤️");
     }
 
     comment.updatedAt = Date.now();
     await post.save();
 
     const counts = {};
-    Object.values(comment.reactions).forEach(emoji => {
+    Array.from(comment.reactions.values()).forEach(emoji => {
       counts[emoji] = (counts[emoji] || 0) + 1;
     });
 
@@ -628,17 +611,17 @@ router.post("/:postId/comments/:commentId/react-emoji", authMiddleware, async (r
     if (!comment) return res.status(404).json({ error: "Comment not found" });
 
     if (!comment.reactions) comment.reactions = {};
-    comment.reactions[myId] = emoji;
+    comment.reactions.set(myId, emoji);
     comment.updatedAt = Date.now();
 
     await post.save();
 
     const counts = {};
-    Object.values(comment.reactions).forEach(e => {
+    Array.from(comment.reactions.values()).forEach(e => {
       counts[e] = (counts[e] || 0) + 1;
     });
 
-    const reactors = Object.entries(comment.reactions).map(([uid, e]) => ({
+    const reactors = Array.from(comment.reactions.entries()).map(([uid, e]) => ({
       userId: uid,
       emoji: e,
     }));
@@ -656,4 +639,3 @@ router.post("/:postId/comments/:commentId/react-emoji", authMiddleware, async (r
 });
 
 module.exports = router;
-

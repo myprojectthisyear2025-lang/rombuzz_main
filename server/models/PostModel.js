@@ -11,7 +11,7 @@
  *
  * Usage:
  *   - Used by auth.js (welcome post)
- *   - Will later replace LowDB usage in posts.js & buzzPosts.js
+ *   - Owns persistent post data for posts.js and buzzPosts.js
  *
  * Notes:
  *   - Keeps shortid-style IDs for backward compatibility.
@@ -49,7 +49,7 @@ const postSchema = new mongoose.Schema(
     mediaUrl: { type: String, default: "" },
     type: {
       type: String,
-      enum: ["text", "photo", "video", "reel", "story"],
+      enum: ["text", "photo", "image", "video", "reel", "story"],
       default: "text",
     },
 
@@ -64,7 +64,7 @@ const postSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },
 
     // 📈 Engagement
-    reactions: { type: Map, of: String, default: {} }, // { userId: "emoji" }
+    reactions: { type: Map, of: mongoose.Schema.Types.Mixed, default: {} }, // legacy boolean likes or emoji values
     comments: [commentSchema],
     likes: [
       {
@@ -86,6 +86,9 @@ const postSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+postSchema.index({ userId: 1, createdAt: -1 });
+postSchema.index({ bookmarks: 1, isActive: 1, createdAt: -1 });
 
 module.exports =
   mongoose.models.PostModel ||

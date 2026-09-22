@@ -14,7 +14,7 @@
  *   POST /api/auth/direct-signup       → Direct email signup (no OTP flow)
  *
  * Dependencies:
- *   - db.lowdb.js          → Database (LowDB)
+ *   - MongoDB User model  → Account persistence
  *   - sendgrid.js          → Email sending (SendGrid)
  *   - jwt.js               → Token generation
  *   - bcrypt               → Password hashing
@@ -127,7 +127,7 @@ router.use("/", require("./auth/otp"));
 router.use("/", require("./auth/registerFull"));
 
 // =======================
-// REGISTER-FULL (Hybrid: Mongo + fallback LowDB)
+// REGISTER-FULL (MongoDB)
 // LEGACY IMPLEMENTATION — KEEP UNTOUCHED DURING MIGRATION
 // =======================
 router.post("/register-full", async (req, res) => {
