@@ -33,6 +33,7 @@
  * ============================================================
  */
 
+const { begin: perfBegin } = require("../performance/context");
 const express = require("express");
 const router = express.Router();
 
@@ -508,6 +509,7 @@ const PREMIUM_INTENTS = new Set(["ons", "threesome", "onlyfans"]);
 
     // Reasonable upper bound to keep scoring cheap
     let candidates = await User.find(baseQuery).limit(400).lean();
+    const stopFilterTiming = perfBegin("discover.filter-score", "logic");
     /* ---------------------------
        5) Compute distance + derive flags
     --------------------------- */
@@ -779,6 +781,8 @@ if (eq(self.workoutFrequency, u.workoutFrequency)) fallbackSimilarity += 0.06;
         /* ---------------------------
        9) Sanitize + sort
     --------------------------- */
+    stopFilterTiming();
+    const stopTransformTiming = perfBegin("discover.sort-transform-sign", "logic");
     const viewerUsesMiles = isUnitedStatesCountry(viewerCountry || self?.country);
 
        const sorted = await Promise.all(
@@ -868,6 +872,7 @@ if (eq(self.workoutFrequency, u.workoutFrequency)) fallbackSimilarity += 0.06;
         })
     );
 
+    stopTransformTiming();
     return res.json({ users: sorted });
   } catch (err) {
     console.error("❌ DISCOVER ERROR:", err);

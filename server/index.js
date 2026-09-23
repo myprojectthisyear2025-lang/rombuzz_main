@@ -10,6 +10,9 @@ require('dotenv').config();
 // Sentry must initialize before Express and other instrumented modules.
 const Sentry = require('./instrument');
 
+const { requestTiming } = require('./performance/http');
+const { instrumentExpress } = require('./performance/express');
+require('./performance/mongo').installMongoose(require('mongoose'));
 const express = require('express');
 const helmet = require('helmet');
 const multer = require('multer');
@@ -111,6 +114,7 @@ const app = express();
 const server = http.createServer(app);
 
 // Middleware
+app.use(requestTiming);
 setupCors(app);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -251,6 +255,7 @@ Sentry.setupExpressErrorHandler(app);
 // =======================
 const { errorHandler } = require("./modules/errorHandler");
 app.use(errorHandler);
+instrumentExpress(app);
 
 // =====================================================
 // ðŸ START SERVER

@@ -29,8 +29,10 @@ async function initMongo() {
 
     await mongoose.connect(uri, {
       serverSelectionTimeoutMS: 10000,
+      ...(process.env.PERF_DIAGNOSTICS === "true" ? { monitorCommands: true } : {}),
     });
 
+    require("../performance/mongo").attachMongoCommands(mongoose.connection.getClient());
     console.log("🍃 MongoDB connected successfully");
   } catch (err) {
     console.error("MongoDB connection failed; check configured URI and network access.");

@@ -57,6 +57,8 @@ function setupCors(app) {
       "Sec-Fetch-Mode",
       "Sec-Fetch-Dest",
     ],
+    ...(process.env.PERF_DIAGNOSTICS === "true"
+      ? { exposedHeaders: ["Server-Timing", "X-Perf-Request-Id"] } : {}),
     credentials: true,
     preflightContinue: false,
   })
