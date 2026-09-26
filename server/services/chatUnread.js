@@ -5,6 +5,7 @@
 const ChatRoom = require("../models/ChatRoom");
 const User = require("../models/User");
 const Match = require("../models/Match");
+const { unreadRoomsPipeline } = require("./chatUnreadQuery");
 function countUnreadForRoom(room, me) {
   const myId = String(me);
   const prefs = room.chatPrefsByUser?.get?.(myId) || room.chatPrefsByUser?.[myId] || {};
@@ -37,7 +38,7 @@ function countUnreadForRoom(room, me) {
 
 async function computeUnreadSummaryForUser(userId) {
   const me = String(userId);
-  const rooms = await ChatRoom.find({ participants: me }).lean(false);
+  const rooms = await ChatRoom.aggregate(unreadRoomsPipeline(me));
 
   const roomPeerIds = [
     ...new Set(
@@ -116,7 +117,7 @@ async function computeUnreadSummaryForUser(userId) {
     if (!activePeerIds.has(peerId)) continue;
     if (!matchedPeerIds.has(peerId)) continue;
 
-    const c = countUnreadForRoom(room, me);
+    const c = room.unreadCount;
 
     if (c > 0) {
       byPeer[peerId] = c;
