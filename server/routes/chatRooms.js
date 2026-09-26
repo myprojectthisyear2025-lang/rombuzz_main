@@ -1177,8 +1177,8 @@ router.post("/chat/mark-read", authMiddleware, async (req, res) => {
     const ridLegacy = legacyRoomId(me, cleanPeerId);
 
     const room =
-      (await ChatRoom.findOne({ roomId: rid })) ||
-      (await ChatRoom.findOne({ roomId: ridLegacy }));
+      (await ChatRoom.findOne({ roomId: rid }).select("roomId").lean()) ||
+      (await ChatRoom.findOne({ roomId: ridLegacy }).select("roomId").lean());
 
     if (!room) return res.status(404).json({ error: "Room not found" });
 
