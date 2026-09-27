@@ -416,6 +416,18 @@ async function enforceGiftsAllowed(req, res) {
 }
 
 
+router.get("/chat/rooms/:roomId/media", authMiddleware, async (req, res) => {
+  try {
+    if (!(await enforceChatAllowed(req, res))) return;
+    if (!(await enforceActiveRoomPeer(req, res, req.params.roomId))) return;
+    const { getChatMediaPage } = require("../services/chatMediaQuery");
+    return res.json(await getChatMediaPage(req.params.roomId, String(req.user.id), req.query));
+  } catch (err) {
+    console.error("GET chat media error:", err.message);
+    return res.status(err.status || 500).json({ error: err.status === 400 ? err.message : "Failed to load media" });
+  }
+});
+
 router.get("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
   try {
     const { roomId } = req.params;
