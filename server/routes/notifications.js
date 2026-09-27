@@ -98,46 +98,44 @@ async function canSendAdminBroadcast(req) {
   return !!email && adminEmails.includes(email);
 }
 
-async function enrichNotificationActor(notification = {}) {
-  const out = { ...notification };
-  const fromId = String(out.fromId || "").trim();
-
-  if (!fromId || fromId === "system") {
-    return out;
-  }
-
+async function loadNotificationActors(notifications) {
+  const ids = [...new Set(notifications.map(n => String(n.fromId || "")).filter(id => id && id !== "system"))];
+  if (!ids.length) return new Map();
   try {
-    const actor = await User.findOne({ id: fromId })
-      .select("id firstName lastName avatar")
-      .lean();
-
-    if (!actor) return out;
-
-    const signedAvatar = await signR2Value(actor.avatar, 21600);
-
-    out.fromUser = {
-      id: actor.id,
-      firstName: actor.firstName || "",
-      lastName: actor.lastName || "",
-      avatar: signedAvatar || "",
-    };
-
-    out.fromName = [actor.firstName, actor.lastName].filter(Boolean).join(" ").trim();
-    out.fromAvatar = signedAvatar || "";
+    const actors = await User.find({ id: { $in: ids } }).select("id firstName lastName avatar").lean();
+    return new Map(await Promise.all(actors.map(async actor => {
+      try { return [actor.id, { ...actor, avatar: await signR2Value(actor.avatar, 21600) }]; }
+      catch { return [actor.id, null]; }
+    })));
   } catch (err) {
-    console.error("⚠️ notification actor enrichment failed:", err?.message || err);
+    console.error("notification actor enrichment failed:", err.message);
+    return new Map();
   }
-
-  return out;
 }
+function enrichNotificationActor(notification, actors) {
+  const actor = actors.get(String(notification.fromId || ""));
+  if (!actor) return notification;
+  return { ...notification,
+    fromUser: { id: actor.id, firstName: actor.firstName || "", lastName: actor.lastName || "", avatar: actor.avatar || "" },
+    fromName: [actor.firstName, actor.lastName].filter(Boolean).join(" ").trim(), fromAvatar: actor.avatar || "",
+  };
+}
+
+router.get("/unread-count", authMiddleware, async (req, res) => {
+  try { return res.json({ total: await Notification.countDocuments({ toId: req.user.id, read: { $ne: true } }) }); }
+  catch (err) { return res.status(500).json({ error: "Failed to count notifications" }); }
+});
 
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const notifs = await Notification.find({ toId: userId })
-      .sort({ createdAt: -1 })
-      .lean();
+    const compact = req.query.view === "mobile";
+    let query = Notification.find({ toId: userId }).sort({ createdAt: -1 });
+    // The mobile cards display type/message/time and routing metadata, never
+    // actor avatars or duplicated actor objects. Legacy clients keep them.
+    if (compact) query = query.select("-_id id toId fromId type message href postId postOwnerId entity entityId targetType targetId targetOwnerId commentId replyId routeContext read createdAt via");
+    const notifs = await query.lean();
 
       const enrich = (n) => {
       const out = { ...n };
@@ -218,11 +216,9 @@ router.get("/", authMiddleware, async (req, res) => {
       return out;
     };
 
-       const enriched = await Promise.all(
-      notifs.map((item) => enrichNotificationActor(enrich(item)))
-    );
-
-     res.json({ notifications: enriched });
+    const actors = compact ? new Map() : await loadNotificationActors(notifs);
+    const enriched = notifs.map(item => enrichNotificationActor(enrich(item), actors));
+    res.json({ notifications: enriched });
   } catch (err) {
     console.error("❌ GET /notifications error:", err);
     res.status(500).json({ error: "Failed to fetch notifications" });
