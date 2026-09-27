@@ -416,6 +416,18 @@ async function enforceGiftsAllowed(req, res) {
 }
 
 
+router.get("/chat/rooms/:roomId/pinned", authMiddleware, async (req, res) => {
+  try {
+    if (!(await enforceChatAllowed(req, res))) return;
+    if (!(await enforceActiveRoomPeer(req, res, req.params.roomId))) return;
+    const { getPinnedMessages } = require("../services/chatPinnedQuery");
+    return res.json(await getPinnedMessages(req.params.roomId, String(req.user.id)));
+  } catch (err) {
+    console.error("GET pinned messages error:", err.message);
+    return res.status(500).json({ error: "Failed to load pinned messages" });
+  }
+});
+
 router.get("/chat/rooms/:roomId/media", authMiddleware, async (req, res) => {
   try {
     if (!(await enforceChatAllowed(req, res))) return;
