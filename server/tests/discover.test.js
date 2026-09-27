@@ -10,8 +10,11 @@ test('projected Discover candidates preserve strict/expanded ranking, hard filte
   await User.insertMany([make('alice',{gender:'male'}),make('strict'),make('relaxed',{lookingFor:'friendship'}),make('male',{gender:'male'}),make('unverified',{isVerified:false}),make('hidden',{visibilityMode:'hidden'}),make('liked'),make('blocked'),make('matched')]);
   await Relationship.create([{id:'l',type:'like',from:'alice',to:'liked'},{id:'b',type:'block',from:'blocked',to:'alice'}]);
   await Match.create({id:'m',status:'matched',users:['alice','matched']});
-  await mongoose.connection.db.command({profile:2});
   backend=await startBackend(uri);
+  // Initialize the backend's first request before beginning the profiler window.
+  // Keep all three measured candidate-query assertions below.
+  await request(backend,'alice','/discover?gender=female&verified=true');
+  await mongoose.connection.db.command({profile:2});
   const common='/discover?gender=female&verified=true&lat=41&lng=-87&lookingFor=long-term';
   const strict=await request(backend,'alice',common+'&phase=strict');assert.deepEqual(strict.users.map(u=>u.id),['strict']);
   const relaxed=await request(backend,'alice',common+'&phase=fallback');assert.deepEqual(relaxed.users.map(u=>u.id),['strict','relaxed']);
