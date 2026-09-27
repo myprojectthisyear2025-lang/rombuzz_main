@@ -332,15 +332,15 @@ router.get("/", authMiddleware, async (req, res) => {
           - blocks in either direction
     --------------------------- */
     const [likedDocs, blockDocs, matchDocs] = await Promise.all([
-      Relationship.find({ from: self.id, type: "like" }).lean(),
+      Relationship.find({ from: self.id, type: "like" }).select("to").lean(),
       Relationship.find({
         type: "block",
         $or: [{ from: self.id }, { to: self.id }],
-      }).lean(),
+      }).select("from to").lean(),
       Match.find({
         status: "matched",
         users: self.id,
-      }).lean(),
+      }).select("users").lean(),
     ]);
 
     const likedIds = likedDocs.map((d) => d.to);
@@ -508,7 +508,7 @@ const PREMIUM_INTENTS = new Set(["ons", "threesome", "onlyfans"]);
     }
 
     // Reasonable upper bound to keep scoring cheap
-    let candidates = await User.find(baseQuery).limit(400).lean();
+    let candidates = await User.find(baseQuery).select("id firstName lastName avatar bio gender vibe lookingFor isVerified zodiac loveLanguage media dob height city orientation relationshipStyle travelVibes interests hobbies favorites visibilityMode fieldVisibility location latitude longitude lastActive bodyType fitnessLevel workoutFrequency smoking drinking sleepSchedule travelStyle petsPreference").limit(400).lean();
     const stopFilterTiming = perfBegin("discover.filter-score", "logic");
     /* ---------------------------
        5) Compute distance + derive flags
