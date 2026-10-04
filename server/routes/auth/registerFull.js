@@ -151,7 +151,7 @@ router.post(
             });
         }
 
-        return completeExistingUser(
+        return await completeExistingUser(
           {
             res,
             user,
@@ -186,7 +186,7 @@ router.post(
         );
       }
 
-      return createNewUser({
+      return await createNewUser({
         res,
         emailLower,
         signupPhotos,

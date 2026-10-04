@@ -42,6 +42,10 @@ const {
   activateAppleCredential,
 } = require("../../services/appleAuthorizationService");
 
+const {
+  saveCompletedSignup,
+} = require("../../services/signupBonusService");
+
 async function completeExistingUser({
   res,
   user,
@@ -125,7 +129,7 @@ async function completeExistingUser({
   user.hasOnboarded = true;
   user.updatedAt = Date.now();
 
-  await user.save();
+  await saveCompletedSignup(user);
 
   const token = signToken(
     {
@@ -215,7 +219,12 @@ async function createNewUser({
     createdAt: Date.now(),
   };
 
-  await User.create(newUser);
+  // Keep signup incomplete until completion and its bonus commit together.
+  const createdUser = await User.create({
+    ...newUser,
+    profileComplete: false,
+    hasOnboarded: false,
+  });
 
   if (appleId) {
     try {
@@ -231,6 +240,10 @@ async function createNewUser({
       throw err;
     }
   }
+
+  createdUser.profileComplete = true;
+  createdUser.hasOnboarded = true;
+  await saveCompletedSignup(createdUser);
 
   // Preserve existing welcome-post behavior.
   const PostModel =
