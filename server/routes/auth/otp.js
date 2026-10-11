@@ -32,7 +32,10 @@ const User = require("../../models/User");
 const { signToken } = require("../../utils/jwt");
 const { JWT_SECRET, TOKEN_EXPIRES_IN } = require("../../config/env");
 const { baseSanitizeUser } = require("../../utils/helpers");
-const { isPendingDeleteUser } = require("../../services/accountDeletionService");
+const {
+  isPendingDeleteUser,
+  releaseExpiredDeletionHoldByEmail,
+} = require("../../services/accountDeletionService");
 const {
   createSignupVerificationTicket,
   verifySignupVerificationTicket,
