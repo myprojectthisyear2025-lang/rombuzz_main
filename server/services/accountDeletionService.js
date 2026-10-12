@@ -155,6 +155,30 @@ async function removeUserFacingDataNow(userId, options = {}) {
       options
     );
 
+  for (const [operation, result] of Object.entries(
+    database?.operations || {}
+  )) {
+    if (!result?.ok) {
+      console.error(
+        `[account-deletion] Database operation failed: ${operation}`
+      );
+    }
+  }
+
+  if (Number(apple?.failedCount || 0) > 0) {
+    console.error("[account-deletion] Apple cleanup failed");
+  }
+
+  if (Number(storage?.failedCount || 0) > 0) {
+    console.error(
+      "[account-deletion] Storage cleanup failed",
+      {
+        r2: storage?.r2?.failedKeys?.length || 0,
+        stream: storage?.stream?.failedUids?.length || 0,
+      }
+    );
+  }
+
   const failedCount =
     Number(
       apple?.failedCount || 0
