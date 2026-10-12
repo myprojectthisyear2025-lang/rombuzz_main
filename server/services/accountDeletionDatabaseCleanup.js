@@ -303,8 +303,8 @@ async function removeDatabaseUserDataNow(userId, options = {}) {
         $or: [
           { callerId: uid },
           { receiverId: uid },
-          { caller: uid },
-          { receiver: uid },
+          { "caller.id": uid },
+          { "receiver.id": uid },
           { participants: uid },
         ],
       }),
