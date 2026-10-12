@@ -369,17 +369,31 @@ async function startAccountDeletion(userId, options = {}) {
     throw err;
   }
 
-   const now = new Date();
+  const now = new Date();
   const deleteAfter = getHoldUntilDate(now);
   const emailLower = normalizeEmail(user.email);
 
-   const cleanup =
+  // Persist the deletion deadline before external cleanup can fail.
+  await User.updateOne(
+    { id: uid },
+    {
+      $set: {
+        visibility: "pending_delete",
+        deleteStatus: "pending_delete",
+        deleteRequestedAt: now,
+        deleteAfter,
+        originalEmail: emailLower,
+        deactivatedAt: now,
+      },
+    }
+  );
+
+  const cleanup =
     await removeUserFacingDataNow(
       uid,
       {
         email: emailLower,
-        appleId:
-          user.appleId || "",
+        appleId: user.appleId || "",
       }
     );
 
