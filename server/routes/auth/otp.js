@@ -21,6 +21,8 @@
  * ============================================================
  */
 
+const fs = require("node:fs");
+const path = require("node:path");
 const express = require("express");
 const router = express.Router();
 const { Resend } = require("resend");
@@ -127,6 +129,12 @@ await resend.emails.send({
   from: process.env.RESEND_FROM || "no-reply@rombuzz.com",
   to: emailLower,
   subject: "Your RomBuzz Verification Code",
+  attachments: [{
+    filename: "rombuzz-logo.png",
+    content: fs.readFileSync(path.join(__dirname, "../../assets/rombuzz-email-logo.png")),
+    contentType: "image/png",
+    contentId: "rombuzz-logo",
+  }],
   html: `
     <div style="
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; 
@@ -146,7 +154,7 @@ await resend.emails.send({
       ">
 
         <img 
-          src="https://raw.githubusercontent.com/myprojectthisyear2025-lang/rombuzz_main/main/frontend/public/assets/logo.png"
+          src="cid:rombuzz-logo"
           alt="RomBuzz Logo"
           style="width: 90px; margin: 0 auto 20px auto; display: block;"
         />

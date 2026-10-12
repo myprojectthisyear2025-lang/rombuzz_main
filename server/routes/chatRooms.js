@@ -29,6 +29,7 @@ const {
   sendFeatureRestrictionError,
 } = require("../utils/moderation");
 const ChatRoom = require("../models/ChatRoom");
+const { sendPersistedChatPush } = require("../services/chatPushNotification");
 const { appendMessage, validKey, authorizeRoom, ensureRoom, markRoomsRead, findActiveChatUser, isChatMatchActive } = require("../services/chatPersistence");
 const { buildChatMessage } = require("../services/chatMessageBuilder");
 const { computeUnreadSummaryForUser } = require("../services/chatUnread");
@@ -551,36 +552,17 @@ router.post("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
 const msg = buildChatMessage({ text, replyTo, fromId, toId, id: req.body?.id });
 
 const saved = await appendMessage(roomId, [fromId, toId], msg);
+if (saved.inserted) void sendPersistedChatPush(saved.message, roomId);
 const signedMsg = await signChatMessageMedia(saved.message, 3600);
 
 // ✅ Socket events (room + direct)
 const io = getIO();
 
 // 🔥 FIX: Emit chat:message (frontend listens for this)
-io.to(roomId).emit("chat:message", signedMsg);
-
-// 🔥 Also send to peer's private room in case they are not in the chat room
+// A union broadcast reaches every device of both accounts exactly once.
 const sid = onlineUsers?.[toId];
-if (sid) {
-  io.to(sid).emit("chat:message", signedMsg);
-}
+io.to(roomId).to(fromId).to(toId).emit("chat:message", { ...signedMsg, roomId });
 
-// 🔥 Navbar/unread bubble handler
-if (sid) {
-  io.to(sid).emit("direct:message", {
-    id: signedMsg.id,
-    roomId,
-    from: fromId,
-    to: toId,
-    time: signedMsg.time,
-    preview: (signedMsg.text || "").slice(0, 80),
-    type: signedMsg.type || "text",
-  });
-}
-
-// ✅ The message is already validated, persisted, signed, and emitted.
-// Return success immediately so Reel sharing does not wait for the
-// receiver's full unread-summary database calculation.
 res.json({ message: signedMsg });
 
 // ✅ Keep unread badges server-accurate without blocking the sender.
@@ -642,6 +624,7 @@ router.patch("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res, next
     msg.text = text;
     msg.edited = true;
     await room.save();
+    getIO()?.to(String(req.user.id)).emit("chat:inbox:update", { roomId: room.roomId });
 
     const updatedMessage = msg.toObject ? msg.toObject() : { ...msg };
     const io = getIO();
@@ -694,6 +677,7 @@ router.delete("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => 
     if (scope === "me") {
       if (!msg.hiddenFor.includes(req.user.id)) msg.hiddenFor.push(req.user.id);
       await room.save();
+      getIO()?.to(String(req.user.id)).emit("chat:inbox:update", { roomId: room.roomId });
       return res.json({ ok: true });
     }
 
@@ -717,6 +701,7 @@ router.delete("/chat/rooms/:roomId/:msgId", authMiddleware, async (req, res) => 
       // ✅ permanently remove from MongoDB first
       room.messages.splice(msgIndex, 1);
       await room.save();
+      getIO()?.to(String(req.user.id)).emit("chat:inbox:update", { roomId: room.roomId });
 
       // ✅ best-effort Cloudflare R2 cleanup only for unsend/delete-for-all
       // Do NOT delete for scope=me because the other user may still need the file.
@@ -798,6 +783,7 @@ router.delete("/chat/rooms/:roomId", authMiddleware, async (req, res) => {
     });
 
     await room.save();
+    getIO()?.to(String(req.user.id)).emit("chat:inbox:update", { roomId: room.roomId });
     res.json({ ok: true, scope });
   } catch (err) {
     console.error("❌ DELETE conversation error:", err);
@@ -836,6 +822,7 @@ router.post("/chat/rooms/:roomId/:msgId/react", authMiddleware, async (req, res)
     }
 
     await room.save();
+    getIO()?.to(String(req.user.id)).emit("chat:inbox:update", { roomId: room.roomId });
 
     const reactions = Object.fromEntries(msg.reactions || new Map());
 
@@ -958,6 +945,7 @@ router.post("/chat/rooms/:roomId/:msgId/pin", authMiddleware, async (req, res) =
     room.messages.push(systemMessage);
 
     await room.save();
+    getIO()?.to(String(req.user.id)).emit("chat:inbox:update", { roomId: room.roomId });
 
     const updatedMessage = msg.toObject ? msg.toObject() : { ...msg };
     const io = getIO();
@@ -1028,6 +1016,7 @@ router.post("/chat/rooms/:roomId/:msgId/viewed", authMiddleware, async (req, res
 
     msg.ephemeral.viewsLeft = nextLeft;
     await room.save();
+    getIO()?.to(String(req.user.id)).emit("chat:inbox:update", { roomId: room.roomId });
 
     const io = getIO();
     io?.to(roomId).emit("chat:ephemeral:update", {
@@ -1339,6 +1328,7 @@ router.patch("/chat/rooms/:roomId/prefs", authMiddleware, async (req, res) => {
     }
 
     await room.save();
+    getIO()?.to(String(req.user.id)).emit("chat:inbox:update", { roomId: room.roomId });
 
     const summary = await computeUnreadSummaryForUser(me);
 
@@ -1403,6 +1393,7 @@ router.post("/chat/rooms/:roomId/unmatch", authMiddleware, async (req, res) => {
     });
 
     await room.save();
+    getIO()?.to(String(req.user.id)).emit("chat:inbox:update", { roomId: room.roomId });
 
     const summary = await computeUnreadSummaryForUser(me);
 

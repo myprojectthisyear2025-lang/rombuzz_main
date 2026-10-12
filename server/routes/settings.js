@@ -40,6 +40,7 @@ const DEFAULT_SETTINGS = {
   showLastSeen: true,         // show last active
   incognitoMode: false,       // temporary hide
   notifications: {
+    push: true,
     likes: true,
     messages: true,
     buzz: true,
@@ -66,7 +67,8 @@ router.get("/", authMiddleware, async (req, res) => {
     const user = await User.findOne({ id: req.user.id }).lean();
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const settings = { ...DEFAULT_SETTINGS, ...(user.settings || {}) };
+    const settings = { ...DEFAULT_SETTINGS, ...(user.settings || {}),
+      notifications: { ...DEFAULT_SETTINGS.notifications, ...(user.settings?.notifications || {}) } };
     res.json({ settings });
   } catch (err) {
     console.error("❌ GET /settings error:", err);
@@ -106,7 +108,8 @@ router.put("/", authMiddleware, async (req, res) => {
       next.notifications = {
         ...DEFAULT_SETTINGS.notifications,
         ...next.notifications,
-        ...body.notifications,
+        ...Object.fromEntries(Object.entries(body.notifications).filter(([key, value]) =>
+          key in DEFAULT_SETTINGS.notifications && typeof value === "boolean")),
       };
     }
 

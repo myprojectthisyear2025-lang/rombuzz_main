@@ -268,6 +268,7 @@ instrumentExpress(app);
   // It permanently wipes accounts whose 7-day pending_delete hold expired.
   if (process.env.DISABLE_BACKGROUND_JOBS !== "true") {
     startPendingDeletionCleanupJob();
+    require("./services/expoPushReceipts").startPushReceiptJob();
     startAiWingmanTask();
   }
   const { startMessageExpiryJob } = require("./services/messageExpiry");

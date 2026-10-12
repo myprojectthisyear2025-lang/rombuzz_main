@@ -5,7 +5,6 @@ const Relationship = require("../models/Relationship");
 const User = require("../models/User");
 
 const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
-const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const DEFAULT_NOTIFICATION_SETTINGS = {
   likes: true,
   messages: true,
@@ -47,6 +46,7 @@ function notificationSettingKeyForType(type = "") {
 }
 
 function isPushEnabledForUser(user = {}, type = "") {
+  if (user?.settings?.notifications?.push === false) return false;
   const key = notificationSettingKeyForType(type);
   if (!key) return true;
 
@@ -79,86 +79,7 @@ function getUserPushTokens(user = {}) {
   return [...new Set(list)];
 }
 
-function chunkArray(list = [], size = 100) {
-  const chunks = [];
-  for (let i = 0; i < list.length; i += size) {
-    chunks.push(list.slice(i, i + size));
-  }
-  return chunks;
-}
-
-async function getFetchImpl() {
-  if (typeof global.fetch === "function") {
-    return global.fetch.bind(global);
-  }
-
-  const mod = await import("node-fetch");
-  return mod.default;
-}
-
-async function pruneInvalidPushTokens(userId, tokens = []) {
-  const uniqueTokens = [...new Set((tokens || []).filter(Boolean))];
-  if (!userId || !uniqueTokens.length) return;
-
-  try {
-    await User.updateOne(
-      { id: String(userId) },
-      {
-        $pull: {
-          pushTokens: {
-            token: { $in: uniqueTokens },
-          },
-        },
-      }
-    );
-  } catch (err) {
-    console.error("Failed to prune invalid push tokens:", err);
-  }
-}
-
-async function sendExpoPushMessages(messages = []) {
-  const validMessages = Array.isArray(messages)
-    ? messages.filter((msg) => isValidExpoPushToken(msg?.to))
-    : [];
-
-  if (!validMessages.length) {
-    return { invalidTokens: [], sentCount: 0 };
-  }
-
-  const fetchImpl = await getFetchImpl();
-  const invalidTokens = [];
-
-  for (const batch of chunkArray(validMessages, 100)) {
-    try {
-      const response = await fetchImpl(EXPO_PUSH_URL, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Accept-Encoding": "gzip, deflate",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(batch),
-      });
-
-      const json = await response.json().catch(() => ({}));
-      const tickets = Array.isArray(json?.data) ? json.data : [];
-
-      tickets.forEach((ticket, index) => {
-        if (ticket?.details?.error === "DeviceNotRegistered") {
-          const token = batch[index]?.to;
-          if (token) invalidTokens.push(token);
-        }
-      });
-    } catch (err) {
-      console.error("Expo push send error:", err);
-    }
-  }
-
-  return {
-    invalidTokens: [...new Set(invalidTokens)],
-    sentCount: validMessages.length,
-  };
-}
+const { sendExpoPushMessages } = require("../services/expoPushService");
 
 async function sendPushToUser(user = {}, payload = {}) {
   const tokens = getUserPushTokens(user);
@@ -169,6 +90,8 @@ async function sendPushToUser(user = {}, payload = {}) {
   const messages = tokens.map((token) => ({
     to: token,
     sound: "default",
+    priority: "high",
+    channelId: "default",
     title: String(payload?.title || "RomBuzz"),
     body: String(payload?.body || "You have a new notification."),
     data: payload?.data && typeof payload.data === "object" ? payload.data : {},
@@ -176,16 +99,13 @@ async function sendPushToUser(user = {}, payload = {}) {
 
   const result = await sendExpoPushMessages(messages);
 
-  if (result.invalidTokens.length) {
-    await pruneInvalidPushTokens(user?.id, result.invalidTokens);
-  }
-
   return result;
 }
 
 function buildNotificationPushData(notif = {}, data = {}) {
   return {
     notificationId: String(notif?.id || ""),
+    recipientId: String(notif?.toId || ""),
     notificationType: String(data?.notificationType || notif?.type || "system"),
     type: String(data?.type || notif?.type || "system"),
     href: String(data?.href || notif?.href || ""),
@@ -311,6 +231,7 @@ async function sendChatMessagePush({ message, sender, recipient }) {
       body: buildChatPushBody(message),
       data: {
         notificationId: String(message?.id || ""),
+        recipientId: String(recipient.id),
         notificationType: "message",
         type: "message",
         screen: "chat",

@@ -17,7 +17,6 @@
  * ============================================================
  */
 
-const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 
 function isExpoPushToken(token = "") {
   return /^Expo(?:nent)?PushToken\[[^\]]+\]$/.test(String(token || "").trim());
@@ -40,72 +39,11 @@ function uniqPushTokens(pushTokens = []) {
   return out;
 }
 
-function chunkList(list = [], size = 100) {
-  const chunks = [];
-
-  for (let i = 0; i < list.length; i += size) {
-    chunks.push(list.slice(i, i + size));
-  }
-
-  return chunks;
-}
-
-async function sendExpoPushMessages(messages = []) {
-  const safeMessages = Array.isArray(messages) ? messages.filter(Boolean) : [];
-  if (!safeMessages.length) {
-    return {
-      ok: true,
-      sent: 0,
-      chunks: 0,
-      results: [],
-    };
-  }
-
-  const chunks = chunkList(safeMessages, 100);
-  const results = [];
-
-  for (const chunk of chunks) {
-    try {
-      const res = await fetch(EXPO_PUSH_URL, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Accept-Encoding": "gzip, deflate",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(chunk),
-      });
-
-      const text = await res.text();
-      let json = null;
-
-      try {
-        json = text ? JSON.parse(text) : null;
-      } catch {
-        json = { raw: text };
-      }
-
-      results.push({
-        ok: res.ok,
-        status: res.status,
-        body: json,
-      });
-    } catch (err) {
-      results.push({
-        ok: false,
-        status: 0,
-        error: err?.message || "expo_push_failed",
-      });
-    }
-  }
-
-  return {
-    ok: results.every((item) => item.ok),
-    sent: safeMessages.length,
-    chunks: chunks.length,
-    results,
-  };
-}
+const { createExpoPushTransport } = require("./expoPushTransport");
+const { saveReceipt, prune, report } = require("./expoPushReceipts");
+const sendExpoPushMessages = createExpoPushTransport({
+  fetchImpl: (...args) => global.fetch(...args), saveReceipt, prune, report,
+});
 
 function getUserDisplayName(user = {}) {
   const first = String(user?.firstName || "").trim();
@@ -120,6 +58,7 @@ function getUserAvatar(user = {}) {
 }
 
 async function sendIncomingVideoCallPush({ receiver, call }) {
+  if (receiver?.settings?.notifications?.push === false || receiver?.settings?.notifications?.messages === false) return { ok: true, sent: 0, reason: "disabled" };
   const tokens = uniqPushTokens(receiver?.pushTokens || []);
   if (!tokens.length || !call?.id) {
     return {
@@ -153,6 +92,7 @@ async function sendIncomingVideoCallPush({ receiver, call }) {
       callId,
       callerId,
       receiverId,
+      recipientId: receiverId,
       roomId,
       channelName,
       callerName,

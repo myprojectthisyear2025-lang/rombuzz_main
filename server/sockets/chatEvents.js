@@ -3,6 +3,7 @@
  * Purpose: Persist socket chat in MongoDB before publishing existing realtime events.
  */
 const Message = require("../models/Message");
+const { sendPersistedChatPush } = require("../services/chatPushNotification");
 const { authorizeRoom, appendMessage, markRoomSeen, validKey } = require("../services/chatPersistence");
 const { buildChatMessage } = require("../services/chatMessageBuilder");
 const { signChatMessageMedia } = require("../services/chatMessageMedia");
@@ -47,6 +48,7 @@ function registerChatEvents(io, socket) {
     if (typeof text !== "string" || !text || text.length > 100000) throw new Error("forbidden");
     const message = buildChatMessage({ text, replyTo: packet.replyTo, id: packet.id, fromId: me, toId: peerId });
     const saved = await appendMessage(packet.roomId, participants, message);
+    if (saved.inserted) void sendPersistedChatPush(saved.message, packet.roomId);
     const signed = await signChatMessageMedia(saved.message);
     const payload = { ...signed, roomId: packet.roomId };
     const target = io.to(packet.roomId).to(me).to(peerId);

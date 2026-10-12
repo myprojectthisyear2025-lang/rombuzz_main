@@ -453,7 +453,7 @@ router.post("/start", authMiddleware, async (req, res) => {
         .select("id firstName lastName avatar profilePic photo")
         .lean(),
       User.findOne({ id: peerId })
-        .select("id firstName lastName avatar profilePic photo pushTokens")
+        .select("id firstName lastName avatar profilePic photo pushTokens settings")
         .lean(),
       VideoCallSession.findOne({
         participants: { $all: [callerId, peerId] },

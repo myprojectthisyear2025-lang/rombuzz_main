@@ -45,6 +45,7 @@ const {
 // âœ… Mongo Models
 // âœ… Mongo Models
 const User = require("../models/User");
+const { claimPushToken } = require("../services/pushTokenOwnership");
 const Relationship = require("../models/Relationship"); // for likes/blocks
 const Match = require("../models/Match");
 const { onlineUsers } = require("../models/state");
@@ -659,27 +660,7 @@ router.post("/me/push-token", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "valid Expo push token required" });
     }
 
-    const user = await User.findOne({ id: req.user.id });
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const list = Array.isArray(user.pushTokens) ? [...user.pushTokens] : [];
-    const existingIndex = list.findIndex(
-      (item) => String(item?.token || "") === entry.token
-    );
-
-    if (existingIndex >= 0) {
-      list[existingIndex] = {
-        ...list[existingIndex].toObject?.(),
-        ...list[existingIndex],
-        ...entry,
-        createdAt: list[existingIndex]?.createdAt || entry.createdAt,
-      };
-    } else {
-      list.push(entry);
-    }
-
-    user.pushTokens = list;
-    await user.save();
+    const user = await claimPushToken(req.user.id, entry);
 
     res.json({
       success: true,
@@ -690,8 +671,9 @@ router.post("/me/push-token", authMiddleware, async (req, res) => {
       })),
     });
   } catch (err) {
-    console.error("POST /users/me/push-token error:", err);
-    res.status(500).json({ error: "Failed to save push token" });
+    // Database errors can contain the token in query details; log only a safe classification.
+    console.error("POST /users/me/push-token error:", err?.code || err?.name || "unknown");
+    res.status(err?.statusCode === 404 ? 404 : 503).json({ error: "Failed to save push token" });
   }
 });
 
@@ -703,12 +685,11 @@ router.delete("/me/push-token", authMiddleware, async (req, res) => {
     const user = await User.findOne({ id: req.user.id });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    user.pushTokens = (Array.isArray(user.pushTokens) ? user.pushTokens : []).filter(
-      (item) => String(item?.token || "") !== token
-    );
-    await user.save();
-
-    res.json({ success: true, remaining: user.pushTokens.length });
+    const updated = await User.findOneAndUpdate({ id: req.user.id }, {
+      $pull: { pushTokens: { token } },
+    }, { new: true });
+    await User.updateOne({ id: req.user.id, pushToken: token }, { $unset: { pushToken: "" } }, { strict: false });
+    res.json({ success: true, remaining: updated.pushTokens.length });
   } catch (err) {
     console.error("DELETE /users/me/push-token error:", err);
     res.status(500).json({ error: "Failed to remove push token" });
