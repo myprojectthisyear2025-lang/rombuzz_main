@@ -133,6 +133,8 @@ function replaceRbzPayloadUrl(text = "", signedUrl = "") {
     if (!payload || typeof payload !== "object") return raw;
 
     payload.url = nextUrl;
+    payload.previewUrl = nextUrl;
+    payload.signedUrl = nextUrl;
     return `::RBZ::${JSON.stringify(payload)}`;
   } catch {
     return raw;
