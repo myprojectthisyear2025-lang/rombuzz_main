@@ -22,12 +22,18 @@ function isExpoPushToken(token = "") {
   return /^Expo(?:nent)?PushToken\[[^\]]+\]$/.test(String(token || "").trim());
 }
 
-function uniqPushTokens(pushTokens = []) {
+function uniqPushTokens(pushTokens = [], legacyPushToken = "") {
   const seen = new Set();
   const out = [];
+  const candidates = [
+    ...(Array.isArray(pushTokens) ? pushTokens : []),
+    legacyPushToken,
+  ];
 
-  for (const entry of Array.isArray(pushTokens) ? pushTokens : []) {
-    const token = String(entry?.token || "").trim();
+  for (const entry of candidates) {
+    const token = String(
+      typeof entry === "string" ? entry : entry?.token || "",
+    ).trim();
 
     if (!isExpoPushToken(token)) continue;
     if (seen.has(token)) continue;
@@ -59,7 +65,10 @@ function getUserAvatar(user = {}) {
 
 async function sendIncomingVideoCallPush({ receiver, call }) {
   if (receiver?.settings?.notifications?.push === false || receiver?.settings?.notifications?.messages === false) return { ok: true, sent: 0, reason: "disabled" };
-  const tokens = uniqPushTokens(receiver?.pushTokens || []);
+  const tokens = uniqPushTokens(
+    receiver?.pushTokens || [],
+    receiver?.pushToken || "",
+  );
   if (!tokens.length || !call?.id) {
     return {
       ok: true,

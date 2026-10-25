@@ -453,7 +453,7 @@ router.post("/start", authMiddleware, async (req, res) => {
         .select("id firstName lastName avatar profilePic photo")
         .lean(),
       User.findOne({ id: peerId })
-        .select("id firstName lastName avatar profilePic photo pushTokens settings")
+        .select("id firstName lastName avatar profilePic photo pushTokens pushToken settings")
         .lean(),
       VideoCallSession.findOne({
         participants: { $all: [callerId, peerId] },
@@ -524,9 +524,19 @@ router.post("/start", authMiddleware, async (req, res) => {
     sendIncomingVideoCallPush({
       receiver,
       call,
-    }).catch((err) => {
-      console.error("❌ incoming video call push failed:", err);
-    });
+    })
+      .then((result) => {
+        if (!result?.sent) {
+          console.warn("⚠️ incoming video call push was not accepted", {
+            receiverId: peerId,
+            reason:
+              result?.reason || result?.errors?.join(",") || "no_ticket_accepted",
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("❌ incoming video call push failed:", err?.message || err);
+      });
 
     emitToUser(callerId, "video-call:ringing", {
       call: callPayload,

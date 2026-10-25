@@ -34,6 +34,7 @@ const {
 
 const { getIO } = require("../socket");
 const { onlineUsers } = require("../models/state");
+const { sendNotification } = require("../utils/helpers");
 
 function cleanText(value) {
   return String(value || "").trim();
@@ -260,6 +261,14 @@ async function sendVideoCallBuzzCoinGift({
 
   emitToUser(cleanSenderId, "video-call-gift:sent", payload);
   emitToUser(receiverId, "video-call-gift:received", payload);
+  void sendNotification(receiverId, {
+    fromId: cleanSenderId,
+    type: "gift",
+    message: `${cleanFirstName(sender.firstName) || "Someone"} sent you ${cleanAmountBC} BuzzCoin during a video call`,
+    href: "/notifications",
+    entity: "video_call_gift",
+    entityId: cleanCallId,
+  });
 
   return payload;
 }
