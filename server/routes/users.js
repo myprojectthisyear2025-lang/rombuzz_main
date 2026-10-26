@@ -1002,7 +1002,7 @@ router.put("/me", authMiddleware, async (req, res) => {
       nextFirstName !== (currentUser.firstName ?? "") ||
       nextLastName !== (currentUser.lastName ?? "");
     const now = Date.now();
-    const cooldownMs = 60 * 1000;
+    const cooldownMs = 7 * 24 * 60 * 60 * 1000;
     let updateFilter = { id: req.user.id };
 
     if (nameIsChanging) {
@@ -1013,7 +1013,7 @@ router.put("/me", authMiddleware, async (req, res) => {
 
       if (changedAt && now < retryAt) {
         return res.status(429).json({
-          error: "You can change your name once every 1 minute.",
+          error: "You can change your name once every 24 hours.",
           code: "NAME_CHANGE_COOLDOWN",
           nameChangedAt: currentUser.nameChangedAt,
           retryAt: new Date(retryAt).toISOString(),

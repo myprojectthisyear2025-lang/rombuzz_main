@@ -26,6 +26,7 @@ const {
 } = require("../utils/moderation");
 
 const ChatRoom = require("../models/ChatRoom");
+const { authorizeRoom } = require("../services/chatPersistence");
 
 const {
   CF_STREAM_MAX_REEL_SECONDS,
@@ -42,52 +43,31 @@ function normalizeText(value = "") {
   return String(value || "").trim();
 }
 
-function getPeersFromRoomId(roomId) {
-  const raw = String(roomId || "");
-  const parts = raw.split("_");
-
-  if (parts.length === 2) {
-    const [a, b] = parts;
-    return { a, b };
-  }
-
-  if (parts.length === 3 && parts[1] === "") {
-    return { a: parts[0], b: parts[2] };
-  }
-
-  const nonEmpty = parts.filter(Boolean);
-  return {
-    a: nonEmpty[0] || "",
-    b: nonEmpty[1] || "",
-  };
-}
-
-function getPeerForUser(roomId, userId, receiverId = "") {
-  const { a, b } = getPeersFromRoomId(roomId);
-  const me = String(userId || "");
+async function getPeerForUser(roomId, userId, receiverId = "") {
+  const me = String(userId || "").trim();
   const requestedReceiver = String(receiverId || "").trim();
 
-  if (!a || !b) {
-    const err = new Error("Invalid chat room");
-    err.status = 400;
+  let peerId;
+  try {
+    ({ peerId } = await authorizeRoom(String(roomId || "").trim(), me));
+  } catch (err) {
+    const statusByError = {
+      forbidden: 403,
+      blocked: 403,
+      not_matched: 409,
+      user_not_found: 404,
+    };
+    err.status = err.status || statusByError[err.message] || 400;
     throw err;
   }
 
-  if (![a, b].includes(me)) {
-    const err = new Error("You are not part of this chat room");
-    err.status = 403;
-    throw err;
-  }
-
-  const peerId = me === a ? b : a;
-
-  if (requestedReceiver && requestedReceiver !== peerId) {
+  if (requestedReceiver && requestedReceiver !== String(peerId)) {
     const err = new Error("receiverId does not match this chat room");
     err.status = 400;
     throw err;
   }
 
-  return peerId;
+  return String(peerId);
 }
 
 async function enforceChatAllowed(req, res) {
@@ -155,7 +135,7 @@ router.post("/direct-upload", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "roomId is required" });
     }
 
-    const peerId = getPeerForUser(roomId, req.user.id, receiverId);
+    const peerId = await getPeerForUser(roomId, req.user.id, receiverId);
 
     const directUpload = await createDirectUpload({
       userId: req.user.id,
@@ -215,7 +195,7 @@ router.post("/complete", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "streamUid is required" });
     }
 
-    const peerId = getPeerForUser(roomId, req.user.id, receiverId);
+    const peerId = await getPeerForUser(roomId, req.user.id, receiverId);
     const video = await getStreamVideo(uid);
 
     const creator = getVideoCreator(video);
