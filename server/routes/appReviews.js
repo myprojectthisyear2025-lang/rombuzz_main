@@ -14,7 +14,7 @@ const router = express.Router();
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
-const INBOX = "support@rombuzz.com";
+const INBOX = "rombuzz2025@gmail.com";
 const FROM = String(
   process.env.SUPPORT_FROM_EMAIL || "RomBuzz Support <support@rombuzz.com>",
 ).trim();
