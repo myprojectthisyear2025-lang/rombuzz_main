@@ -135,13 +135,15 @@ router.post("/likes", authMiddleware, async (req, res) => {
     return res.status(403).json({ error: "likes disabled" });
 
   try {
-    if (!(await enforceDiscoverAllowed(req, res))) return;
-
     const { to } = req.body;
     if (!to) return res.status(400).json({ error: "to required" });
     const from = req.user.id;
 
-    const targetUser = await findUserByAnyId(to);
+    const [discoverAllowed, targetUser] = await Promise.all([
+      enforceDiscoverAllowed(req, res),
+      findUserByAnyId(to),
+    ]);
+    if (!discoverAllowed) return;
     if (!targetUser) return res.status(404).json({ error: "target_not_found" });
 
     if (isDiscoverRestrictedUser(targetUser)) {
@@ -151,12 +153,14 @@ router.post("/likes", authMiddleware, async (req, res) => {
       });
     }
 
-    // ⭐ FIXED: make async
-    if (await isBlocked(from, to))
+    const [blocked, existing] = await Promise.all([
+      isBlocked(from, to),
+      Relationship.findOne({ from, to, type: "like" }),
+    ]);
+    if (blocked)
       return res.status(403).json({ error: "blocked" });
 
     // 💞 Already liked?
-    const existing = await Relationship.findOne({ from, to, type: "like" });
     if (existing)
       return res.status(400).json({ error: "already liked" });
 
@@ -233,7 +237,7 @@ router.post("/likes", authMiddleware, async (req, res) => {
 
 
   // MATCH NOTIFICATIONS FOR BOTH USERS (Symmetrical)
-  await Promise.all([
+  void Promise.all([
     // To USER B (to)
     sendNotification(to, {
       fromId: from,
@@ -287,7 +291,7 @@ router.post("/likes", authMiddleware, async (req, res) => {
   }
 
   const fromName = self?.firstName || "Someone nearby";
-  await sendNotification(to, {
+  void sendNotification(to, {
     fromId: from,
     type: "buzz",
     via: "discover_like", // 🔹 identify as Discover match request

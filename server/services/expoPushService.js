@@ -93,6 +93,7 @@ async function sendIncomingVideoCallPush({ receiver, call }) {
     body: `${callerName} is calling you`,
     priority: "high",
     channelId: "default",
+    categoryId: "incoming_video_call",
     ttl: 45,
     data: {
       type: "video_call_incoming",
