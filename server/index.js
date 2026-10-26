@@ -191,9 +191,10 @@ app.use('/api', require('./routes/aiWingman'));
 app.use('/api', require('./routes/premium'));
 
 // 💘 CUPID SUPPORT
+app.use('/api/cupid-support/reviews', require('./routes/appReviews'));
 app.use('/api/cupid-support', require('./routes/cupidSupport'));
 
-// ðŸ’¬ CHAT ROOMS
+// 💬 CHAT ROOMS
 app.use('/api', require('./routes/chatRooms'));
 
 // 📍 MEET IN THE MIDDLE — NEW CLEAN MONGODB VERSION

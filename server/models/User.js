@@ -35,6 +35,7 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true, index: true },
     firstName: { type: String, default: "" },
     lastName: { type: String, default: "" },
+    nameChangedAt: { type: Date, default: null },
     passwordHash: { type: String, default: "" },
     googleId: { type: String, default: "" },
     appleId: { type: String, default: "", index: true },

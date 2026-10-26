@@ -988,6 +988,49 @@ router.put("/me", authMiddleware, async (req, res) => {
       if (req.body[k] !== undefined) updates[k] = req.body[k];
     }
 
+    const currentUser = await User.findOne({ id: req.user.id })
+      .select("firstName lastName nameChangedAt")
+      .lean();
+    if (!currentUser) return res.status(404).json({ error: "User not found" });
+
+    if (updates.firstName !== undefined) updates.firstName = String(updates.firstName).trim();
+    if (updates.lastName !== undefined) updates.lastName = String(updates.lastName).trim();
+
+    const nextFirstName = updates.firstName ?? currentUser.firstName ?? "";
+    const nextLastName = updates.lastName ?? currentUser.lastName ?? "";
+    const nameIsChanging =
+      nextFirstName !== (currentUser.firstName ?? "") ||
+      nextLastName !== (currentUser.lastName ?? "");
+    const now = Date.now();
+    const cooldownMs = 60 * 1000;
+    let updateFilter = { id: req.user.id };
+
+    if (nameIsChanging) {
+      const changedAt = currentUser.nameChangedAt
+        ? new Date(currentUser.nameChangedAt).getTime()
+        : 0;
+      const retryAt = changedAt + cooldownMs;
+
+      if (changedAt && now < retryAt) {
+        return res.status(429).json({
+          error: "You can change your name once every 1 minute.",
+          code: "NAME_CHANGE_COOLDOWN",
+          nameChangedAt: currentUser.nameChangedAt,
+          retryAt: new Date(retryAt).toISOString(),
+        });
+      }
+
+      updates.nameChangedAt = new Date(now);
+      updateFilter = {
+        id: req.user.id,
+        $or: [
+          { nameChangedAt: null },
+          { nameChangedAt: { $exists: false } },
+          { nameChangedAt: { $lte: new Date(now - cooldownMs) } },
+        ],
+      };
+    }
+
     if (updates.dob !== undefined) {
       const { dob: verifiedDob } = requireAdultDob(updates.dob);
       updates.dob = verifiedDob;
@@ -1031,7 +1074,7 @@ router.put("/me", authMiddleware, async (req, res) => {
     updates.updatedAt = Date.now();
 
     const user = await User.findOneAndUpdate(
-      { id: req.user.id },
+      updateFilter,
       { $set: updates },
       { new: true }
     ).lean();

@@ -49,8 +49,8 @@ export default function Account() {
   const now = Date.now();
   const canChangeName = useMemo(() => {
     if (!nameChangedAt) return true;
-    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
-    return now - nameChangedAt >= THIRTY_DAYS;
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    return now - nameChangedAt >= ONE_DAY;
   }, [nameChangedAt, now]);
 
   const daysLeft = useMemo(() => {

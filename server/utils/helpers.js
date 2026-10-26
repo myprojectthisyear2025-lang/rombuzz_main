@@ -181,10 +181,16 @@ function buildChatPushBody(message = {}) {
     return preview;
   }
 
+  const mediaType = String(message?.mediaType || "").toLowerCase();
+  if (["photo", "image"].includes(mediaType)) return "Sent you a photo";
+  if (mediaType === "video") return "Sent you a video";
+  if (["audio", "voice"].includes(mediaType)) return "Sent you a voice message";
+
   const type = String(message?.type || "").toLowerCase();
 
   if (["photo", "image"].includes(type)) return "Sent you a photo";
-  if (["video", "reel", "share_reel"].includes(type)) return "Shared a reel";
+  if (type === "video") return "Sent you a video";
+  if (["reel", "share_reel"].includes(type)) return "Shared a reel";
   if (["audio", "voice"].includes(type)) return "Sent you a voice message";
   if (["share_post", "post"].includes(type)) return "Shared a post";
   if (message?.url) return "Sent you an attachment";
