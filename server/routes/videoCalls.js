@@ -46,9 +46,22 @@ const { getSignedMediaUrl, isR2Key } = require("../utils/r2Media");
 const { getIO } = require("../socket");
 const { onlineUsers } = require("../models/state");
 
-const CALL_RING_SECONDS = 45;
+const CALL_RING_SECONDS = 30;
 const CALL_ROOM_EXPIRES_MINUTES = 10;
 const TOKEN_TTL_SECONDS = 60 * 60;
+
+const createVideoCallExpiry = require("../services/videoCallExpiry");
+
+const ringExpiry = createVideoCallExpiry({
+  Call: VideoCallSession,
+  onExpired: async (call) => {
+    await emitCallEvent(call, "video-call:missed");
+
+    createCallHistoryMessage(call, "missed").catch((error) => {
+      console.error("Missed video call history:", error);
+    });
+  },
+});
 
 function normalizeMediaString(value = "") {
   return String(value || "").trim();
@@ -194,26 +207,15 @@ async function requireMatchedPair(userA, userB) {
 }
 
 async function markExpiredRingingCallsForUser(userId) {
-  const now = new Date();
-
-  const expiredCalls = await VideoCallSession.find({
+  const expired = await VideoCallSession.find({
     participants: String(userId),
     status: "ringing",
-    expiresAt: { $lte: now },
-  });
+    expiresAt: { $lte: new Date() },
+  }).select("id").lean();
 
-  if (!expiredCalls.length) return;
-
-  for (const call of expiredCalls) {
-    call.status = "missed";
-    call.missedAt = now;
-    call.endedAt = now;
-    call.lastReason = "ring_timeout";
-       await call.save();
-
-    await createCallHistoryMessage(call, "missed");
-    await emitCallEvent(call, "video-call:missed");
-  }
+  await Promise.all(
+    expired.map((call) => ringExpiry.expire(call.id)),
+  );
 }
 function emitToUser(userId, eventName, payload) {
   try {
@@ -512,6 +514,8 @@ router.post("/start", authMiddleware, async (req, res) => {
       lastReason: "started",
     });
 
+    ringExpiry.schedule(call);
+
     const callerToken = createTokenForCall(call, callerId);
     const callPayload = await publicCall(call);
 
@@ -600,10 +604,18 @@ router.get("/:callId", authMiddleware, async (req, res) => {
 
     if (!(await enforceVideoCallAllowed(req, res))) return;
 
-    const call = await VideoCallSession.findOne({ id: callId });
+    let call = await VideoCallSession.findOne({ id: callId });
     if (!call) return res.status(404).json({ error: "call_not_found" });
 
     ensureParticipant(call, me);
+
+    if (
+      call.status === "ringing" &&
+      new Date(call.expiresAt).getTime() <= Date.now()
+    ) {
+      await ringExpiry.expire(callId);
+      call = await VideoCallSession.findOne({ id: callId });
+    }
 
     return res.json({
       ok: true,
@@ -675,42 +687,45 @@ router.post("/:callId/accept", authMiddleware, async (req, res) => {
       return res.status(403).json({ error: "only_receiver_can_accept" });
     }
 
-    if (call.status !== "ringing") {
-      return res.status(409).json({
-        error: "call_not_ringing",
-        call: await publicCall(call),
+    const acceptedAt = new Date();
+
+    const acceptedCall = await VideoCallSession.findOneAndUpdate(
+      {
+        id: callId,
+        status: "ringing",
+        expiresAt: { $gt: acceptedAt },
+      },
+      {
+        $set: {
+          status: "accepted",
+          acceptedAt,
+          expiresAt: callExpiresAt(),
+          lastReason: "accepted",
+        },
+      },
+      { new: true },
+    );
+
+    if (!acceptedCall) {
+      await ringExpiry.expire(callId);
+
+      const latest = await VideoCallSession.findOne({ id: callId });
+      const missed = latest?.status === "missed";
+
+      return res.status(missed ? 410 : 409).json({
+        error: missed ? "call_missed" : "call_not_ringing",
+        call: await publicCall(latest),
       });
     }
 
-        if (call.expiresAt && new Date(call.expiresAt).getTime() < Date.now()) {
-      call.status = "missed";
-      call.missedAt = new Date();
-      call.endedAt = new Date();
-      call.lastReason = "ring_timeout";
-          await call.save();
+    ringExpiry.cancel(callId);
 
-      await createCallHistoryMessage(call, "missed");
-      await emitCallEvent(call, "video-call:missed");
-
-      return res.status(410).json({
-        error: "call_missed",
-        call: await publicCall(call),
-      });
-    }
-
-    call.status = "accepted";
-    call.acceptedAt = new Date();
-    call.expiresAt = callExpiresAt();
-    call.lastReason = "accepted";
-    await call.save();
-
-      const receiverToken = createTokenForCall(call, me);
-
-    await emitCallEvent(call, "video-call:accepted");
+    const receiverToken = createTokenForCall(acceptedCall, me);
+    await emitCallEvent(acceptedCall, "video-call:accepted");
 
     return res.json({
       ok: true,
-      call: await publicCall(call),
+      call: await publicCall(acceptedCall),
       token: receiverToken,
     });
   } catch (err) {

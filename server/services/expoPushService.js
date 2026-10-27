@@ -94,7 +94,7 @@ async function sendIncomingVideoCallPush({ receiver, call }) {
     priority: "high",
     channelId: "default",
     categoryId: "incoming_video_call",
-    ttl: 45,
+    ttl: 30,
     data: {
       type: "video_call_incoming",
       notificationType: "video_call_incoming",
