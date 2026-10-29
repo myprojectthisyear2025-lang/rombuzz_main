@@ -35,7 +35,15 @@ test("chat/match/call dispatch respects master and category switches and carries
  await helpers.sendChatMessagePush({message,sender:{id:"A"},recipient});await helpers.sendNotificationPush({id:"n",toId:"B",type:"match",fromId:"A"});assert.equal(sent.length,0);
  recipient.settings.notifications={push:false,messages:true,buzz:true};await helpers.sendChatMessagePush({message,sender:{id:"A"},recipient});assert.equal(sent.length,0);
  recipient.settings.notifications={push:true,messages:true,buzz:true};await helpers.sendChatMessagePush({message,sender:{id:"A"},recipient});await helpers.sendNotificationPush({id:"n",toId:"B",type:"match",fromId:"A"});
- assert.equal(sent.length,2);assert.equal(sent[0].data.recipientId,"B");assert.equal(sent[0].data.peerId,"A");assert.equal(sent[1].data.recipientId,"B");assert.equal(sent[0].channelId,"default");
+ assert.equal(sent.length, 2);
+ assert.equal(sent[0].data.recipientId, "B");
+ assert.equal(sent[0].data.peerId, "A");
+ assert.equal(sent[1].data.recipientId, "B");
+ assert.equal(sent[0].channelId, "rombuzz-messages-v1");
+ assert.equal(sent[0].sound, "alert.wav");
+ assert.equal(sent[1].channelId, "default");
+ assert.equal(sent[1].sound, "default");
+
  const calls=[];const service=load("services/expoPushService.js",{"./expoPushReceipts":{saveReceipt:async()=>{},prune:async()=>{},report:()=>{}},"./expoPushTransport":{createExpoPushTransport:()=>async messages=>calls.push(...messages)}});
  await service.sendIncomingVideoCallPush({receiver:{...recipient,settings:{notifications:{messages:false}}},call:{id:"call"}});assert.equal(calls.length,0);
  await service.sendIncomingVideoCallPush({receiver:recipient,call:{id:"call",callerId:"A",receiverId:"B"}});assert.equal(calls[0].data.recipientId,"B");

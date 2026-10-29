@@ -1,3 +1,5 @@
+/** Shared notification dispatch, preferences, and RomBuzz chat-message alert routing. */
+
 const shortid = require("shortid");
 const Notification = require("../models/Notification");
 const MatchStreak = require("../models/MatchStreak");
@@ -35,6 +37,7 @@ function notificationSettingKeyForType(type = "") {
       return "wingman";
     case "like":
     case "gift":
+    case "media_gift":
     case "comment":
     case "reaction":
     case "new_post":
@@ -87,11 +90,35 @@ async function sendPushToUser(user = {}, payload = {}) {
     return { sentCount: 0, invalidTokens: [] };
   }
 
+  const type = String(
+    payload?.data?.type || payload?.data?.notificationType || "",
+  ).toLowerCase();
+
+  const isMessage = type === "message";
+  const isMicroBuzzRequest =
+    type === "buzz" &&
+    String(payload?.data?.via || "").toLowerCase() === "microbuzz";
+  const isActivity = ["buzz", "match", "gift", "media_gift"].includes(type);
+
+  let sound = null;
+  let channelId = "rombuzz-quiet-v1";
+
+  if (isMessage) {
+    sound = "alert.wav";
+    channelId = "rombuzz-messages-v1";
+  } else if (isMicroBuzzRequest) {
+    sound = "microbuzz_req.wav";
+    channelId = "rombuzz-microbuzz-v1";
+  } else if (isActivity) {
+    sound = "notification.wav";
+    channelId = "rombuzz-activity-v1";
+  }
+
   const messages = tokens.map((token) => ({
     to: token,
-    sound: "default",
+    sound,
     priority: "high",
-    channelId: "default",
+    channelId,
     title: String(payload?.title || "RomBuzz"),
     body: String(payload?.body || "You have a new notification."),
     data: payload?.data && typeof payload.data === "object" ? payload.data : {},
@@ -108,6 +135,7 @@ function buildNotificationPushData(notif = {}, data = {}) {
     recipientId: String(notif?.toId || ""),
     notificationType: String(data?.notificationType || notif?.type || "system"),
     type: String(data?.type || notif?.type || "system"),
+    via: String(data?.via || notif?.via || ""),
     href: String(data?.href || notif?.href || ""),
     fromId: String(data?.fromId || notif?.fromId || ""),
     userId: String(data?.userId || notif?.fromId || notif?.entityId || ""),
