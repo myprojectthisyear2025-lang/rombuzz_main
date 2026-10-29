@@ -253,17 +253,16 @@ function createTokenForCall(call, userId) {
 }
 
 function getCallDurationSeconds(call) {
-  const start = new Date(call?.acceptedAt || call?.startedAt || 0).getTime();
-  const end = new Date(
-    call?.endedAt ||
-      call?.declinedAt ||
-      call?.canceledAt ||
-      call?.missedAt ||
-      0
-  ).getTime();
+  if (!call?.acceptedAt || !call?.endedAt) return 0;
 
-  if (!start || !end || end <= start) return 0;
-  return Math.max(1, Math.floor((end - start) / 1000));
+  const start = new Date(call.acceptedAt).getTime();
+  const end = new Date(call.endedAt).getTime();
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return 0;
+  }
+
+  return Math.floor((end - start) / 1000);
 }
 
 function getCallPreviewText(status, durationSeconds = 0) {
@@ -342,7 +341,7 @@ async function createCallHistoryMessage(call, forcedStatus = "") {
     callType: String(call.callType || "video"),
     callStatus: status,
     callDurationSeconds: durationSeconds,
-    callStartedAt: call.acceptedAt || call.startedAt || null,
+    callStartedAt: call.acceptedAt || null,
     callEndedAt:
       call.endedAt || call.declinedAt || call.canceledAt || call.missedAt || null,
     callEndedBy: String(call.endedBy || ""),
@@ -736,151 +735,107 @@ router.post("/:callId/accept", authMiddleware, async (req, res) => {
   }
 });
 
-// ============================================================
-// POST /api/video-calls/:callId/decline
-// Receiver declines incoming call.
-// ============================================================
-router.post("/:callId/decline", authMiddleware, async (req, res) => {
-  try {
-    const me = String(req.user.id);
-    const callId = String(req.params.callId || "");
+/** Finishes calls atomically and keeps unanswered attempts free of duration. */
+function endStatus(call, me, reason, now) {
+  if (call.acceptedAt) return "ended";
 
-    const call = await VideoCallSession.findOne({ id: callId });
-    if (!call) return res.status(404).json({ error: "call_not_found" });
+  const expiresAt = call.expiresAt && new Date(call.expiresAt).getTime();
+  const timedOut = /timeout|no_answer|no-answer|missed/i.test(reason);
 
-    ensureParticipant(call, me);
+  if (timedOut || (expiresAt && expiresAt <= now.getTime())) return "missed";
+  if (/declin/i.test(reason)) return "declined";
 
-    if (String(call.receiverId) !== me) {
-      return res.status(403).json({ error: "only_receiver_can_decline" });
-    }
+  return String(call.receiverId) === me ? "declined" : "canceled";
+}
 
-    if (isTerminalStatus(call.status)) {
-      return res.json({
-        ok: true,
-        call: await publicCall(call),
+function finishCall(action) {
+  return async (req, res) => {
+    try {
+      const me = String(req.user.id);
+      const callId = String(req.params.callId || "");
+      const reason = String(req.body?.reason || "ended").trim();
+      const call = await VideoCallSession.findOne({ id: callId });
+
+      if (!call) return res.status(404).json({ error: "call_not_found" });
+      ensureParticipant(call, me);
+
+      const allowedId = action === "decline" ? call.receiverId : call.callerId;
+
+      if (action !== "end" && String(allowedId) !== me) {
+        return res.status(403).json({
+          error: action === "decline"
+            ? "only_receiver_can_decline"
+            : "only_caller_can_cancel",
+        });
+      }
+
+      if (isTerminalStatus(call.status)) {
+        return res.json({ ok: true, call: await publicCall(call) });
+      }
+
+      if (action !== "end" && (call.status !== "ringing" || call.acceptedAt)) {
+        return res.status(409).json({
+          error: "call_not_ringing",
+          call: await publicCall(call),
+        });
+      }
+
+      const now = new Date();
+      const status = action === "decline" ? "declined"
+        : action === "cancel" ? "canceled"
+        : endStatus(call, me, reason, now);
+
+      const updates = {
+        status,
+        endedAt: now,
+        endedBy: me,
+        lastReason: status === "ended" ? reason : status,
+      };
+
+      if (status === "declined") updates.declinedAt = now;
+      if (status === "canceled") updates.canceledAt = now;
+      if (status === "missed") updates.missedAt = now;
+
+      // Competing requests cannot overwrite the first completed state change.
+      const finished = await VideoCallSession.findOneAndUpdate(
+        {
+          id: callId,
+          status: call.status,
+          acceptedAt: call.acceptedAt || null,
+        },
+        { $set: updates },
+        { new: true },
+      );
+
+      if (!finished) {
+        const latest = await VideoCallSession.findOne({ id: callId });
+
+        return res.status(isTerminalStatus(latest?.status) ? 200 : 409).json({
+          ok: isTerminalStatus(latest?.status),
+          call: await publicCall(latest),
+        });
+      }
+
+      ringExpiry.cancel(callId);
+      await emitCallEvent(finished, `video-call:${status}`);
+
+      createCallHistoryMessage(finished, status).catch((error) => {
+        console.error("Video call history write failed:", error);
+      });
+
+      return res.json({ ok: true, call: await publicCall(finished) });
+    } catch (error) {
+      console.error(`Video call ${action} error:`, error);
+
+      return res.status(error.statusCode || 500).json({
+        error: error.message || `failed_to_${action}_call`,
       });
     }
+  };
+}
 
-     call.status = "declined";
-    call.declinedAt = new Date();
-    call.endedAt = new Date();
-    call.endedBy = me;
-    call.lastReason = "declined";
-    await call.save();
-
-      await call.save();
-
-    await createCallHistoryMessage(call, "declined");
-    await emitCallEvent(call, "video-call:declined");
-
-    return res.json({
-      ok: true,
-      call: await publicCall(call),
-    });
-  } catch (err) {
-    console.error("❌ video call decline error:", err);
-    return res.status(err.statusCode || 500).json({
-      error: err.message || "failed_to_decline_call",
-    });
-  }
-});
-
-// ============================================================
-// POST /api/video-calls/:callId/cancel
-// Caller cancels before receiver accepts.
-// ============================================================
-router.post("/:callId/cancel", authMiddleware, async (req, res) => {
-  try {
-    const me = String(req.user.id);
-    const callId = String(req.params.callId || "");
-
-    const call = await VideoCallSession.findOne({ id: callId });
-    if (!call) return res.status(404).json({ error: "call_not_found" });
-
-    ensureParticipant(call, me);
-
-    if (String(call.callerId) !== me) {
-      return res.status(403).json({ error: "only_caller_can_cancel" });
-    }
-
-    if (isTerminalStatus(call.status)) {
-      return res.json({
-        ok: true,
-        call: await publicCall(call),
-      });
-    }
-
-    call.status = "canceled";
-    call.canceledAt = new Date();
-    call.endedAt = new Date();
-    call.endedBy = me;
-    call.lastReason = "canceled";
-      await call.save();
-
-    await createCallHistoryMessage(call, "canceled");
-    await emitCallEvent(call, "video-call:canceled");
-
-    return res.json({
-      ok: true,
-      call: await publicCall(call),
-    });
-  } catch (err) {
-    console.error("❌ video call cancel error:", err);
-    return res.status(err.statusCode || 500).json({
-      error: err.message || "failed_to_cancel_call",
-    });
-  }
-});
-
-// ============================================================
-// POST /api/video-calls/:callId/end
-// Either participant ends an accepted call.
-// ============================================================
-router.post("/:callId/end", authMiddleware, async (req, res) => {
-  try {
-    const me = String(req.user.id);
-    const callId = String(req.params.callId || "");
-    const reason = String(req.body?.reason || "ended").trim();
-
-    const call = await VideoCallSession.findOne({ id: callId });
-    if (!call) return res.status(404).json({ error: "call_not_found" });
-
-    ensureParticipant(call, me);
-
-    if (isTerminalStatus(call.status)) {
-      return res.json({
-        ok: true,
-        call: await publicCall(call),
-      });
-    }
-
-    call.status = "ended";
-    call.endedAt = new Date();
-    call.endedBy = me;
-    call.lastReason = reason || "ended";
-    await call.save();
-
-    const callPayload = await publicCall(call);
-
-    // Tell both phones immediately. Chat-history persistence is not allowed
-    // to delay the actual hang-up signal or the caller's HTTP response.
-    emitToUser(call.callerId, "video-call:ended", { call: callPayload });
-    emitToUser(call.receiverId, "video-call:ended", { call: callPayload });
-
-    createCallHistoryMessage(call, "ended").catch((err) => {
-      console.error("❌ video call history write failed after end:", err);
-    });
-
-    return res.json({
-      ok: true,
-      call: callPayload,
-    });
-  } catch (err) {
-    console.error("❌ video call end error:", err);
-    return res.status(err.statusCode || 500).json({
-      error: err.message || "failed_to_end_call",
-    });
-  }
-});
+router.post("/:callId/decline", authMiddleware, finishCall("decline"));
+router.post("/:callId/cancel", authMiddleware, finishCall("cancel"));
+router.post("/:callId/end", authMiddleware, finishCall("end"));
 
 module.exports = router;
